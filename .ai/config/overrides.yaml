@@ -1,0 +1,14 @@
+# ProMedia — project configuration overrides.
+#
+# This file is deep-merged OVER aef/config/framework.yaml. Project keys replace
+# framework keys at the same path; keys absent here inherit the framework default.
+# Never edit aef/config/framework.yaml to change behaviour in this project —
+# aef/ is read-only. Override here instead.
+#
+# Example:
+#   execution:
+#     max_parallel_agents: 2     # replaces the framework default of 4
+#
+# Intentionally empty: ProMedia currently runs on unmodified framework defaults.
+# Any override added here must cite the reason and, where it relaxes a quality or
+# verification setting, a decision record in .ai/state/decisions/.
