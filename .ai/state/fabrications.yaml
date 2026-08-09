@@ -1,0 +1,70 @@
+# .ai/state/fabrications.yaml
+# Schema: aef/schemas/fabrication.schema.yaml
+#
+# Registered at creation time, per Constitution section 6.
+# No release may proceed with an active fabrication where visible_to_user is true.
+
+fabrications:
+
+  - id: F-001
+    created_by_task: T-012
+    created_at: "2026-08-08"
+    kind: fake_api
+    location: promedia/core/publishers/stub.py
+    what_is_fake: >
+      StubPublisher.publish() returns a fabricated platform post id and publishes
+      nothing, anywhere. verify_published() always returns False.
+    why: >
+      No platform credentials exist, and X/LinkedIn API access terms and pricing
+      must be verified against live documentation rather than model memory
+      (operator instruction; project.md O-3). Building live adapters against
+      unverified assumptions would be sunk work.
+    visible_to_user: true
+    visibility_note: >
+      THE HIGHEST-RISK FABRICATION IN THE SYSTEM. A simulated publish that looked
+      real would be indistinguishable from a real one in the UI. Three guards:
+      (1) unreachable unless publishing.allow_simulation is explicitly true, and
+      it is false in promedia.toml; (2) every result carries simulated=true which
+      reaches the publication record and the dashboard banner; (3) the platform
+      post id contains the literal string SIMULATED-NOT-PUBLISHED rather than a
+      plausible identifier.
+    replacement_condition: >
+      Operator supplies X and LinkedIn credentials AND access terms, rate limits
+      and pricing are verified against live platform documentation.
+    replacement_task: T-019
+    status: active
+    blocks_release: true
+
+  - id: F-002
+    created_by_task: T-006
+    created_at: "2026-08-08"
+    kind: placeholder
+    location: promedia/core/credentials.py
+    what_is_fake: >
+      The CredentialStore file backend writes credentials as plaintext JSON.
+      DR-008 specifies Windows DPAPI (per-user OS encryption) as the intended
+      backend; the interface is in place but the encryption is not.
+    why: >
+      Shipping a Windows-only native-interface dependency was deferred so the v1
+      slice could be built and verified first. The decision that matters in
+      DR-008 — separation of credentials from the repository and from the
+      database, so they are absent from every backup and export — IS implemented
+      and tested (tests/test_credentials.py).
+    visible_to_user: false
+    replacement_condition: "DPAPI backend implemented behind the same interface."
+    replacement_task: T-022
+    status: active
+    blocks_release: false
+    residual_risk: >
+      Plaintext at rest under the operator profile. On a single-user machine an
+      attacker with the operator's live session defeats DPAPI too, so the real
+      exposure delta is narrower than it appears — but it is not zero, and it is
+      not silently accepted.
+
+notes:
+  - >
+    ffprobe is absent on this machine, so media duration and codec are recorded
+    as null with probe_status 'unavailable'. That is NOT registered as a
+    fabrication because nothing fake is produced: the absence is recorded
+    honestly and tested (test_ingest.py::test_missing_probe_records_unavailable_not_guess).
+    A guessed duration would have been a fabrication.

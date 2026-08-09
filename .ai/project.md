@@ -198,14 +198,16 @@ Physical harm: none. Financial loss: four channels, in severity order.
 
 | Aspect | Value | Source |
 |---|---|---|
-| Runtime | Local-first: Windows 11 desktop. Web UI on localhost; agents call the same operations in-repo | ASSUMED |
+| Runtime | Local-first: Windows 11 desktop. Web UI on localhost; agents call the same operations in-repo | **Confirmed** |
 | Remote/mobile access | Not required | ASSUMED |
-| Deployment target | Self-hosted, single machine. No cloud provider | ASSUMED — **conflicts with C-24, see §12 O-1** |
+| Deployment target | Self-hosted, single machine. No cloud provider | **Confirmed** — resolves O-1 to option (C), see DR-009 |
 | Platforms | **X** (1 account), **LinkedIn** (1 account). Expansion later | Confirmed |
 | Platform rate limits and API pricing | **NOT RECORDED — deliberately.** To be verified against live documentation during `protocols/02`. No figure from model memory is admissible here | Confirmed instruction |
 | Content source | Screen recordings | Confirmed |
 | Systems replaced | None. No existing scheduler, no existing library | Confirmed |
-| Data residency | Operator's machine. If off-site backup uses cloud storage, residency becomes a live choice | ASSUMED |
+| Existing assets | **None**, beyond the two platform accounts themselves. No code, templates, prompts or media | **Confirmed** |
+| Data residency | **No requirement.** Operator's machine | **Confirmed** |
+| Available toolchain | Python 3.11.9, Node 24.14.1, npm 11.11.0, git 2.53. **No ffmpeg/ffprobe. No Go, no .NET** | Observed 2026-08-08 |
 
 ### Browser automation policy
 
@@ -220,16 +222,25 @@ itself.
 
 | Aspect | Value | Confidence |
 |---|---|---|
-| Operating jurisdiction | **United Arab Emirates** | **INFERRED, UNCONFIRMED.** Evidence: Windows home location = UAE, timezone UTC+04:00. This is a machine setting, not a legal declaration |
-| Copyright regime | UAE law, plus the terms of each platform | Follows from the above — unverified |
-| GDPR | Assumed not applicable — no EU audience targeting, no third-party personal data processed beyond what platforms already hold | ASSUMED |
-| UAE PDPL | Assumed not applicable for the same reason | ASSUMED |
+| Applicable regimes | **Copyright and platform terms of service only.** No other regime applies | **Confirmed 2026-08-08** |
+| Operating jurisdiction | **United Arab Emirates** | **INFERRED, UNCONFIRMED.** Evidence: Windows home location = UAE, timezone UTC+04:00. A machine setting, not a legal declaration |
+| Copyright regime | Determined by jurisdiction, plus the terms of each platform | Follows from the above — unverified |
+| GDPR | Not applicable | Confirmed via "no compliance regime beyond copyright and platform ToS" |
+| UAE PDPL | Not applicable | Same |
 
-> **Gate:** jurisdiction is unconfirmed and it determines the rights ruleset —
-> what counts as fair use versus fair dealing, what public-domain terms apply, what
-> licence types are recognised. **The rights ruleset may not be implemented until the
-> operator confirms jurisdiction.** Every other part of the system may proceed. See
-> §12 O-2.
+> **O-2 resolved without blocking.** The operator confirmed that copyright and platform
+> ToS are the only applicable regimes, but jurisdiction — which selects *which*
+> copyright regime — remains inferred. Rather than block the rights engine on this,
+> **jurisdiction is a runtime configuration parameter of the ruleset** (`DR-007`), and
+> the shipped default ruleset is **jurisdiction-neutral and deliberately
+> conservative**: it recognises only unambiguous permissions (operator-owned, explicit
+> written licence, verified public domain) and blocks everything else. A conservative
+> ruleset cannot become wrong by learning the jurisdiction later — it can only become
+> less restrictive. This is why the constraint does not gate the build.
+>
+> **What this explicitly does NOT do:** it does not implement fair use, fair dealing,
+> or any doctrine requiring jurisdictional interpretation. Those are absent, not
+> approximated. Adding them requires confirmed jurisdiction and legal input.
 
 ---
 
@@ -238,13 +249,16 @@ itself.
 Sole maintainer: the operator, indefinitely, with no second person and no handover
 plan required.
 
-Demonstrated capability (from observed behaviour, not self-report): comfortable with
-git, CLI tooling, agent frameworks, and structured configuration.
+**Confirmed capability: can operate anything runnable locally.** This is a wide
+mandate, and the framework requires it be read carefully rather than as licence for
+complexity (`protocols/02` rule 5). Operational burden remains a real cost against
+S2 (< 3 hours/week): a design consuming an hour a week in maintenance has already
+spent a third of the budget the system exists to protect. **Capability is not the
+binding constraint; the operator's time is.** Selection therefore still prefers
+low-ops, and DR-001/DR-003 choose zero-daemon options on that basis, not on capability.
 
-`ASSUMED`: comfortable running Docker and administering a local database, but
-**prefers low-ops**. Operational burden is a real cost against S2 (< 3 hours/week) —
-a design that consumes an hour a week in maintenance has already spent a third of the
-budget the system exists to protect.
+Demonstrated capability (observed, not self-reported): comfortable with git, CLI
+tooling, agent frameworks, and structured configuration.
 
 ---
 
@@ -255,7 +269,7 @@ budget the system exists to protect.
 | Monthly ceiling, all API and infrastructure | **$100** |
 | Hard stop | **150% ($150)** — a stop, not a warning |
 | Per-operation cap | **$5** without explicit approval |
-| Deadline | None stated. `ASSUMED` no hard date |
+| Deadline | **None.** Confirmed 2026-08-08 |
 | Cut order if pressure appears | 1st analytics · 2nd scheduling · **rights checking is never cut** (`ASSUMED`) |
 
 > **Risk:** X provides API access through paid tiers, and LinkedIn posting access is
@@ -328,10 +342,12 @@ ingest), or earlier if any specific trigger below fires.
 | A-5 | 14-day post-publish grace period | Any deletion the operator regrets |
 | A-6 | Storage thresholds 70/85/100 GB | First queued ingest event |
 | A-7 | Local-first, single machine, no remote access | Operator wants to approve a publish while away from the desk |
-| A-8 | Jurisdiction = UAE | **Blocks the rights ruleset. Confirm before implementing it** |
-| A-9 | GDPR and UAE PDPL not applicable | Any audience targeting or third-party personal data processing |
-| A-10 | No hard deadline; cut order analytics → scheduling → never rights | Operator states a date |
-| A-11 | Docker and a self-administered DB acceptable; low-ops preferred | Ops burden approaches 1 h/week |
+| A-8 | Jurisdiction = UAE | **No longer blocking** — ruleset is jurisdiction-parameterised and conservative by default (§7, DR-007). Revisit before any doctrine-based rule (fair use / fair dealing) is added |
+| A-9 | GDPR and UAE PDPL not applicable | Confirmed by operator. Revisit on audience targeting or third-party personal data processing |
+| A-10 | Cut order analytics → scheduling → never rights | Operator states a different order |
+| A-11 | Low-ops preferred despite unrestricted capability, because operator *time* is the binding constraint | Ops burden approaches 1 h/week |
+| A-15 | ffmpeg/ffprobe absent; media duration and codec metadata recorded as `null` with `probe_status: unavailable` rather than guessed | ffmpeg installed, or derivative generation enters scope |
+| A-16 | Publish windows restricted to hours the machine is on (O-1 option C) | First missed window that mattered |
 | A-12 | Sustained < 1 op/sec | — |
 | A-13 | OAuth alerting at 72 h before expiry | First token expiry incident |
 | A-14 | Dependency licence compatibility is a **check, not a hard gate** — commercial use unlikely but not impossible | Operator decides to commercialise |
@@ -343,36 +359,30 @@ ingest), or earlier if any specific trigger below fires.
 Not blockers for `protocols/02` unless marked. Presented as decisions, per the
 escalation format.
 
-**O-1 — The scheduler cannot run on a machine that sleeps.**
-C-24 and C-26 require the scheduler to be up at every publish window with ±5 min
-tolerance, and C-27 forbids posting late. A single self-hosted desktop that sleeps,
-reboots, or travels will miss windows and escalate routinely, converting a hard
-guarantee into a recurring interruption — which attacks S2 directly.
-Options: **(A)** desktop guaranteed awake during publish windows — free, fragile;
-**(B)** minimal always-on VPS for the scheduler only — small monthly cost against the
-$100 ceiling, splits the deployment; **(C)** restrict scheduling to hours the machine
-is known on — free, gives up optimal posting times.
-*Recommendation: decide in `protocols/02` alongside hosting. Do not design the
-scheduler until this is settled.*
+**O-1 — RESOLVED.** Operator confirmed self-hosted on the Windows dev machine, no
+cloud. That selects option (C): publish windows are restricted to hours the machine is
+on, and a missed window escalates rather than posting late (C-27). Recorded in
+**DR-009**. An always-on VPS remains the escape hatch if missed windows become common;
+it is a cost decision, not an architectural one, because the scheduler is a thin caller
+of the same operation layer either way.
 
-**O-2 — Jurisdiction is unconfirmed and gates the rights ruleset.**
-Inferred UAE from machine settings only. **Blocking for the rights ruleset alone;**
-everything else proceeds.
+**O-2 — RESOLVED without blocking.** See §7. Jurisdiction stays inferred; the ruleset
+is jurisdiction-parameterised with a conservative default that a later answer can only
+relax, never invalidate. No doctrine-based rules are implemented.
 
-**O-3 — Platform API cost and access may exceed the budget.**
+**O-3 — OPEN. Deferred to first live connection, not to protocol 02.**
 X paid API tiers and LinkedIn's gated posting access must be priced and
-access-verified against live documentation in `protocols/02`. If either exceeds the
-$100 ceiling, the choice is a budget change or a different mechanism — the latter
-tests C-30 and F-6 directly.
+access-verified against live documentation. This cannot be resolved from model memory
+(operator instruction) and does not block the build: the publisher interface is defined
+and the v1 slice ships a **stub publisher** (registered fabrication), so the cost
+question is answered when credentials are supplied. If either exceeds the $100 ceiling,
+the choice is a budget change or a different mechanism — the latter tests C-30 and F-6.
 
-**O-4 — Provenance evidence standard after media deletion.**
-If a rights claim arrives 18 months post-publish and the master is gone, what is
-shown? Options: **(A)** content hash + technical metadata — smallest, proves a file
-existed but not what was in it; **(B)** hash + metadata + a small set of stills —
-a few hundred KB per video, negligible against the ceiling; **(C)** rely on the
-published copy held by the platform.
-*Recommendation: **B plus C**. The cost is trivial and A alone is weak evidence.
-Not yet accepted by the operator.*
+**O-4 — DECIDED by default, reversible.** Provenance retains content hash + embedded
+technical metadata + the full evidence set — option (A) plus (C), without stills, since
+the v1 slice has no frame extraction absent ffmpeg (A-15). Stills are added when ffmpeg
+enters scope; the provenance record carries a schema version so adding them is additive
+rather than a migration. Operator may overrule.
 
 ---
 

@@ -1,0 +1,86 @@
+id: DR-002
+date: 2026-08-08
+decision_area: application_architecture
+status: accepted
+
+binding_constraints:
+  - "F-1: every capability is ONE callable operation with ONE implementation, exposed through both a UI surface and a repo-callable surface. No capability may exist in only one."
+  - "S4: 100% dual-surface coverage; a single-surface capability is a BUILD FAILURE, not a gap"
+  - "F-2: agents may draft/ingest/analyse/rights-check/queue; never publish, spend, or clear a rights flag"
+  - "C-4: repo-callable cold start < 1s"
+
+problem_statement: >
+  F-1 is usually stated as a UI requirement and then violated quietly: a developer
+  adds an endpoint, forgets the CLI, and the drift is invisible until an agent needs
+  the missing path. The architecture must make that drift impossible to commit, not
+  merely discouraged.
+
+ruled_out:
+  - option: "Two parallel implementations (CLI module + web handlers)"
+    reason: >
+      The default shape, and the exact failure F-1 forbids. Divergence is a matter
+      of time, and nothing detects it.
+  - option: "CLI shells out to the HTTP API"
+    reason: >
+      Makes the repo-callable surface depend on a running server, breaking agent
+      invocation in a cold repo and adding network failure modes to local calls.
+      Also fails C-4.
+  - option: "UI calls the CLI as a subprocess"
+    reason: >
+      Inverts the same problem: per-request process spawn, argument-escaping as a
+      security surface, and structured errors degraded to exit codes and stderr.
+
+candidates:
+  - option: "Operation registry as the single source of truth; both surfaces are generated from it"
+    advantages:
+      - "One implementation per capability, enforced structurally rather than by review"
+      - "Both surfaces enumerate the same registry, so dual-surface parity is testable as an assertion over data (T-020), not a checklist"
+      - "Authority rules (F-2) attach to the operation definition, so they are enforced identically on both paths and cannot be forgotten on one"
+      - "Adding a capability automatically appears on both surfaces; forgetting is not expressible"
+    disadvantages:
+      - "Indirection: an operation is defined in a registry rather than as a plain function call, which is a real readability cost for a newcomer"
+      - "Generic surfaces are less ergonomic than hand-written ones — the CLI cannot have bespoke per-command flag design without extra work"
+      - "Schema/validation must be expressed as data, constraining how exotic an operation's signature may be"
+  - option: "Shared service layer, hand-written thin adapters on each surface"
+    advantages:
+      - "Conventional, immediately readable, ergonomic per-surface"
+      - "One implementation of business logic"
+    disadvantages:
+      - "Adapters are hand-maintained, so a capability CAN exist on one surface only. F-1 becomes a convention enforced by discipline. Given S4 calls that a build failure, discipline is insufficient."
+  - option: "Single HTTP API, UI and CLI both as clients"
+    advantages:
+      - "Genuinely one implementation; a well-trodden pattern"
+    disadvantages:
+      - "Requires a running daemon for any agent call — fails C-4 and adds an always-on process to a low-ops brief"
+
+decision: "Operation registry with generated surfaces"
+rationale: >
+  S4 declares a single-surface capability to be a build failure. That wording rules
+  out any design where parity depends on someone remembering, which is what the
+  hand-written-adapter option reduces to. In the registry design both surfaces are
+  projections of the same data structure, so parity is an invariant that a test can
+  assert directly, and the authority ceiling in F-2 is carried on the operation
+  definition itself rather than duplicated per surface — the place it would
+  otherwise eventually be missed.
+
+architecture:
+  layers:
+    - "promedia/core/operations.py — registry: name, summary, params, handler, authority, surfaces"
+    - "promedia/core/<domain>.py — domain logic (accounts, assets, rights, provenance, posts, storage, audit)"
+    - "promedia/cli.py — thin generic adapter: argv -> registry -> JSON out"
+    - "promedia/web/app.py — thin generic adapter: HTTP -> registry -> HTML/JSON out"
+  invariant: >
+    Neither adapter contains business logic. Any behaviour reachable from one
+    surface and not the other is a defect.
+  enforcement: "T-020 asserts registry/CLI/web parity and fails the build on drift"
+
+fluency_bias_check: >
+  Habit would have chosen the shared-service-layer option, which is the standard
+  answer and appears in most codebases. It was rejected not because it is wrong in
+  general but because this project raised parity from a convention to a build
+  gate, and that specific requirement is what the standard answer cannot enforce.
+
+reversibility: moderate
+revisit_if:
+  - "Registry indirection measurably slows delivery of new capabilities"
+  - "A capability needs a signature the registry's parameter model cannot express"

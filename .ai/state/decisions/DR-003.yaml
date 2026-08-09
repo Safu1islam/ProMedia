@@ -1,0 +1,87 @@
+id: DR-003
+date: 2026-08-08
+decision_area: datastore
+status: accepted
+
+binding_constraints:
+  - "C-17/C-18: 1 human + up to 4 concurrent agent sessions"
+  - "C-19: exactly one writer per entity, enforced, with visible lock owner"
+  - "C-8: sustained < 1 op/sec"
+  - "C-16: permanent records est. < 1 GB/year"
+  - "Durability: rights evidence, provenance, published-post records, audit log must survive disk loss"
+  - "Low-ops: no daemon the operator must administer"
+  - "Self-hosted, single machine, no cloud"
+
+ruled_out:
+  - option: PostgreSQL
+    reason: >
+      A server process to install, run, patch and back up for a workload of under
+      1 op/sec and under 1 GB/year. Operational cost lands directly on S2 (< 3
+      hrs/week) and buys concurrency headroom the constraints do not require.
+  - option: "Plain files (JSON/YAML per record)"
+    reason: >
+      No transactions. C-19 requires enforced single-writer semantics and the audit
+      log requires append-only integrity; both would have to be hand-built on top of
+      a filesystem, badly. Rejected despite fitting the low-ops brief.
+  - option: "Cloud managed DB (Supabase, Neon, RDS)"
+    reason: >
+      Contradicts self-hosted and no-data-residency-requirement posture, adds
+      recurring cost against the $100 ceiling, and introduces network failure into
+      a local tool.
+  - option: "Document store (MongoDB, TinyDB)"
+    reason: >
+      Provenance and rights records are highly relational (asset -> evidence ->
+      verdict -> post -> approval) and must remain queryable after the media is
+      deleted (F-8). Relational integrity is the property that matters most here.
+
+candidates:
+  - option: "SQLite via Python stdlib sqlite3, WAL mode"
+    advantages:
+      - "Zero install, zero daemon, zero administration — in the standard library (DR-001)"
+      - "ACID transactions; foreign keys enforce the provenance graph"
+      - "WAL permits concurrent readers with one writer, which matches C-18 exactly: 4 agents reading, one writing at a time"
+      - "Single-file database makes off-site backup of the permanent set trivial — the durability requirement becomes a file copy"
+      - "Well-understood failure and recovery semantics"
+    disadvantages:
+      - "Single writer: concurrent writes serialise and can raise SQLITE_BUSY under contention. Requires an explicit busy timeout and, for entity-level ownership, an application-level lock table — SQLite's own locking is too coarse to express 'agent X owns asset Y'."
+      - "No network access; anything remote would need a service in front (not required today, but forecloses casual remote use)"
+      - "Weak typing in older type affinity rules; schema discipline must be enforced by CHECK constraints and tests"
+  - option: "DuckDB"
+    advantages: ["Embedded, no daemon, strong analytics"]
+    disadvantages:
+      - "Optimised for OLAP scans, not the small transactional writes this workload is made of; wrong shape for an audit log and lock table"
+  - option: "SQLite + Litestream-style continuous replication"
+    advantages: ["Continuous off-site durability for the permanent set"]
+    disadvantages:
+      - "Adds a background process and a remote target, i.e. ops and cost, before the operator has any backup at all. Deferred: DR-003 chooses the store; backup mechanism is a separate later decision."
+
+decision: "SQLite (stdlib sqlite3), WAL mode, foreign keys ON, busy_timeout set"
+rationale: >
+  The workload is tiny, transactional, relational and local, and the maintainer's
+  time is the scarce resource. SQLite is the only candidate that is simultaneously
+  ACID and zero-administration. Its single-writer limit is not a real constraint at
+  under 1 op/sec, and C-19's per-entity ownership requirement is not something any
+  candidate provides natively — it needs an application-level lock table regardless
+  of engine, so it does not differentiate.
+
+concurrency_design:
+  - "PRAGMA journal_mode=WAL — concurrent readers during a write"
+  - "PRAGMA foreign_keys=ON — the provenance graph is enforced, not assumed"
+  - "PRAGMA busy_timeout=5000 — agent write contention waits rather than failing"
+  - "Application-level entity_lock table implements C-19 with a visible owner and TTL, per aef/schemas/lock.schema.yaml"
+
+fluency_bias_check: >
+  Habit for a system described as 'social media management platform' would reach for
+  Postgres, because that phrase evokes a multi-tenant web service. F-9 makes this a
+  permanently single-operator local tool at under 1 op/sec. The phrase, not the
+  constraints, is what would have driven that choice.
+
+reversibility: moderate
+reversibility_note: >
+  Schema is plain SQL and access is confined to promedia/core/db.py, so moving to
+  Postgres later is a repository-layer change, not an application rewrite.
+
+revisit_if:
+  - "Concurrent agent writes produce sustained SQLITE_BUSY under normal operation"
+  - "Remote or multi-machine access becomes a requirement (would contradict F-9/A-7)"
+  - "Permanent records exceed 20 GB"

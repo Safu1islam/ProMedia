@@ -1,0 +1,76 @@
+id: DR-004
+date: 2026-08-08
+decision_area: ui_delivery_and_web_framework
+status: accepted
+
+binding_constraints:
+  - "C-1: UI interaction p95 < 300ms"
+  - "C-23: no UI availability target — downtime costs nothing"
+  - "F-2: approval of publish/spend/rights-clear happens IN THE UI; it is the authority surface"
+  - "A-7: local-only, no remote or mobile access required"
+  - "Low-ops: operator time is the binding constraint"
+
+ruled_out:
+  - option: "React / Vue / Svelte SPA"
+    reason: >
+      Adds node_modules, a build step, a bundler and a dependency upgrade treadmill
+      to a localhost single-user tool. Every one of those is operator time spent for
+      interactivity this UI does not need. Also splits validation across two
+      languages, which pressures F-1's single-implementation rule.
+  - option: "Desktop GUI (Tauri, Qt, WinUI)"
+    reason: >
+      Packaging and update burden for zero benefit over a localhost page, and no
+      easier path to the repo-callable surface.
+  - option: "Terminal UI only"
+    reason: >
+      F-2 makes the UI the approval surface for irreversible, money- and
+      rights-relevant actions. Those need unambiguous, reviewable presentation of
+      what is about to happen; a TUI is the wrong medium for a legal-consequence
+      confirmation, and the CLI already covers the agent path.
+
+candidates:
+  - option: "FastAPI + Jinja2 server-rendered HTML, no build step"
+    advantages:
+      - "Already installed; no new dependency and no bundler"
+      - "Server-rendered pages trivially meet C-1 on localhost"
+      - "Pydantic models double as the operation parameter schema shared with the CLI (DR-002)"
+      - "Renders the same registry the CLI reads, so dual-surface parity is structural"
+      - "Progressive enhancement only — the approval flow works without JavaScript, which matters for an authority surface"
+    disadvantages:
+      - "Full page loads for every interaction; no rich client-side state. Acceptable here, limiting if the UI ever needs live editing."
+      - "Uvicorn is a process the operator must start — mitigated by a single CLI command that launches it"
+      - "Server-rendered HTML in Jinja templates has weaker refactoring support than typed components"
+  - option: "Flask + Jinja2"
+    advantages: ["Smaller surface than FastAPI; equally build-free"]
+    disadvantages:
+      - "No native schema/validation model, so the operation parameter contract of DR-002 would need a second mechanism. FastAPI's pydantic integration is the specific reason it wins."
+  - option: "Python stdlib http.server"
+    advantages: ["Zero dependencies at all"]
+    disadvantages:
+      - "Hand-rolled routing, parsing, and error handling — reinventing a solved problem, and each hand-rolled line is a place for an authority-surface bug"
+
+decision: "FastAPI + Jinja2, server-rendered, no client build step"
+rationale: >
+  The UI's job here is not richness but trustworthy confirmation: it is where a
+  human authorises actions that are irreversible or legally consequential. That
+  argues for the simplest possible rendering path with no build pipeline, no client
+  state to desynchronise, and validation shared with the other surface. FastAPI is
+  chosen over Flask specifically because its pydantic parameter models are the same
+  artefact DR-002's registry needs, avoiding a second validation implementation.
+
+accessibility_note: >
+  routing.yaml classifies ui_change with mandatory accessibility and
+  human_experience dimensions. Server-rendered semantic HTML with real form controls
+  and no JS dependency is the cheapest way to satisfy keyboard reachability and
+  screen-reader sanity, and is a reason to prefer this option beyond ops cost.
+
+fluency_bias_check: >
+  Habit for anything called a 'management dashboard' is React. Nothing in the
+  constraints asks for client-side interactivity; one operator, on localhost,
+  approving items in a list. The word dashboard, not the requirements, would have
+  driven that choice.
+
+reversibility: cheap
+revisit_if:
+  - "The UI needs live-updating views or in-place media editing"
+  - "Remote access becomes a requirement (would also reopen DR-008)"

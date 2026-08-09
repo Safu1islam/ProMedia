@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}ProMedia{% endblock %}</title>
+<style>
+  :root { color-scheme: light dark; --fg:#1a1a1a; --bg:#fff; --muted:#666;
+          --line:#d8d8d8; --ok:#0a7a34; --warn:#8a5a00; --bad:#b00020; --panel:#f7f7f7; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg:#e8e8e8; --bg:#161616; --muted:#a0a0a0; --line:#333;
+            --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --panel:#1f1f1f; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:1.5rem; font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif;
+         color:var(--fg); background:var(--bg); max-width:70rem; margin-inline:auto; }
+  a { color:inherit; }
+  h1,h2,h3 { line-height:1.2; }
+  nav { display:flex; gap:1rem; padding-bottom:1rem; border-bottom:1px solid var(--line); margin-bottom:1.5rem; }
+  table { border-collapse:collapse; width:100%; }
+  th,td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-size:.8rem; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  code, .mono { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:.875em; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:1rem; margin-bottom:1rem; }
+  .verdict { font-weight:700; }
+  .PERMITTED { color:var(--ok); } .BLOCKED { color:var(--bad); } .ESCALATE { color:var(--warn); }
+  .banner { border-left:4px solid var(--warn); background:var(--panel); padding:.75rem 1rem; margin-bottom:1rem; }
+  .banner.bad { border-left-color:var(--bad); }
+  button { font:inherit; padding:.5rem 1rem; border:1px solid var(--line); border-radius:6px;
+           background:var(--panel); color:inherit; cursor:pointer; }
+  button:focus-visible, a:focus-visible { outline:3px solid #4a90d9; outline-offset:2px; }
+  button[disabled] { opacity:.5; cursor:not-allowed; }
+  .muted { color:var(--muted); }
+  dl.kv { display:grid; grid-template-columns:max-content 1fr; gap:.35rem 1rem; margin:0; }
+  dl.kv dt { color:var(--muted); font-size:.85rem; }
+  dl.kv dd { margin:0; }
+  .wrap { overflow-x:auto; }
+</style>
+</head>
+<body>
+<nav>
+  <a href="/">Dashboard</a>
+  <a href="/ops">Capabilities</a>
+</nav>
+{% block body %}{% endblock %}
+</body>
+</html>

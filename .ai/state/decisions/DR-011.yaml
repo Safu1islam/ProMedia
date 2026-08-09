@@ -1,0 +1,102 @@
+id: DR-011
+date: 2026-08-09
+decision_area: rights_declaration_attestation
+status: accepted
+refines: DR-007
+prompted_by: "Independent review round 2 — the declaration channel, B1's untouched twin"
+
+binding_constraints:
+  - "F-2: agents may never clear a rights flag"
+  - "F-3: rights are a hard gate; uncertainty blocks or escalates"
+  - "F-5: an LLM opinion is evidence, never a verdict"
+  - "S3: zero unresolved-rights publications"
+
+problem_statement: >
+  DR-007 built the rights engine as a pure function over declaration + evidence,
+  and review round 1 closed the evidence channel: an agent can no longer forge
+  `produced_by='operator'`. Round 2 found the same defect one field over. The
+  DECLARATION — which is what the permitting rules actually read — was still an
+  unchecked self-assertion from the same untrusted principal:
+
+      agent ingest --declaration '{"authorship":"operator_original"}'   -> PERMITTED
+      agent ingest --declaration '{...invented licence...}'             -> PERMITTED
+
+  The ruleset text already claimed "**Operator** declares sole authorship", but
+  the code checked only what was declared, never who declared it. The operator
+  then saw "PERMITTED via OPERATOR_ORIGINAL" on the approval screen with no
+  indication that an agent had authored the claim.
+
+  This is not a bypass of the human gate — approval was still required — but it
+  is an agent manufacturing a PERMITTED verdict, which F-2 forbids, and it made
+  the operator's approval screen actively misleading about the basis of the
+  permission.
+
+ruled_out:
+  - option: "Leave it; the operator approval gate is downstream and intact"
+    reason: >
+      S3 requires zero unresolved-rights publications, and the operator approves
+      on the strength of the verdict. A verdict an agent can manufacture is not
+      a gate; it is a suggestion wearing a gate's clothing. It also makes the
+      one screen where a human exercises judgement report a fact that is not one.
+  - option: "Forbid agents from supplying declarations at all"
+    reason: >
+      Would remove ingest from the agent's permitted set, which F-2 explicitly
+      grants. Agents doing the legwork is the point of the system; what they
+      cannot do is make the legwork authoritative.
+  - option: "Require the operator to re-type the declaration rather than confirm it"
+    reason: >
+      Attacks S2 (under 3 hours/week) for no security gain — the operator is
+      attesting either way, and re-typing invites rubber-stamping through
+      fatigue.
+
+decision: >
+  Declaration authorship is derived from the authenticated principal and stored
+  as `rights_declarations.declared_by_kind`. Every permitting rule
+  (OPERATOR_ORIGINAL, EXPLICIT_LICENCE, PUBLIC_DOMAIN_VERIFIED) requires an
+  operator-attested declaration. A new rule,
+  DECLARATION_NOT_OPERATOR_ATTESTED, fires ahead of the permitting rules and
+  returns ESCALATE when an unattested declaration would otherwise permit.
+  A new operator-authority operation, `attest-declaration`, lets the operator
+  confirm what an agent proposed.
+
+design:
+  attestation_is_append_only: >
+    attest-declaration inserts a NEW declaration row rather than editing the
+    agent's. The record therefore shows what the agent proposed, who proposed
+    it, and that the operator subsequently attested — which is precisely the
+    history a dispute turns on. Overwriting would destroy it.
+  escalate_not_block: >
+    An unattested declaration ESCALATES rather than BLOCKS, because nothing is
+    known to be wrong with it; it is merely unconfirmed. Blocking would conflate
+    "unverified" with "unusable" and train the operator to ignore blocks.
+  narrow_firing: >
+    The rule fires only where a permission would otherwise be reachable. An
+    agent ingesting material it declares as third-party still gets a truthful
+    BLOCKED with no operator round-trip, so the common honest case costs nothing.
+  disclosure: >
+    decision_context now returns the declaration's authorship, declared_by, and
+    attested_by_operator, and the approval page renders "Declared by an agent
+    (<id>), not attested by you" in place of a bare verdict. The operator sees
+    the basis, not just the conclusion.
+
+consequences:
+  - "Agent-only workflows can no longer reach PERMITTED. This is intended: it is what F-2 means."
+  - "The operator gains one step per asset — attest-declaration — chargeable against S2. Judged acceptable: it is the moment where a human takes legal responsibility, which is the one thing the system must not automate."
+  - "Existing tests that assumed an agent-ingested asset could reach PERMITTED were wrong, not the change; 8 were updated to attest explicitly."
+
+fluency_bias_check: >
+  The habit here is subtler than a technology preference: it is trusting a
+  structured field because it arrives in a well-formed request. B1 and this
+  finding are the same mistake twice — a string chosen by the untrusted caller
+  standing in for an authorisation check. Where a value guards a boundary, it
+  must be derived from the principal, never accepted from the payload.
+
+reversibility: moderate
+reversibility_note: >
+  The schema column is additive and the rule is data in the ruleset. Removing
+  the requirement would be a one-line ruleset edit — but it would re-open the
+  hole, so the bar for doing so is a recorded decision superseding this one.
+
+revisit_if:
+  - "The attestation step measurably threatens S2 (under 3 hrs/week)"
+  - "A trusted non-operator declaration source appears (would contradict F-9 today)"

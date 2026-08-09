@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>ProMedia</h1>
+
+{% if status.simulation_enabled %}
+<p class="banner bad"><strong>Simulation is enabled.</strong> Publishing uses the stub
+publisher (fabrication F-001). Nothing reaches any platform, and every publication
+recorded while this is on is marked simulated.</p>
+{% endif %}
+
+<div class="panel">
+  <h2>Storage</h2>
+  <dl class="kv">
+    <dt>Used</dt><dd>{{ '%.2f'|format(status.storage.total_bytes / 1073741824) }} GB
+      of {{ '%.0f'|format(status.storage.ceiling_bytes / 1073741824) }} GB
+      ({{ (status.storage.fraction_used * 100)|round(1) }}%)</dd>
+    <dt>State</dt><dd>{{ status.storage.state }}</dd>
+    <dt>Refuses at</dt><dd>{{ '%.0f'|format(status.storage.refuse_bytes / 1073741824) }} GB</dd>
+  </dl>
+</div>
+
+<div class="panel">
+  <h2>Rights ruleset in force</h2>
+  <dl class="kv">
+    <dt>Ruleset</dt><dd class="mono">{{ status.rights_ruleset.ruleset }} v{{ status.rights_ruleset.version }}</dd>
+    <dt>Jurisdiction</dt><dd class="mono">{{ status.rights_ruleset.jurisdiction }}</dd>
+  </dl>
+</div>
+
+<h2>Posts</h2>
+{% if posts %}
+<div class="wrap">
+<table>
+  <thead><tr><th>Post</th><th>Status</th><th>Body</th><th>Created by</th></tr></thead>
+  <tbody>
+  {% for p in posts %}
+    <tr>
+      <td><a class="mono" href="/posts/{{ p.id }}">{{ p.id }}</a></td>
+      <td>{{ p.status }}{% if p.simulated %}
+          <br><span class="verdict BLOCKED">SIMULATED — never published</span>{% endif %}</td>
+      <td>{{ p.body[:80] }}</td>
+      <td class="muted">{{ p.created_by }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="muted">No posts yet. An agent can queue one with
+  <code>python -m promedia queue-post</code>; approval happens here.</p>
+{% endif %}
+
+<h2>Assets</h2>
+{% if assets %}
+<div class="wrap">
+<table>
+  <thead><tr><th>Asset</th><th>File</th><th>Size</th><th>Rights</th><th>State</th></tr></thead>
+  <tbody>
+  {% for a in assets %}
+    <tr>
+      <td class="mono">{{ a.id }}</td>
+      <td>{{ a.original_filename }}</td>
+      <td>{{ '%.1f'|format(a.byte_size / 1048576) }} MB</td>
+      <td><span class="verdict {{ a.latest_verdict or '' }}">{{ a.latest_verdict or '—' }}</span></td>
+      <td>{{ a.state }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="muted">No assets ingested.</p>
+{% endif %}
+
+<h2>Accounts</h2>
+{% if accounts %}
+<ul>
+{% for acct in accounts %}
+  <li><strong>{{ acct.platform }}</strong> {{ acct.handle }} — {{ acct.status }}
+      <span class="muted mono">({{ acct.credential_ref }})</span></li>
+{% endfor %}
+</ul>
+{% else %}
+<p class="muted">No accounts connected.</p>
+{% endif %}
+{% endblock %}

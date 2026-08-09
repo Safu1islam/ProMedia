@@ -1,0 +1,96 @@
+id: DR-006
+date: 2026-08-08
+decision_area: media_storage_layout_and_admission_control
+status: accepted
+
+binding_constraints:
+  - "C-13 / F-7: 100 GB media ceiling, HARD. Refuse or queue ingest that would breach it; never fill the disk silently"
+  - "F-8: provenance must stay valid after the media is deleted; key on content hash, never file path"
+  - "C-9: peak batch ingest < 20 files"
+  - "Derived: a 20-file batch reserves ~45% of the ceiling once derivatives are counted"
+  - "Media is transient; permanent records are not"
+
+problem_statement: >
+  The naive design tracks bytes on disk and checks free space at write time. That
+  fails F-7 in the specific way project.md already identified: a system that admits
+  30 GB of source and then discovers it needs 15 GB of renders has already breached
+  the ceiling. Accounting must therefore be a reservation ledger, not a disk usage
+  reading.
+
+ruled_out:
+  - option: "Check free disk space at write time"
+    reason: >
+      Measures the wrong thing (disk, not project quota) at the wrong time (after
+      commitment). Cannot express a projected footprint for work not yet done.
+  - option: "Path-keyed storage (media/2026/08/clip.mp4) as the identity"
+    reason: >
+      Directly violates F-8. A provenance record referencing a path becomes a
+      dangling pointer the moment retention runs, which is the exact scenario the
+      records exist to survive.
+  - option: "Store media as BLOBs in SQLite"
+    reason: >
+      Gigabyte blobs defeat the single-file-backup advantage of DR-003 and make the
+      permanent record set inseparable from the transient media the design is built
+      to delete.
+
+candidates:
+  - option: "Content-addressed store + reservation ledger in SQLite"
+    advantages:
+      - "Content hash (SHA-256) is the identity, so provenance survives deletion by construction (F-8)"
+      - "Reservation is taken BEFORE bytes are written, sized as master + projected derivatives, so admission control decides against committed-plus-projected usage"
+      - "Deduplication is free: re-ingesting identical bytes reuses the record"
+      - "The ledger, not the filesystem, is the source of truth for usage, so a manual file deletion cannot silently corrupt accounting (reconcilable, and detectable)"
+    disadvantages:
+      - "Hash-named files are opaque to a human browsing the folder; requires the UI/CLI to resolve names"
+      - "Hashing a 1.5 GB file costs a full read (~seconds); ingest latency grows with file size"
+      - "Ledger and filesystem can drift if the process dies mid-write; needs a reconcile operation and a stated recovery path"
+  - option: "Filesystem quota / dedicated volume"
+    advantages: ["Enforced by the OS; impossible to exceed"]
+    disadvantages:
+      - "Windows quota management is per-volume and per-user, not per-application; would require a dedicated volume — real operator setup cost, and still cannot express projected footprint"
+  - option: "Track usage, warn at thresholds, allow override"
+    advantages: ["Simple"]
+    disadvantages:
+      - "F-7 says refuse or queue, not warn. A warning that can be clicked past is not a hard ceiling."
+
+decision: "Content-addressed filesystem store with a SQLite reservation ledger and pre-write admission control"
+rationale: >
+  Two constraints drive this and neither is negotiable: F-8 forces content-hash
+  identity, and F-7 forces admission control on projected rather than actual usage.
+  A reservation ledger satisfies both, and gives deduplication and post-deletion
+  provenance as consequences rather than extra features.
+
+design:
+  layout: "media/objects/<hash[0:2]>/<hash[2:4]>/<hash>  — sharded to avoid one huge directory"
+  identity: "SHA-256 of file bytes"
+  ledger_states: [reserved, committed, released]
+  admission_rule: >
+    reserve(projected_bytes) fails unless
+    committed + reserved + projected <= ceiling * hard_threshold.
+    Reservation precedes any byte being written. A crashed ingest leaves an expired
+    reservation, reclaimed by TTL rather than leaking quota permanently.
+  thresholds:
+    warn_bytes: "70% of ceiling"
+    refuse_new_ingest: "85% of ceiling"
+    absolute: "100 GB"
+    note: "Configurable at runtime per protocol 05 (no hardcoded thresholds); defaults from project.md A-6"
+  derivative_projection: >
+    Projected footprint = master + (master * derivative_multiplier). Multiplier is
+    configuration, defaulting to 0.5 per A-3, because that assumption is expected to
+    change when a platform is added.
+  queue_behaviour: "Refused ingest is recorded as queued, not discarded, and retried when retention releases space"
+
+fluency_bias_check: >
+  Habit would have written files under a dated folder tree and checked disk space —
+  the shape almost every media tool uses. It is ruled out here by F-8, which most
+  media tools do not have to satisfy because they never delete the master.
+
+reversibility: expensive
+reversibility_note: >
+  Storage identity is referenced by every provenance record. Changing it later is a
+  data migration over the permanent set. Evidence bar raised accordingly: the hash
+  algorithm is recorded per object so a future migration can proceed incrementally.
+
+revisit_if:
+  - "Deduplication proves worthless in practice and hashing cost dominates ingest latency"
+  - "The ceiling moves materially (would change threshold arithmetic, not the design)"

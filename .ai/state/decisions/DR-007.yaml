@@ -1,0 +1,107 @@
+id: DR-007
+date: 2026-08-08
+decision_area: rights_determination_engine
+status: accepted
+
+binding_constraints:
+  - "F-3: rights are a hard gate; block or escalate anything uncertain"
+  - "F-4: editing is a production function, not a copyright-clearing function; transformation never confers usability"
+  - "F-5 / C-20: an LLM opinion is EVIDENCE, never a VERDICT. Verdicts are deterministic functions over recorded evidence, stamped with the ruleset version"
+  - "S3: zero unresolved-rights publications"
+  - "Jurisdiction INFERRED, unconfirmed (project.md section 7)"
+  - "C-2: cached-evidence rights check p95 < 2s"
+
+problem_statement: >
+  The obvious implementation — send the asset and its context to a model and ask
+  whether it is safe to publish — is forbidden by F-5, and would be wrong even if it
+  were allowed: it is non-reproducible, unauditable, and produces confident answers
+  to legal questions. The engine must instead be a pure function whose inputs are
+  recorded evidence and whose output is reproducible years later.
+
+ruled_out:
+  - option: "LLM decides publishability"
+    reason: "Prohibited by F-5/C-20. Non-deterministic, unauditable, cannot be re-derived."
+  - option: "LLM decides, with a deterministic sanity check afterwards"
+    reason: >
+      Still makes the model the decision-maker; the check only filters its output.
+      The verdict would not be reproducible from evidence.
+  - option: "Free-text rights notes reviewed by the operator at publish time"
+    reason: >
+      Puts the determination in a human's head at the moment of least attention.
+      Produces no record capable of answering a claim 18 months later, and cannot
+      satisfy S3 as an enforced property.
+  - option: "Trust file metadata / EXIF as proof of ownership"
+    reason: "Trivially forged and absent on most screen recordings. Evidence, at best, never proof."
+
+candidates:
+  - option: "Versioned declarative ruleset evaluated over an immutable evidence set"
+    advantages:
+      - "Same evidence + same ruleset version -> same verdict, always (C-20 satisfied by construction)"
+      - "Verdict carries the ruleset version, so a later ruleset change cannot silently rewrite history"
+      - "Jurisdiction is a ruleset parameter, so the unconfirmed jurisdiction does not block the build"
+      - "Pure function: fast, trivially unit-testable, meets C-2 without caching complexity"
+      - "An LLM can contribute evidence records (e.g. 'this segment appears to contain third-party music') that a rule then weighs — model usefulness retained without model authority"
+    disadvantages:
+      - "Expressiveness is bounded: only questions expressible as rules over structured evidence can be answered; genuinely novel situations fall to ESCALATE rather than being reasoned about"
+      - "A ruleset is only as good as its evidence taxonomy; a missing evidence type means a whole class of asset always escalates"
+      - "Requires the operator to supply structured provenance at ingest, which is more work than a free-text note"
+  - option: "Decision table / spreadsheet maintained by the operator"
+    advantages: ["Transparent, editable without code"]
+    disadvantages: ["No versioning discipline, no test coverage, silently editable — history becomes unreproducible"]
+  - option: "External rights-clearance service (buy, not build)"
+    advantages: ["Authoritative for music/stock catalogues; genuine expertise"]
+    disadvantages:
+      - "Recurring cost against a $100 ceiling; none covers 'is this screen recording mine'; introduces a network dependency into a hard gate. Reconsider if third-party music enters scope."
+
+decision: "Versioned declarative ruleset evaluated as a pure function over an immutable evidence set"
+
+design:
+  verdicts: [PERMITTED, BLOCKED, ESCALATE]
+  default_verdict: ESCALATE
+  default_rule: >
+    Anything not matched by an explicit permitting rule is ESCALATE, never PERMITTED.
+    F-3 requires uncertainty to block; the engine's default arm is therefore the
+    conservative one, and a rule must be added to permit anything.
+  permitting_rules_v1:
+    - "OPERATOR_ORIGINAL: operator declares sole authorship AND no third-party material declared"
+    - "EXPLICIT_LICENCE: a licence record exists with grantor, scope, and evidence reference"
+    - "PUBLIC_DOMAIN_VERIFIED: source recorded and verified, with evidence"
+  blocking_rules_v1:
+    - "THIRD_PARTY_MATERIAL_UNCLEARED: any declared third-party component without a matching licence record"
+    - "UNKNOWN_PROVENANCE: source cannot be established"
+  transformation_rule:
+    statement: "No transformation of any kind changes a verdict. Derivatives inherit the source verdict."
+    enforces: F-4
+    note: >
+      Implemented as an inheritance rule on derivative assets rather than a
+      recomputation, so it is impossible to 'launder' a BLOCKED asset by editing it
+      and re-running the check. This is the single most important rule in the engine.
+  llm_role: >
+    An LLM may only write records of kind `evidence` with a stated confidence and
+    model identifier. Evidence never carries a verdict field. Rules may treat
+    low-confidence model evidence as grounds to ESCALATE but never as grounds to
+    PERMIT.
+  jurisdiction: >
+    A ruleset parameter. v1 ships jurisdiction-neutral: it recognises only
+    unambiguous permissions and implements NO doctrine requiring jurisdictional
+    interpretation (no fair use, no fair dealing). Those are absent, not
+    approximated. A confirmed jurisdiction can only relax the default ruleset,
+    never invalidate verdicts already issued under it.
+  versioning: "Ruleset has a semantic version; every verdict records the version that produced it; changing rules never rewrites past verdicts"
+
+fluency_bias_check: >
+  Habit for anything described as 'determine whether this is allowed' in 2026 is to
+  call a model, because models are good at nuanced judgement. F-5 forbids it, and
+  the constraint is correct: the value of this component is reproducibility under
+  challenge, which is the one property a model cannot provide.
+
+reversibility: moderate
+reversibility_note: >
+  Rules are data and can be revised. Verdicts already issued are immutable and
+  version-stamped, so revision is additive. The evidence taxonomy is the expensive
+  part to change, because it shapes what is collectable at ingest.
+
+revisit_if:
+  - "Jurisdiction is confirmed and doctrine-based rules become desirable (requires legal input, not an agent decision)"
+  - "Third-party music or stock footage enters scope (reopens the build-vs-buy candidate)"
+  - "Escalation rate is so high in practice that the gate is ignored — a high escalation rate is a ruleset coverage problem, never grounds to weaken the default arm"

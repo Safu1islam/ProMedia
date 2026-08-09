@@ -1,0 +1,91 @@
+id: DR-001
+date: 2026-08-08
+decision_area: primary_language_and_runtime
+status: accepted
+
+binding_constraints:
+  - "C-4: agent-callable operation cold-start overhead < 1s"
+  - "C-1: UI interaction p95 < 300ms"
+  - "C-18: up to 4 concurrent agent sessions"
+  - "C-19: exclusive entity write-locking with visible owner"
+  - "F-1: one implementation per capability, exposed through two surfaces"
+  - "Operator environment: Windows 11, self-hosted, no cloud"
+  - "Operator time is the binding constraint, not capability (project.md section 8)"
+  - "Observed toolchain: Python 3.11.9 and Node 24.14.1 present; no Go, no .NET, no ffmpeg"
+
+ruled_out:
+  - option: Go
+    reason: >
+      No toolchain installed. Would require the operator to install and maintain a
+      compiler for a single-user local tool, spending the scarce resource (time)
+      to save the abundant one (capability). Cold-start advantage (~10ms vs ~300ms)
+      is real but C-4's budget is 1000ms, so it optimises a constraint that is not
+      binding.
+  - option: .NET / C#
+    reason: "Same as Go: no runtime installed, no constraint it uniquely satisfies."
+  - option: Rust
+    reason: >
+      No toolchain. Compile-time cost per iteration is a direct tax on a solo
+      maintainer's hours. No constraint here requires its guarantees.
+  - option: Browser-only / Electron app
+    reason: >
+      F-1 requires a repo-callable surface agents invoke directly. An Electron app
+      is UI-first by construction and would force a second implementation for the
+      agent path, violating F-1's single-implementation rule.
+
+candidates:
+  - option: Python 3.11
+    advantages:
+      - "sqlite3 in the standard library — no native module build on Windows (see DR-003)"
+      - "hashlib, pathlib, subprocess, argparse, dataclasses all stdlib: small dependency surface"
+      - "All required third-party packages already installed (fastapi, uvicorn, jinja2, pydantic, pytest, httpx, pyyaml) — zero install risk"
+      - "Subprocess orchestration of ffmpeg is idiomatic when media derivatives enter scope"
+      - "Operator already runs Python; agents (Claude Code, Codex) handle it well"
+    disadvantages:
+      - "CLI cold start is the weakest point: importing FastAPI/pydantic eagerly can reach 400-800ms against C-4's 1s budget. Requires disciplined lazy imports in the CLI path, and is a real ongoing constraint on how the code may be structured."
+      - "No compile-time type enforcement; correctness of the rights engine leans on tests, not the compiler"
+      - "GIL limits CPU parallelism — acceptable here because the workload is I/O and subprocess bound"
+  - option: TypeScript on Node 24
+    advantages:
+      - "Node startup ~30-50ms, comfortably inside C-4"
+      - "Compile-time types on the rights engine's evidence structures"
+      - "Installed and current"
+    disadvantages:
+      - "SQLite access needs either better-sqlite3 (native module, MSVC build toolchain on Windows — real friction) or node:sqlite (built-in but comparatively young); Python's sqlite3 has neither problem"
+      - "npm transitive dependency surface is materially larger, which the supply_chain_security dimension counts against a solo maintainer"
+      - "Build/transpile step adds an ops layer that the operator's time budget does not want"
+  - option: Python + Node split (Python core, Node UI)
+    advantages:
+      - "Each language on its strongest surface"
+    disadvantages:
+      - "Directly violates F-1: two runtimes means two implementations of the operation contract, or an IPC layer that becomes a third thing to maintain. Rejected on the project's own non-negotiable."
+
+decision: Python 3.11
+rationale: >
+  The binding differentiator is not speed but dependency and build surface on a
+  Windows machine maintained by one person whose time is the scarce resource.
+  Python reaches SQLite through the standard library, needs no compile step, no
+  native module toolchain, and no package installation at all in this environment.
+  Node's cold-start advantage optimises a constraint (C-4) that has ~3x headroom
+  either way, while its SQLite and build-toolchain story costs operator hours that
+  the project cannot spare.
+
+fluency_bias_check: >
+  Habit would have chosen Python, and Python won. That coincidence is exactly what
+  protocol 02 exists to catch, so the check was made falsifiable instead of
+  rhetorical: the one constraint where Python is genuinely weaker (C-4 cold start)
+  is carried into planning as an executed measurement (T-021), not an assurance. If
+  measured CLI cold start exceeds 1000ms and cannot be brought under it by lazy
+  imports, this record is superseded rather than explained away. Node was the
+  serious alternative and lost on toolchain surface, not on fluency.
+
+reversibility: expensive
+reversibility_note: >
+  Language choice touches every file. Mitigated by DR-002: business logic lives in
+  a surface-agnostic operation registry, so a port replaces adapters and core but
+  keeps the contract, schema, and rights ruleset definitions intact.
+
+revisit_if:
+  - "Measured CLI cold start exceeds 1000ms (C-4) and lazy-import remediation fails"
+  - "A capability requires true CPU parallelism the GIL prevents"
+  - "The operator asks for a distributable single binary"

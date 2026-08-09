@@ -1,0 +1,86 @@
+id: DR-009
+date: 2026-08-08
+decision_area: scheduling_and_publish_execution_model
+supersedes: null
+resolves: "project.md O-1"
+status: accepted
+
+binding_constraints:
+  - "C-24: scheduler must be up across every scheduled publish window"
+  - "C-26: +/- 5 minute tolerance"
+  - "C-27: missed window -> mark missed and ESCALATE. Never post late"
+  - "C-22: scheduled order is posted order, per account"
+  - "C-23: no UI availability target"
+  - "Confirmed: self-hosted on the Windows dev machine, no cloud"
+  - "S2: under 3 hours/week of operator time"
+  - "F-2: publishing requires operator approval; agents may only queue"
+
+problem_statement: >
+  A hard +/- 5 minute deadline on a desktop that sleeps is not satisfiable in
+  general. project.md O-1 offered three options; the operator's confirmation of
+  self-hosted-no-cloud selects one and forecloses another.
+
+ruled_out:
+  - option: "Always-on VPS for the scheduler"
+    reason: >
+      Operator confirmed self-hosted, no cloud provider. Also splits the deployment
+      and puts platform credentials on a remote host, which DR-008 works to avoid.
+      Retained as the documented escape hatch if missed windows become frequent.
+  - option: "Assume the desktop is always awake"
+    reason: >
+      Would convert a hard guarantee into an unstated assumption, and the failure is
+      silent: a missed post looks identical to no post scheduled.
+  - option: "Post late when a window is missed"
+    reason: "Prohibited by C-27."
+  - option: "Long-running daemon process the operator must keep alive"
+    reason: >
+      Adds a supervision problem to a low-ops brief; a dead daemon fails in exactly
+      the same silent way as a sleeping machine.
+
+candidates:
+  - option: "Windows Task Scheduler invokes a one-shot tick command on an interval"
+    advantages:
+      - "OS-supervised; survives reboot; no daemon to babysit"
+      - "The tick is the same repo-callable surface (DR-005), so the scheduler is a caller, not a component — nothing to reimplement"
+      - "Absence of the machine is visible: ticks stop, and the next tick detects and escalates the missed window rather than silently posting"
+      - "Zero cost, no cloud"
+    disadvantages:
+      - "Resolution bounded by the tick interval; a 1-minute tick is needed to hold +/- 5 min meaningfully"
+      - "Nothing runs while the machine is off — the fundamental limitation, mitigated by publish-window restriction, not solved"
+      - "Task registration is a manual operator setup step (documented in HUMAN ACTIONS)"
+  - option: "In-process APScheduler inside the web app"
+    advantages: ["No OS integration; scheduling lives with the app"]
+    disadvantages:
+      - "Requires the web app to be running continuously, which C-23 explicitly does not require, and couples publishing to UI uptime"
+      - "New dependency for behaviour the OS already provides"
+  - option: "Manual publish only; no scheduler in v1"
+    advantages: ["Simplest; the v1 slice's publish step is operator-triggered anyway"]
+    disadvantages: ["Defers C-24/C-26/C-27 rather than answering them"]
+
+decision: >
+  One-shot tick command (`publish-tick`) invoked by Windows Task Scheduler.
+  Publish windows are restricted to hours the machine is known to be on. A window
+  missed by more than the tolerance is marked `missed` and escalated; it is never
+  posted late.
+
+design:
+  tick_contract: "Idempotent. Two concurrent ticks must not double-publish — enforced by claiming the queue item transactionally (DR-003) before any platform call"
+  ordering: "Queue drained in scheduled order per account, satisfying C-22"
+  missed_detection: "scheduled_at + tolerance < now AND status = approved -> status = missed, audit entry written, operator notified"
+  tolerance_source: "Configuration, defaulting to 300s per C-26 — not hardcoded (protocol 05)"
+  v1_scope: >
+    The v1 vertical slice implements queue -> approve -> publish -> record, with
+    publish operator-triggered. The tick command and Task Scheduler registration
+    are planned (T-018) but the scheduler is NOT part of the slice the operator
+    scoped. Recorded here so the design exists before the code does.
+
+fluency_bias_check: >
+  Habit would add APScheduler or Celery, because 'scheduled publishing' evokes a job
+  queue. Celery would additionally require a broker — a daemon and a dependency for
+  at most five posts a day. The OS scheduler is the boring answer and the constraints
+  favour it.
+
+reversibility: cheap
+revisit_if:
+  - "Missed windows become frequent enough to affect S1 (reopens the VPS option as a cost decision)"
+  - "Posting volume grows past what a per-minute tick can drain in order"

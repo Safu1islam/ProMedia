@@ -1,0 +1,79 @@
+id: DR-005
+date: 2026-08-08
+decision_area: repo_callable_surface_and_cli_contract
+status: accepted
+
+binding_constraints:
+  - "F-1: repo-callable surface that agents (Claude Code, Codex) invoke directly"
+  - "C-4: cold-start overhead < 1s"
+  - "F-2: agents may never publish, spend, or clear a rights flag"
+  - "Consumers are AI agents, not only humans"
+
+ruled_out:
+  - option: "Typer / Click"
+    reason: >
+      Both import eagerly and add startup cost against C-4's budget, and both are
+      optimised for hand-written per-command ergonomics — precisely what DR-002
+      removes in favour of generation from the registry. Their main benefit does
+      not apply here.
+  - option: "MCP server as the only agent surface"
+    reason: >
+      Requires a running server and per-tool client configuration; an agent in a
+      cold repo could not call an operation. Deferred as an ADDITIONAL surface
+      later, not the primary one — and because it would be another projection of
+      the same registry, adding it costs little.
+  - option: "Python API only (import promedia; promedia.ingest(...))"
+    reason: >
+      Forces agents into writing throwaway scripts and managing interpreter state;
+      no stable process boundary, no structured exit codes, no uniform error shape.
+
+candidates:
+  - option: "argparse-based generic CLI generated from the operation registry, JSON in / JSON out"
+    advantages:
+      - "argparse is stdlib — no import cost beyond the interpreter, protecting C-4"
+      - "Commands are generated from the registry, so CLI coverage cannot drift from the UI (DR-002)"
+      - "JSON output is directly parseable by an agent; no scraping of human prose"
+      - "Process exit codes give agents an unambiguous success/failure signal"
+      - "`--json` on every command, and a machine-readable `ops` listing so an agent can discover capabilities without documentation"
+    disadvantages:
+      - "Generated help text is less polished than hand-written per-command help"
+      - "A generic flag mapping cannot express bespoke syntax (positional shorthands, subcommand trees)"
+  - option: "Single `promedia call <op> --param k=v` entrypoint"
+    advantages: ["Simplest possible mapping; trivially generated"]
+    disadvantages:
+      - "Poor discoverability and no per-operation validation messaging; agents would need out-of-band knowledge of parameter names"
+  - option: "JSON-RPC over stdin/stdout"
+    advantages: ["Rich structured protocol, good for long-lived agent sessions"]
+    disadvantages:
+      - "Not invocable as a one-shot shell command, which is how Claude Code and Codex actually work in a repo"
+
+decision: "argparse CLI generated from the registry; every operation a subcommand; JSON output available on all"
+rationale: >
+  The consumers are agents, so the contract optimises for machine legibility and
+  cold invocation: stdlib-only startup to protect C-4, structured JSON output,
+  meaningful exit codes, and discoverability through a listable operation index.
+  Generation from the registry is what makes the surface trustworthy — an agent can
+  rely on any UI capability being present here.
+
+contract:
+  invocation: "python -m promedia <operation> [--param value ...] [--json]"
+  discovery: "python -m promedia ops --json  ->  full operation index with parameters and authority"
+  exit_codes:
+    0: "success"
+    1: "operation failed (business rule, validation, not-found)"
+    2: "usage error"
+    3: "FORBIDDEN — operation requires operator authority (F-2); agents receive this, never a partial effect"
+  authority_enforcement: >
+    Enforced in the operation layer, not the CLI adapter, so it holds identically on
+    both surfaces. The CLI is agent-facing by default and therefore runs as the
+    agent principal unless explicitly told otherwise.
+
+fluency_bias_check: >
+  Habit would have chosen Typer for its decorator ergonomics. The ergonomics it sells
+  are for hand-written commands, which this design does not have, and its import cost
+  works against the one constraint (C-4) where the chosen language is weakest.
+
+reversibility: cheap
+revisit_if:
+  - "Measured cold start exceeds C-4 despite stdlib-only CLI imports"
+  - "Agents need long-lived sessions rather than one-shot invocation (revisit MCP)"

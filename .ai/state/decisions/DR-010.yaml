@@ -1,0 +1,84 @@
+id: DR-010
+date: 2026-08-08
+decision_area: platform_integration_and_ai_model_provider
+status: accepted
+
+binding_constraints:
+  - "Platforms: X and LinkedIn, one account each"
+  - "Operator instruction: rate limits and API pricing must NOT be written from model memory; verify against live documentation"
+  - "F-6: browser automation is a fallback for platforms with no usable API, with a stated reason; never the default"
+  - "C-31: $100/month ceiling, hard stop at 150%, $5 per-operation cap"
+  - "C-30: platform account loss via ToS violation is a real financial channel"
+  - "O-3 OPEN: X and LinkedIn API cost and access are unpriced and unverified"
+
+part_a_platform_publishing:
+
+  ruled_out:
+    - option: "Browser automation as the primary publishing mechanism"
+      reason: >
+        F-6 permits it only where no usable API exists. Both target platforms have
+        publishing APIs. Choosing automation for convenience would also engage C-30
+        (account-loss risk) for no constraint-based reason.
+    - option: "Third-party aggregator (Buffer, Hootsuite, Ayrshare)"
+      reason: >
+        Recurring cost against the $100 ceiling, and it would hold the platform
+        credentials and the publish authority — displacing the F-2 approval gate to
+        a vendor. The gate is the product; it cannot be outsourced.
+    - option: "Implement live X and LinkedIn clients now"
+      reason: >
+        Blocked, not rejected: no credentials exist, and pricing/access terms are
+        explicitly not to be written from memory. Building against unverified
+        assumptions is how the cost surprise in O-3 would become sunk work.
+
+  decision: >
+    Define a Publisher interface with a stub implementation for the v1 slice.
+    Live X and LinkedIn adapters are separate tasks, gated on the operator
+    supplying credentials and on verifying access terms and cost against live
+    documentation.
+
+  interface_contract:
+    methods:
+      - "capabilities() -> declared limits for this platform, populated from VERIFIED documentation only"
+      - "publish(post, credential_ref) -> platform_post_id, permalink, published_at"
+      - "verify_published(platform_post_id) -> confirmed live | not found"
+    notes:
+      - "verify_published exists because the retention policy requires 'confirmed live on every target platform, not merely the API returned 200' before deletion is permitted"
+      - "capabilities() intentionally ships EMPTY for real platforms rather than pre-filled from memory. An unknown limit must read as unknown, not as a plausible guess."
+
+  fabrication_note: >
+    The stub publisher is a registered fabrication (see fabrications.yaml). It is
+    visible_to_user because a stubbed publish would otherwise be indistinguishable
+    from a real one in the UI — the highest-risk fabrication in the system. It must
+    label itself in every response and must never be reachable without an explicit
+    simulation flag.
+
+part_b_ai_model_provider:
+
+  decision: "DEFERRED. No LLM dependency in the v1 vertical slice."
+  rationale: >
+    The slice the operator scoped — connect, ingest, rights-determine, provenance,
+    queue, approve, publish, record — contains no step requiring generation or
+    classification. F-5 further bars a model from the rights verdict, which is the
+    one place a model would otherwise appear. Selecting a provider now would be a
+    decision without a binding constraint to test it against, which protocol 02
+    exists to prevent.
+  when_required: >
+    Content drafting and asset analysis (evidence generation, not verdicts). At that
+    point routing.yaml class `ai_feature` applies and brings mandatory dimensions:
+    output_quality_evaluation, hallucination_risk, prompt_injection_resistance,
+    cost_control, fallback_behaviour.
+  constraints_recorded_now:
+    - "Model output may only ever be written as evidence records with a confidence and model identifier (DR-007)"
+    - "Cost control must be enforced before the call, against C-31's $5 per-operation cap"
+    - "Prompt-injection resistance is mandatory: ingested media descriptions and platform content are untrusted input"
+
+fluency_bias_check: >
+  Habit would wire up an LLM immediately, since the project is described as
+  'automated content production' and models are the obvious engine for it. No step
+  in the scoped slice needs one, and the component where a model would feel most
+  natural — deciding rights — is the one place it is explicitly forbidden.
+
+reversibility: cheap
+revisit_if:
+  - "Operator supplies platform credentials (unblocks live adapters and answers O-3)"
+  - "Drafting or asset analysis enters scope (triggers provider selection under ai_feature)"

@@ -1,0 +1,85 @@
+id: DR-008
+date: 2026-08-08
+decision_area: credential_and_secret_handling
+status: accepted
+
+binding_constraints:
+  - "NON-NEGOTIABLES A: never print, commit, or log a secret in any form"
+  - "quality-dimensions secrets_handling: no secret in code, logs, history, or client bundles; externalised config only"
+  - "routing.yaml: auth_or_permissions is mode CRITICAL — threat model and audit trail mandatory"
+  - "F-2: agents may not spend money or publish; credentials are the mechanism by which they could"
+  - "Self-hosted, single operator, single machine"
+
+ruled_out:
+  - option: "Credentials in SQLite alongside application data"
+    reason: >
+      The database file is the backup artefact (DR-003). Backing up the permanent
+      record set would then copy live platform credentials to wherever backups go,
+      widening exposure every time durability is exercised.
+  - option: "Credentials in a .env file committed or committable"
+    reason: "Prohibited outright. .gitignore already excludes .env, but the design must not depend on that being correct."
+  - option: "Cloud secret manager (Vault, AWS SM, Azure KV)"
+    reason: >
+      Recurring cost and a network dependency for a local single-user tool.
+      Disproportionate to one operator with two platform accounts.
+  - option: "Encrypted with a key stored next to the ciphertext"
+    reason: "Encryption theatre. Adds complexity while providing no boundary an attacker with file access does not also cross."
+
+candidates:
+  - option: "Windows DPAPI (per-user OS encryption) with a file-permission fallback"
+    advantages:
+      - "Ciphertext is bound to the operator's Windows account; copying the file to another machine yields nothing"
+      - "No key for the operator to manage, lose, or leak"
+      - "Stdlib-adjacent on Windows; no new service"
+    disadvantages:
+      - "Windows-only, so the credential layer becomes the one platform-specific component"
+      - "Not portable if the operator moves machines — recovery means re-authorising the platforms, which must be documented as the stated recovery path"
+      - "Requires ctypes or pywin32; adds a small native-interface surface"
+  - option: "Separate credentials file outside the repo, 0600-equivalent ACL, referenced by path from config"
+    advantages:
+      - "Portable, simple, inspectable; no native interface"
+      - "Trivially excluded from backup of the permanent record set"
+    disadvantages:
+      - "Plaintext at rest. Anyone with the operator's filesystem access reads it — though on a single-user machine that attacker already has the DPAPI-decrypting session too, so the real difference is narrower than it appears"
+  - option: "OS keyring via the `keyring` package"
+    advantages: ["Cross-platform; uses Windows Credential Manager"]
+    disadvantages: ["New third-party dependency (not currently installed); adds supply-chain surface to the most sensitive component in the system"]
+
+decision: >
+  Credentials live OUTSIDE the application database, in a separate store under the
+  operator's profile, never in the repository and never in the backup set for the
+  permanent records. v1 slice implements the store behind a CredentialStore interface
+  with a file-based backend and restrictive ACL; DPAPI is the intended production
+  backend and is a follow-up task, not a rewrite.
+
+rationale: >
+  The decision that actually matters is separation, not the encryption mechanism:
+  keeping credentials out of the database keeps them out of every backup, export,
+  and provenance artefact, which is where they would otherwise leak. Choosing the
+  interface first and the backend second lets the v1 slice proceed without shipping
+  a Windows-only dependency prematurely, while making the upgrade a backend swap.
+
+threat_model_summary:
+  attacker_goals: ["Post to the operator's accounts", "Exfiltrate platform tokens", "Escalate an agent into operator authority"]
+  entry_points: ["Repository contents (agents read these)", "Backup artefacts", "Log output", "The operation layer's own responses"]
+  trust_boundaries:
+    - "Agent principal vs operator principal — enforced in the operation layer (DR-002), not the adapters"
+    - "Application database (backed up, agent-readable) vs credential store (neither)"
+  mitigations:
+    - "Credentials never returned by any operation; only a redacted reference and connection status"
+    - "Credential values never logged; log records carry the credential ref, never the value"
+    - "Agent principal cannot invoke operations with authority=operator, so it cannot publish even holding a valid connection"
+    - "Audit log records every authority-gated attempt, including denied ones"
+  residual_risk:
+    - "An attacker with the operator's live Windows session has full access under every candidate. Accepted; out of scope for a local single-user tool."
+    - "Plaintext-at-rest until the DPAPI backend lands. Tracked as a fabrication-adjacent gap, not silently accepted."
+
+fluency_bias_check: >
+  Habit would reach for python-dotenv and a .env file, which is the near-universal
+  default. It is ruled out here because .env sits in the repository tree that agents
+  are explicitly instructed to read.
+
+reversibility: cheap
+revisit_if:
+  - "The operator moves to a second machine (portability becomes binding)"
+  - "Any credential is ever needed by a non-operator principal"
