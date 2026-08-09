@@ -1,8 +1,5 @@
 # .ai/state/locks.yaml — entity/path ownership.
 # Schema: aef/schemas/lock.schema.yaml
-#
-# No locks held. The v1 slice run released its locks at completion
-# (protocol 07: "locks released, state files updated, work committed").
 
 locks: []
 
@@ -14,7 +11,18 @@ history:
     acquired_at: "2026-08-08T12:00:00+04:00"
     released_at: "2026-08-09T21:30:00+04:00"
     note: >
-      Single-agent run. Worth stating plainly: no lock contention was exercised,
-      so the C-19 machinery in promedia/core/db.py is unit-tested but has never
-      arbitrated a real conflict. See follow-up task T-027 — the locking code is
-      also not reachable from any operation yet.
+      Single-agent run. No lock contention was exercised, so the C-19 machinery
+      in promedia/core/db.py is unit-tested but has never arbitrated a real
+      conflict. See T-027 — the locking code is also not reachable from any
+      operation yet.
+
+  - path: "promedia/core/registry.py, promedia/core/ops/accounts.py, promedia/cli.py, promedia/web/app.py"
+    task_id: "T-023, T-024, T-025"
+    agent: "claude-code-session-559528a7"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-09T21:40:00+04:00"
+    released_at: "2026-08-10T02:45:00+04:00"
+    note: >
+      Hardening round. Scope grew during the run to promedia/core/posts.py
+      (N11) after review round 3; recorded here rather than left implicit,
+      since the original claim did not cover that path.

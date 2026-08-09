@@ -623,39 +623,42 @@ follow_up_tasks:
     objective: "Credential rotation has no working path: INSERT OR REPLACE mints a new account_id and deletes the old row, or crashes on ON DELETE RESTRICT when posts reference it."
     change_class: data_model_change
     mode: critical
-    status: ready
+    status: complete
     owned_paths: [promedia/core/ops/accounts.py]
     acceptance_criteria:
       - id: AC-1
         statement: "Reconnecting an existing platform+handle preserves the account_id and updates the credential reference."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          tests/test_hardening.py::test_reconnect_preserves_account_id — executed, observed pass. Reviewer re-verified id preservation under FK pressure and under a concurrent publish.
 
   - id: T-024
     title: "Secrets travel through argv and HTTP query strings (I4)"
     objective: "`--secret` is visible in shell history and to every process on the machine; GET /api/op/connect-account?secret=... returns 200. NON-NEGOTIABLES list A is absolute about secrets in any form."
     change_class: auth_or_permissions
     mode: critical
-    status: ready
+    status: complete
     owned_paths: [promedia/core/ops/accounts.py, promedia/cli.py, promedia/web/app.py]
     acceptance_criteria:
       - id: AC-1
         statement: "A credential can be supplied only via stdin or a file path; passing it as an argv flag or a GET parameter is refused."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          tests/test_hardening.py::test_secret_supplied_via_stdin and 5 others — executed. Reviewer probed 11 input shapes with a canary; it reached neither argv, URL, database, nor audit log.
 
   - id: T-025
     title: "Mutating operations are reachable via HTTP GET with no origin check (I5)"
     objective: "GET /api/op/publish-post works; cross-origin form POST with the operator cookie returns 303. Only SameSite=strict protects an endpoint that performs irreversible external publication."
     change_class: auth_or_permissions
     mode: critical
-    status: ready
+    status: complete
     owned_paths: [promedia/web/app.py]
     acceptance_criteria:
       - id: AC-1
         statement: "Operations declaring mutates or operator authority are refused over GET, and a cross-origin POST is refused server-side."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          tests/test_hardening.py::test_state_changing_operations_refused_over_get and 9 others — executed. Reviewer enumerated all 29 operations: zero mismatches in either direction.
 
   - id: T-026
     title: "?token= is unusable on the generic API route and silently reserves a parameter name (I3)"
@@ -721,3 +724,92 @@ follow_up_tasks:
         statement: "Each of the four items is addressed or explicitly declined with a reason."
         result: NOT_RUN
         evidence: "not implemented"
+
+# ---------------------------------------------------------------------------
+# Independent review, round 3 — the T-023/T-024/T-025 hardening.
+# ---------------------------------------------------------------------------
+
+review_round_3:
+  verdicts:
+    T-023: RESOLVED
+    T-024: RESOLVED
+    T-025: "405 rule RESOLVED; origin check reopened for N8, then fixed"
+    I3: RESOLVED
+
+  reviewer_probes_that_found_nothing:
+    - "11 input shapes for a secret canary (CLI abbreviations, query-only, query+form, repeated params, GET, JSON body, form body) — absent from iterdump, audit log, and every response"
+    - "All 29 operations enumerated against the GET/405 rule — zero mismatches in either direction"
+    - "Account reconnect under FK pressure and during an in-flight publish — id preserved, no drift"
+    - "Every classic origin bypass — null, prefix-extension, port, scheme, case, Referer-precedence — all correctly refused"
+
+  new_findings_fixed_in_this_run:
+    - id: N8
+      severity: IMPORTANT
+      summary: >
+        The origin check derived its baseline from request.url.netloc — the
+        client-supplied Host header — so an attacker controlling both Host and
+        Origin matched its own forgery. The reviewer put a state change through
+        that way. Every other vector was correctly refused; only the
+        self-referential baseline failed.
+      fix: "promedia/web/app.py — baseline comes from web.host/web.port in Config; comparison is structural (hostname, port), not string-prefix"
+      regression_test: tests/test_hardening.py::test_host_header_rebind_cannot_forge_same_origin
+      verified: "Confirmed to fail when the baseline is reverted to request-derived"
+
+    - id: N9
+      severity: IMPORTANT
+      summary: >
+        The operator token — which grants publish authority over every account —
+        was exempt from the query-string rule T-024 had just imposed on platform
+        credentials. POST /api/op/publish-post?token=... published successfully.
+      fix: "X-ProMedia-Token header or cookie; ?token= refused on /api/op/* and retained only as the one-time bootstrap on /"
+      regression_test: tests/test_hardening.py::test_token_in_query_cannot_publish
+
+    - id: N10
+      severity: IMPORTANT
+      summary: >
+        A bare reconnect (no secret — a plausible slip) set a live account to
+        status 'error'. Pre-existing expression, made destructive by T-023
+        preserving the row instead of minting a new one.
+      fix: "promedia/core/ops/accounts.py — status left untouched when no secret is supplied"
+      regression_test: tests/test_hardening.py::test_bare_reconnect_does_not_downgrade_a_working_account
+
+    - id: N11
+      severity: IMPORTANT
+      summary: >
+        account.status was written but never read, so the system could report an
+        account as broken and publish to it anyway.
+      fix: "promedia/core/posts.py — publish refuses a non-connected account; status surfaced in decision_context"
+      regression_test: tests/test_hardening.py::test_publish_refuses_an_account_that_is_not_connected
+
+    - id: N12
+      severity: OPTIONAL
+      summary: >
+        --secret was blocked only by argparse abbreviation AMBIGUITY, which is an
+        accident rather than a control, and the error did not say what to do.
+      fix: "allow_abbrev=False plus an explicit suppressed --secret that consumes its value and errors with the alternatives, without echoing the value"
+      regression_test: tests/test_hardening.py::test_inline_secret_flag_gives_actionable_error
+
+    - id: N13
+      severity: OPTIONAL
+      summary: "handle was not case-normalised while platform was, so x/Case and x/case became two accounts"
+      fix: "promedia/core/ops/accounts.py — handle lowercased for the lookup key"
+      regression_test: tests/test_hardening.py::test_handle_is_case_normalised
+
+    - id: N14
+      severity: OPTIONAL
+      summary: >
+        The round-2 tests asserted the entry points but not the end state — no
+        iterdump or audit-log check on the secret, and no Host-rebind case, which
+        is exactly why N8 survived.
+      fix: "tests/test_hardening.py — canary asserted absent from database, audit log and every response; Host-rebind and 6 origin vectors added"
+
+  reviewer_statement_corrected:
+    claim: "Round 3 closed by listing N1 and N4 as 'still open from earlier rounds, unchanged'."
+    finding: >
+      Both were already fixed in commit 1aa06da, before round 3 began. Verified
+      by inspection and by executing their regression tests
+      (test_exception_text_never_reaches_the_audit_log,
+      test_reporting_operations_agree_with_the_gate) — both pass, registry.py
+      audits the exception TYPE only, and ops/rights.py routes through
+      effective_verdict. Recorded because an inherited "still open" would have
+      sent the next agent to re-fix working code.

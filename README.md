@@ -45,15 +45,21 @@ boundary, because an agent can issue local HTTP requests as easily as a browser.
 ## The slice, end to end
 
 ```bash
-python -m promedia connect-account --platform x --handle you --secret ...   # operator
+python -m promedia connect-account --platform x --handle you --secret-stdin  # operator
 python -m promedia ingest --source-path clip.mp4 \
     --declaration '{"authorship":"operator_original","third_party_material":[]}'
-python -m promedia attest-declaration --asset-id as_...                     # operator
+python -m promedia attest-declaration --asset-id as_...                      # operator
 python -m promedia determine-rights   --asset-id as_...
 python -m promedia seal-provenance    --asset-id as_...
 python -m promedia queue-post --account-id acct_... --asset-id as_... --body "..."
 # approve and publish in the UI
 ```
+
+There is deliberately no `--secret` flag. A credential passed as an argument is
+visible to every process on the machine and persists in shell history, so
+sensitive parameters are declared `sensitive` in the registry and accepted only
+via `--<name>-stdin` or `--<name>-file`. The same declaration makes the web
+surface refuse them in a query string.
 
 An agent can run the un-annotated steps. The three marked `operator` require the
 token, and return exit code 3 without it — distinct from failure, so an agent can
@@ -93,6 +99,6 @@ tell "hand this to the human" from "this broke".
 python -m pytest
 ```
 
-132 tests. `tests/test_review_regressions.py` holds the ones written from an
-independent reviewer's reproduced attacks — those are the interesting ones, and
-each was confirmed to fail before its fix.
+147 tests. `tests/test_review_regressions.py` and `tests/test_hardening.py` hold
+the ones written from an independent reviewer's reproduced attacks — those are
+the interesting ones, and each was confirmed to fail before its fix.

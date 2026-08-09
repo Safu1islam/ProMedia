@@ -24,7 +24,16 @@ from ..registry import Context, Param, register
     params=(
         Param("platform", "str", help="Platform key: x or linkedin."),
         Param("handle", "str", help="Account handle as it appears on the platform."),
-        Param("secret", "str", required=False, help="Credential value. Stored, never echoed."),
+        Param(
+            "secret",
+            "str",
+            required=False,
+            sensitive=True,
+            help=(
+                "Credential value. Supply via --secret-stdin or --secret-file;"
+                " it is never accepted as an inline flag or a query parameter."
+            ),
+        ),
     ),
     authority="operator",
     mutates=True,
@@ -33,30 +42,59 @@ from ..registry import Context, Param, register
 )
 def connect_account(ctx: Context, platform: str, handle: str, secret: str | None = None) -> dict[str, Any]:
     key = platform.strip().lower()
+    # N13: platform was normalised but handle was not, so "x/Case" and "x/case"
+    # became two accounts with two credential refs. Platforms treat handles
+    # case-insensitively; the lookup key must too.
+    handle = handle.strip().lower()
     if key not in publishers.SUPPORTED_PLATFORMS:
         raise ValidationError(
             f"unsupported platform '{platform}'",
             parameter="platform",
             supported=list(publishers.SUPPORTED_PLATFORMS),
         )
-    account_id = new_id("acct")
     credential_ref = f"{key}:{handle}"
+    status = "connected" if secret else "error"
+
+    # T-023: reconnecting must PRESERVE the account id. INSERT OR REPLACE against
+    # UNIQUE(platform, handle) minted a new id and deleted the old row, so
+    # anything holding the previous id dangled — and once posts referenced the
+    # account, ON DELETE RESTRICT turned it into a raw crash instead. Either way
+    # credential rotation, the normal reason to reconnect, had no working path.
+    existing = ctx.conn.execute(
+        "SELECT id, status FROM accounts WHERE platform = ? AND handle = ?", (key, handle)
+    ).fetchone()
 
     if secret:
         CredentialStore().put(credential_ref, secret)
 
-    ctx.conn.execute(
-        "INSERT OR REPLACE INTO accounts (id, platform, handle, credential_ref, status, connected_at)"
-        " VALUES (?, ?, ?, ?, ?, ?)",
-        (
-            account_id,
-            key,
-            handle,
-            credential_ref,
-            "connected" if secret else "error",
-            iso(),
-        ),
-    )
+    if existing is not None:
+        account_id = existing["id"]
+        if secret:
+            ctx.conn.execute(
+                "UPDATE accounts SET credential_ref = ?, status = ?, connected_at = ? WHERE id = ?",
+                (credential_ref, status, iso(), account_id),
+            )
+        else:
+            # N10: a bare reconnect must not downgrade a working account to
+            # 'error'. Under the old INSERT OR REPLACE this expression minted a
+            # fresh row and so never corrupted anything; preserving the id
+            # (T-023) made the same line destructive. Omitting the secret is a
+            # plausible slip, and its cost was a live account marked broken.
+            ctx.conn.execute(
+                "UPDATE accounts SET credential_ref = ?, connected_at = ? WHERE id = ?",
+                (credential_ref, iso(), account_id),
+            )
+            status = existing["status"]
+        reconnected = True
+    else:
+        account_id = new_id("acct")
+        ctx.conn.execute(
+            "INSERT INTO accounts (id, platform, handle, credential_ref, status, connected_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (account_id, key, handle, credential_ref, status, iso()),
+        )
+        reconnected = False
+
     return {
         "ok": True,
         "account_id": account_id,
@@ -64,7 +102,8 @@ def connect_account(ctx: Context, platform: str, handle: str, secret: str | None
         "handle": handle,
         "credential_ref": credential_ref,
         "credential_value": REDACTED,
-        "status": "connected" if secret else "error",
+        "status": status,
+        "reconnected": reconnected,
         "note": (
             None if secret
             else "no credential supplied; account recorded but cannot publish (T-019)"

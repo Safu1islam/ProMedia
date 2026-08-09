@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -35,6 +36,71 @@ TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 # the URL printed at startup, so the token is presented once rather than living
 # in every link the operator might copy.
 COOKIE_NAME = "promedia_operator"
+
+# Namespaced so it can never collide with an operation parameter (finding I3).
+AUTH_QUERY_PARAM = "token"
+
+# Finding N9: T-024's rationale — a query string lands in browser history and
+# leaks via Referer — applies with more force to the operator token than to a
+# platform credential, because the token grants publish authority over every
+# account. ?token= therefore survives ONLY as the one-time bootstrap on "/",
+# which immediately exchanges it for a cookie and redirects. Everywhere else it
+# must arrive as a cookie or this header.
+AUTH_HEADER = "X-ProMedia-Token"
+
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _reject_foreign_origin(request: Request, cfg: Config) -> JSONResponse | None:
+    """Refuse a state-changing request that did not originate from this app.
+
+    T-025. SameSite=strict on the cookie is a browser-side control, and it was
+    the only thing standing between a cross-origin form POST and an irreversible
+    publish.
+
+    Finding N8: the first version derived "this app" from
+    `request.url.netloc` — which is the client-supplied Host header. An attacker
+    controlling both Host and Origin matched its own forgery, and the reviewer
+    put a state change through that way. The baseline must come from
+    configuration, which the client cannot influence, not from the request.
+
+    Comparison is structural (scheme, hostname, port) rather than string-prefix,
+    so `http://host.evil.com` cannot pass as a prefix-extension of `http://host`.
+
+    Requests with no Origin and no Referer are allowed: curl, the CLI and the
+    test client carry no ambient cookie authority, which is the thing CSRF
+    exploits.
+    """
+    source = request.headers.get("origin") or request.headers.get("referer")
+    if not source:
+        return None
+
+    configured_host = str(cfg.get("web", "host")).lower()
+    configured_port = int(cfg.get("web", "port"))
+    # Loopback spellings of the same machine are the same origin in practice.
+    allowed_hosts = {configured_host, "localhost", "127.0.0.1", "[::1]", "::1"}
+
+    parsed = urlsplit(source)
+    hostname = (parsed.hostname or "").lower()
+    port = parsed.port or _DEFAULT_PORTS.get(parsed.scheme)
+
+    if hostname in allowed_hosts and port == configured_port:
+        return None
+
+    return JSONResponse(
+        {
+            "ok": False,
+            "error": "FORBIDDEN",
+            "message": "cross-origin state-changing request refused",
+            "detail": {
+                "origin": source,
+                "expected_host": configured_host,
+                "expected_port": configured_port,
+            },
+        },
+        status_code=403,
+    )
 
 
 def create_app(config: Config | None = None, *, store: CredentialStore | None = None) -> FastAPI:
@@ -59,7 +125,13 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
         boundary the CLI has, rather than a weaker one.
         """
         expected = credential_store.operator_token()
-        supplied = request.cookies.get(COOKIE_NAME) or request.query_params.get("token")
+        supplied = (
+            request.cookies.get(COOKIE_NAME)
+            or request.headers.get(AUTH_HEADER)
+            # Bootstrap only: "/" exchanges this for a cookie and redirects.
+            # api_op refuses it outright (N9).
+            or request.query_params.get(AUTH_QUERY_PARAM)
+        )
         principal = (
             resolve(supplied, expected, identifier="ui")
             if expected and supplied
@@ -76,11 +148,18 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
         finally:
             ctx.conn.close()
 
+    def guarded(request: Request, name: str, params: dict[str, Any]) -> Any:
+        """run(), with the cross-origin refusal applied first (T-025)."""
+        denied = _reject_foreign_origin(request, cfg)
+        if denied is not None:
+            return denied
+        return run(request, name, params)
+
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request) -> Any:
         # Exchange ?token=... for a cookie once, then drop it from the URL so it
         # does not linger in history or get copied into a shared link.
-        supplied = request.query_params.get("token")
+        supplied = request.query_params.get(AUTH_QUERY_PARAM)
         if supplied:
             response = RedirectResponse(url="/", status_code=303)
             response.set_cookie(
@@ -123,7 +202,9 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
     @app.post("/posts/{post_id}/approve")
     def approve(request: Request, post_id: str, decision: str = Form("approved")) -> Any:
         try:
-            run(request, "approve-post", {"post_id": post_id, "decision": decision})
+            denied = guarded(request, "approve-post", {"post_id": post_id, "decision": decision})
+            if isinstance(denied, JSONResponse):
+                return denied
         except ProMediaError as exc:
             return TEMPLATES.TemplateResponse(
                 request=request,
@@ -136,7 +217,9 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
     @app.post("/posts/{post_id}/publish")
     def publish(request: Request, post_id: str) -> Any:
         try:
-            run(request, "publish-post", {"post_id": post_id})
+            denied = guarded(request, "publish-post", {"post_id": post_id})
+            if isinstance(denied, JSONResponse):
+                return denied
         except ProMediaError as exc:
             return TEMPLATES.TemplateResponse(
                 request=request,
@@ -149,7 +232,9 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
     @app.post("/posts/{post_id}/release-claim")
     def release_claim(request: Request, post_id: str) -> Any:
         try:
-            run(request, "release-publish-claim", {"post_id": post_id})
+            denied = guarded(request, "release-publish-claim", {"post_id": post_id})
+            if isinstance(denied, JSONResponse):
+                return denied
         except ProMediaError as exc:
             return TEMPLATES.TemplateResponse(
                 request=request,
@@ -180,7 +265,40 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
         This is what makes dual-surface parity structural rather than a
         convention someone has to remember.
         """
+        op = operations.get(name)
+
+        # T-025: a state-changing operation must not be reachable by GET.
+        # A GET is fetched by prefetchers, link previews and history restores,
+        # and publish-post is irreversible. Refuse before anything else runs.
+        if op is not None and request.method == "GET" and (op.mutates or op.authority == "operator"):
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": "METHOD_NOT_ALLOWED",
+                    "message": f"'{name}' changes state and must be POSTed, not fetched",
+                    "detail": {"operation": name, "method": "POST"},
+                },
+                status_code=405,
+            )
+
+        # N9: the operator token must not travel in the URL of a real operation.
+        if AUTH_QUERY_PARAM in request.query_params:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": "VALIDATION",
+                    "message": (
+                        f"the operator token must not be sent as '?{AUTH_QUERY_PARAM}=' here;"
+                        f" send the {AUTH_HEADER} header, or visit / once to obtain a"
+                        " session cookie"
+                    ),
+                    "detail": {"parameter": AUTH_QUERY_PARAM, "use_header": AUTH_HEADER},
+                },
+                status_code=400,
+            )
+
         params: dict[str, Any] = dict(request.query_params)
+
         if request.method == "POST":
             content_type = request.headers.get("content-type", "")
             if content_type.startswith("application/json"):
@@ -193,6 +311,31 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
             else:
                 form = await request.form()
                 params.update({k: v for k, v in form.items()})
+
+        # T-024: a sensitive value must never arrive in a query string, where the
+        # browser records it in history and leaks it via Referer.
+        if op is not None:
+            in_query = set(request.query_params)
+            for p in op.params:
+                if p.sensitive and p.name in in_query:
+                    return JSONResponse(
+                        {
+                            "ok": False,
+                            "error": "VALIDATION",
+                            "message": (
+                                f"'{p.name}' is sensitive and must not be sent as a query"
+                                " parameter; send it in a POST body"
+                            ),
+                            "detail": {"parameter": p.name},
+                        },
+                        status_code=400,
+                    )
+
+        if request.method == "POST":
+            denied = _reject_foreign_origin(request, cfg)
+            if denied is not None:
+                return denied
+
         try:
             result = run(request, name, params)
         except ProMediaError as exc:

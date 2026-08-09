@@ -101,6 +101,9 @@ def decision_context(ctx: Context, post_id: str) -> dict[str, Any]:
             "id": account["id"],
             "platform": account["platform"],
             "handle": account["handle"],
+            # N11: surfaced so the operator sees a broken account before
+            # approving, not after publish refuses.
+            "status": account["status"],
         } if account else None,
         "asset": {
             "id": asset["id"],
@@ -326,6 +329,17 @@ def publish(ctx: Context, *, post_id: str) -> dict[str, Any]:
         "SELECT * FROM accounts WHERE id = ?", (post["account_id"],)
     ).fetchone()
     asset = ctx.conn.execute("SELECT * FROM assets WHERE id = ?", (post["asset_id"],)).fetchone()
+
+    # N11: account.status existed but nothing consulted it, so the system could
+    # report an account as broken and then publish to it anyway.
+    if account["status"] != "connected":
+        raise ValidationError(
+            f"cannot publish: account is '{account['status']}', not connected",
+            post_id=post_id,
+            account_id=account["id"],
+            status=account["status"],
+            remedy="reconnect the account with a credential",
+        )
 
     # Claim BEFORE the irreversible act. Everything above is a read-only gate;
     # from here on exactly one caller may proceed (finding B2).

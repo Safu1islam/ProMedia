@@ -43,6 +43,12 @@ class Param:
     required: bool = True
     default: Any = None
     help: str = ""
+    # T-024. A sensitive value must never appear in a place the OS or a browser
+    # records: argv is readable by every process on the machine and survives in
+    # shell history; a query string lands in browser history and Referer headers.
+    # Declaring it here means BOTH surfaces enforce the same rule, rather than
+    # each adapter remembering to — the same reasoning as authority (F-2).
+    sensitive: bool = False
 
     def coerce(self, raw: Any) -> Any:
         """Convert a surface-supplied value to the declared type.
@@ -86,6 +92,7 @@ class Param:
             "required": self.required,
             "default": self.default,
             "help": self.help,
+            "sensitive": self.sensitive,
         }
 
 
