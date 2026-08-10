@@ -665,13 +665,20 @@ follow_up_tasks:
     objective: "GET /api/op/status?token=<valid> returns VALIDATION 'unexpected parameter: token'. The documented auth path does not work, and `token` collides with any future domain parameter of that name."
     change_class: api_change
     mode: standard
-    status: ready
+    status: complete
     owned_paths: [promedia/web/app.py]
     acceptance_criteria:
       - id: AC-1
         statement: "The auth key is stripped before invoke and is namespaced so it cannot collide with an operation parameter."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          Fixed during the T-024/T-025 hardening round, not as separate work.
+          AUTH_QUERY_PARAM is consumed before dispatch and namespaced; finding N9
+          then went further and moved the token to the X-ProMedia-Token header,
+          refusing ?token= on /api/op/* entirely. Verified by execution:
+          tests/test_hardening.py -k token, 2 passed. Reviewer round 3 recorded
+          I3 as RESOLVED. Marked complete here because leaving finished work as
+          'ready' sends the next agent to redo it.
 
   - id: T-027
     title: "C-19 entity locking is reachable from neither surface (I7)"
@@ -691,13 +698,84 @@ follow_up_tasks:
     objective: "test_web_covers_every_operation compares /api/ops against load_operations(), but api_ops serialises that same dict — the assertion cannot fail and never exercises /api/op/{name}. S4 designates single-surface capabilities a build failure and DR-002 names this test as the enforcement mechanism."
     change_class: new_project
     mode: standard
-    status: ready
+    status: complete
+    claimed_by: "claude-code-session-38b1e8a2"
     owned_paths: [tests/test_parity.py]
     acceptance_criteria:
       - id: AC-1
         statement: "Each operation is actually invoked over HTTP and via the CLI parser, asserting the same error class for the same inputs."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          tests/test_parity.py::test_operation_refuses_identically_on_both_surfaces and
+          ::test_operation_handler_agrees_across_surfaces, both parametrised over all 29
+          registered operations (58 cases). Each case POSTs /api/op/{name} and calls
+          promedia.cli.main() with the same parameters, then compares the outcome class
+          and its surface-native signal (HTTP status vs exit code). Executed: 218 passed.
+    verification:
+      - command: "python -m pytest -p no:cacheprovider"
+        status: PASSED
+        observed: "218 passed, 1 warning in 36.66s (was 161 before this task; +57 net from the new parametrised cases)"
+      - command: "python -m pytest tests/test_parity.py -p no:cacheprovider -q, with promedia/cli.py temporarily skipping 'storage-status' in _build_parser"
+        status: FAILED
+        observed: >
+          Intentional sabotage, to prove the gate can fail. 3 failures:
+          test_every_operation_on_both_surfaces ('operations absent from the CLI surface:
+          ['storage-status']') plus both parametrised cases for [storage-status]
+          ("'storage-status' is not callable on the CLI surface — argparse exited 2").
+          Sabotage reverted; promedia/cli.py is byte-identical to HEAD.
+      - command: "python -m pytest tests/test_parity.py -p no:cacheprovider -q, with api_op temporarily 404ing 'storage-status'"
+        status: FAILED
+        observed: >
+          Intentional sabotage. 2 failures naming storage-status: "'storage-status' is not
+          reachable at /api/op/storage-status" and "F-1 violation: 'storage-status' behaves
+          differently per surface on the populated probe — web returned NOT_FOUND, CLI
+          returned OK". Sabotage reverted.
+      - command: "python -m pytest tests/test_parity.py -p no:cacheprovider -q, with api_op temporarily defaulting the 'asset' operation's asset_id"
+        status: FAILED
+        observed: >
+          Intentional sabotage covering the case where BOTH surfaces answer but disagree —
+          adapter logic drift rather than a missing route. 1 failure: "F-1 violation:
+          'asset' behaves differently per surface on the no-parameter probe — web returned
+          NOT_FOUND ('no asset asset_probe_default'), CLI returned VALIDATION ('missing
+          required parameter 'asset_id'')". Sabotage reverted; promedia/web/app.py is
+          byte-identical to HEAD.
+    review: []
+    fabrications_introduced: []
+    assumptions:
+      - >
+        The CLI half is exercised in-process via cli.main() rather than as a subprocess.
+        tests/test_cli.py already pins the subprocess contract (exit codes, stdout
+        parseability); 58 interpreter starts at ~250ms each would have cost more than the
+        rest of the suite. If the CLI ever grows behaviour that only appears under a real
+        process boundary, this choice needs revisiting.
+    decisions: [DR-002]
+    independent_review:
+      reviewer: "orchestrating session (did not implement this task)"
+      note: >
+        First task in this project where implementation and review were performed
+        by genuinely separate agents with separate contexts, which is what
+        Constitution section 7 actually requires. Every prior task was reviewed by
+        an agent that had not written the code, but the human-experience pass was
+        always mine; here the implementation itself was someone else's.
+      checks:
+        - "git diff vs HEAD: promedia/ byte-identical, so all three sabotages were genuinely reverted — PASSED"
+        - "Full suite re-run independently: 218 passed — PASSED"
+        - "Parity file collects 62 cases: 29 ops x 2 probes + 4 structural — PASSED"
+        - >
+          Gate proven to fail by MY OWN sabotage, deliberately different from the
+          agent's (operation 'publications' dropped from the CLI parser, not
+          'storage-status'): 3 failures, naming the operation — PASSED
+        - >
+          Gate proven to catch BEHAVIOURAL DRIFT, not just absence: web adapter
+          made to silently default a required parameter for 'provenance' produced
+          1 failure, 'web returned NOT_FOUND, CLI returned VALIDATION' — PASSED.
+          This is the case the old tautological test could never have seen.
+        - "Both of my sabotages restored, SHA-256 verified against the pre-edit file — PASSED"
+        - "No acceptance criterion anywhere in tasks.yaml is PASSED without evidence — PASSED"
+      residual: >
+        The CLI half runs in-process rather than as a subprocess. Recorded by the
+        implementer as an assumption rather than hidden; tests/test_cli.py still
+        pins the subprocess contract separately. Accepted.
 
   - id: T-029
     title: "Re-ingesting a retention-deleted asset reports success and restores nothing (I9)"
@@ -724,6 +802,34 @@ follow_up_tasks:
         statement: "Each of the four items is addressed or explicitly declined with a reason."
         result: NOT_RUN
         evidence: "not implemented"
+
+
+  - id: T-031
+    title: "create_app's operations dict is decorative — filtering it does not disable an operation"
+    objective: >
+      Found while building the T-028 sabotage. api_op looks up the local
+      `operations` dict only for the T-025 GET guard and the T-024 sensitive-param
+      check, then calls invoke(), which re-reads the global registry itself. An
+      operation removed from that dict therefore STILL EXECUTES over HTTP, but
+      with both guards skipped — the opposite of what removing it implies.
+      Latent, not currently exploitable (nothing filters that dict today), but it
+      is a trapdoor: the obvious way to disable a capability on the web surface
+      silently disables its protections instead.
+    change_class: auth_or_permissions
+    mode: critical
+    status: ready
+    owned_paths: [promedia/web/app.py]
+    found_by: "implementer agent during T-028"
+    acceptance_criteria:
+      - id: AC-1
+        statement: "An operation absent from the web adapter's operations mapping is refused with NOT_FOUND rather than executing without its guards."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "A parity test proves the two paths cannot disagree about which operations exist."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, security, error_handling, testing]
 
 # ---------------------------------------------------------------------------
 # Independent review, round 3 — the T-023/T-024/T-025 hardening.

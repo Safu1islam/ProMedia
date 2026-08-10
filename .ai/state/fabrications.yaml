@@ -63,6 +63,15 @@ fabrications:
 
 notes:
   - >
+    T-028's parity probes use a sentinel identifier
+    ('parity-probe-no-such-entity') and empty-JSON parameter values. These are
+    NOT registered as fabrications because nothing fake is produced or shown:
+    they are inputs chosen to match no entity, and the tests assert that both
+    surfaces refuse them identically. A sentinel that produced a plausible
+    result would have been a fabrication; one that produces NOT_FOUND is a
+    probe. The tests also assert publishing.allow_simulation is false, so
+    fabrication F-001 stays unreachable while they run.
+  - >
     ffprobe is absent on this machine, so media duration and codec are recorded
     as null with probe_status 'unavailable'. That is NOT registered as a
     fabrication because nothing fake is produced: the absence is recorded
