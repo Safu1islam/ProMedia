@@ -9,6 +9,13 @@ capability reachable from one surface and not the other is not expressible
 Authority (F-2) is a property of the operation, checked here in the operation
 layer. Putting it in the adapters would mean enforcing it twice, and the second
 copy is the one that eventually drifts.
+
+Entity locking (C-19) is here for the same reason (T-027). The lock table in
+promedia.core.db was implemented and unit-tested but called by nothing, so with
+up to four concurrent agent sessions (C-18) two of them could write the same
+asset or post with no owner recorded anywhere. Enforcing it in ``invoke`` means
+the CLI and the web surface cannot enforce it differently, because neither of
+them enforces it at all.
 """
 
 from __future__ import annotations
@@ -19,7 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from ..config import Config
-from ..errors import Forbidden, ProMediaError, ValidationError
+from ..errors import EntityLocked, Forbidden, ProMediaError, ValidationError
 from .principal import Principal
 
 Handler = Callable[..., Any]
@@ -34,6 +41,10 @@ class Context:
     principal: Principal
     agent_id: str = "claude-code"
     model: str = "claude-opus-5"
+    # Entities this session already owns, so a nested invoke() does not release
+    # a lock the enclosing call still depends on (T-027). Not part of the
+    # operation contract — bookkeeping for the duration of one session.
+    held_locks: set[tuple[str, str]] = field(default_factory=set, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -192,9 +203,54 @@ def validate(op: Operation, raw: dict[str, Any]) -> dict[str, Any]:
     return resolved
 
 
+def lock_target(op: Operation, params: dict[str, Any]) -> tuple[str, str] | None:
+    """The ``(entity_type, entity_id)`` this call must own exclusively, or None.
+
+    The id is read from the operation's own parameters under the convention
+    ``<entity>_id`` — the same key set ``_entity_id`` reads out of a result, so
+    the lock key and the audit key cannot drift apart. Deriving it from the
+    entity type rather than listing it per operation is the DR-002 reasoning
+    again: a rule stated once cannot be forgotten when a capability is added.
+
+    Three cases, each deliberate:
+
+    * **Not mutating, or no entity named** — nothing to lock. A read must never
+      take a lock (C-19 constrains writers only), and ``init`` /
+      ``reclaim-reservations`` mutate but name no entity, so there is no owner
+      to record.
+    * **No ``<entity>_id`` parameter declared** — the operation *creates* the
+      entity (``ingest``, ``queue-post``, ``connect-account``). There is no id
+      yet, so there is nothing another agent could be holding and nothing to
+      wait for. Skipped explicitly, not by accident. The residual gap is
+      ``connect-account``, which updates an existing account when one already
+      matches platform+handle; its natural key is not an entity id and locking
+      on it would be a different mechanism, so it is recorded as a known limit
+      rather than approximated here.
+    * **Declared** — its value is the lock key.
+    """
+    if not op.mutates or op.entity is None:
+        return None
+    key = f"{op.entity}_id"
+    if key not in {p.name for p in op.params}:
+        return None
+    value = params.get(key)
+    if not isinstance(value, str) or not value:
+        # Unreachable while every such parameter is required — validate() has
+        # already refused a missing one. A hard error rather than a silent
+        # unlocked write if that ever changes: writing to a named entity with
+        # no recorded owner is the exact hole C-19 exists to close.
+        raise ValidationError(
+            f"operation '{op.name}' mutates a {op.entity} but supplied no '{key}' to lock",
+            operation=op.name,
+            parameter=key,
+        )
+    return (op.entity, value)
+
+
 def invoke(ctx: Context, name: str, raw_params: dict[str, Any] | None = None) -> dict[str, Any]:
     """Run an operation. The single entry point both surfaces use."""
-    from .audit import record  # local import keeps CLI cold start light
+    from . import db  # local imports keep CLI cold start light (C-4)
+    from .audit import record
 
     registry = load_operations()
     op = registry.get(name)
@@ -214,6 +270,41 @@ def invoke(ctx: Context, name: str, raw_params: dict[str, Any] | None = None) ->
 
     params = validate(op, raw_params or {})
     audited = op.authority == "operator" or op.mutates
+
+    # C-19: exactly one writer per entity, with a visible owner. Taken after
+    # authority and validation — a refused or malformed call must not be able
+    # to park a lock on an entity — and always released below, so a handler
+    # that raises cannot strand one. TTL comes from configuration; protocol 05
+    # forbids a literal here, and it is what makes a crashed session's lock
+    # reclaimable rather than permanent.
+    target = lock_target(op, params)
+    acquired = False
+    if target is not None and target not in ctx.held_locks:
+        try:
+            db.acquire_lock(
+                ctx.conn,
+                target[0],
+                target[1],
+                task_id=op.name,
+                agent=ctx.agent_id,
+                model=ctx.model,
+                ttl_minutes=int(ctx.config.get("locks", "ttl_minutes")),
+            )
+        except EntityLocked as exc:
+            # A refusal on ownership is as much an attempt as a refusal on
+            # authority, and the audit log exists to answer "what was tried".
+            record(
+                ctx,
+                op.name,
+                outcome="denied",
+                detail=f"{exc.code}: owned by {exc.detail.get('owner')}",
+                entity_type=target[0],
+                entity_id=target[1],
+            )
+            raise
+        ctx.held_locks.add(target)
+        acquired = True
+
     try:
         result = op.handler(ctx, **params)
     except ProMediaError as exc:
@@ -243,9 +334,18 @@ def invoke(ctx: Context, name: str, raw_params: dict[str, Any] | None = None) ->
             operation=op.name,
             exception_type=type(exc).__name__,
         ) from exc
-    if audited:
-        record(ctx, op.name, outcome="allowed", detail=None,
-               entity_type=op.entity, entity_id=_entity_id(result))
+    else:
+        if audited:
+            record(ctx, op.name, outcome="allowed", detail=None,
+                   entity_type=op.entity, entity_id=_entity_id(result))
+    finally:
+        # Release only what this call took. Releasing a lock an ENCLOSING
+        # invoke() still holds would hand the entity to another agent while the
+        # outer handler was mid-write, which is worse than never locking at
+        # all — the outer call would go on believing it had exclusivity.
+        if acquired and target is not None:
+            ctx.held_locks.discard(target)
+            db.release_lock(ctx.conn, target[0], target[1], agent=ctx.agent_id)
     return result if isinstance(result, dict) else {"result": result}
 
 

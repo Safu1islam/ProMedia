@@ -27,6 +27,20 @@ history:
       (N11) after review round 3; recorded here rather than left implicit,
       since the original claim did not cover that path.
 
+  - path: "promedia/core/registry.py, tests/test_locking.py"
+    task_id: "T-027"
+    agent: "claude-code-session-38b1e8a2"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-11T00:55:00+04:00"
+    released_at: "2026-08-11T01:20:00+04:00"
+    note: >
+      C-19 wiring. promedia/core/registry.py was edited TWICE as intentional
+      sabotage during verification (acquire disabled, then release disabled) to
+      prove tests/test_locking.py can fail; both were reverted and the file was
+      hash-verified identical to its pre-sabotage state. The history entry above
+      for T-001..T-013 said the C-19 machinery "has never arbitrated a real
+      conflict" — it now does, in the operation layer.
+
   - path: "tests/test_parity.py"
     task_id: "T-028"
     agent: "claude-code-session-38b1e8a2"

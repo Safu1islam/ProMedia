@@ -685,13 +685,133 @@ follow_up_tasks:
     objective: "acquire_lock/release_lock are implemented and unit-tested but called by no operation, so C-19 is unenforced with up to 4 concurrent agents. The mirror image of an F-1 defect: a capability on zero surfaces, which the parity test cannot see."
     change_class: api_change
     mode: standard
-    status: ready
-    owned_paths: [promedia/core/ops/system.py, promedia/core/registry.py]
+    status: complete
+    claimed_by: "claude-code-session-38b1e8a2"
+    owned_paths: [promedia/core/registry.py, tests/test_locking.py]
+    owned_paths_note: >
+      promedia/core/ops/system.py was listed at planning time but needed no
+      change — the `locks` operation it already carries makes owners visible on
+      both surfaces, which is the C-19 reporting half. tests/test_locking.py is
+      new and was added to the claim.
     acceptance_criteria:
       - id: AC-1
         statement: "Mutating operations claim an entity lock, and a second agent attempting the same entity receives ENTITY_LOCKED naming the owner."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          registry.invoke() now derives a lock target from the operation
+          (mutates + entity + a declared <entity>_id parameter), acquires before
+          the handler with owner=ctx.agent_id and TTL from config locks.ttl_minutes,
+          and releases in a finally. Seven operations lock: add-evidence,
+          attest-declaration, determine-rights, seal-provenance, approve-post,
+          publish-post, release-publish-claim. Executed:
+          tests/test_locking.py, 13 passed; full suite 231 passed (was 218).
+          test_second_agent_is_refused_while_the_first_holds_the_entity has
+          agent-beta attempt the asset from inside agent-alpha's handler and
+          asserts ENTITY_LOCKED with message "asset <id> is locked by agent-alpha"
+          and detail.owner == "agent-alpha".
+    verification:
+      - command: "python -m pytest -p no:cacheprovider"
+        status: PASSED
+        observed: "231 passed, 1 warning in 47.71s (218 before this task; +13 from tests/test_locking.py)"
+      - command: "python -m pytest tests/test_parity.py tests/test_db.py -p no:cacheprovider"
+        status: PASSED
+        observed: "70 passed, 1 warning in 12.08s — the 62-case dual-surface gate and the 8 T-002 lock unit tests are unaffected"
+      - command: "python -m pytest tests/test_locking.py -p no:cacheprovider, with the acquire branch in invoke() disabled (`if False and ...`)"
+        status: FAILED
+        observed: >
+          Intentional sabotage, to prove the new tests can fail. 5 failed, 8 passed:
+          test_lock_is_held_by_the_operation_layer_while_the_handler_runs,
+          test_second_agent_is_refused_while_the_first_holds_the_entity,
+          test_refusal_on_ownership_is_audited,
+          test_nested_invoke_does_not_release_the_outer_lock,
+          test_entity_locked_is_refused_identically_on_both_surfaces.
+          Sabotage reverted; registry.py restored byte-identical (SHA-256
+          E584E76B33FC73F46F6E929CA805861FE6F29A876FA7B9551CD4584E8CEBF5A0).
+      - command: "python -m pytest tests/test_locking.py -p no:cacheprovider, with the release branch in the finally disabled"
+        status: FAILED
+        observed: >
+          Second sabotage, covering the opposite bug — acquiring and never
+          releasing. 5 failed, 8 passed, a different five: the three release
+          tests plus test_same_agent_may_write_the_same_entity_repeatedly and
+          test_nested_invoke_does_not_release_the_outer_lock. Actual text:
+          "assert db.list_locks(alpha.conn) == [] / Left contains one more item:
+          {'agent': 'agent-alpha', 'entity_id': 'as_does_not_exist',
+          'entity_type': 'asset', ...}". Reverted and hash-verified as above.
+    review: []
+    fabrications_introduced: []
+    assumptions:
+      - >
+        Entity id is read from the parameter named <entity>_id, matching the key
+        set registry._entity_id already reads out of a result. Every mutating
+        operation that acts on an existing entity declares exactly that name, so
+        no per-operation mapping table is needed.
+      - >
+        An operation that CREATES its entity (ingest, queue-post,
+        connect-account) declares no such parameter and therefore takes no lock:
+        there is no id yet, so no other agent can be holding one. Stated in
+        lock_target's docstring and pinned by
+        test_the_locking_and_creating_sets_are_what_this_task_intended.
+    open_items:
+      - >
+        connect-account is create-OR-update: it preserves the account id when
+        platform+handle already match (T-023), so a reconnect is an unlocked
+        write to an existing account. Its natural key is not an entity id, so
+        locking it needs a different mechanism than this task's. Recorded rather
+        than approximated. Impact is low — connecting an account is operator
+        authority and C-17 fixes the human count at 1.
+      - >
+        ENTITY_LOCKED has no dedicated surface signal: the web adapter's status
+        map does not list it, so it falls through to HTTP 400, and the CLI uses
+        the base exit code 1. Both surfaces agree, which is what F-1 requires,
+        and tests/test_locking.py pins the pair. 409 Conflict would be more
+        accurate on the web side but changing it means changing an adapter this
+        task did not claim.
+    decisions: [DR-002, DR-003]
+    independent_review:
+      reviewer: null
+      status: NOT_RUN
+      note: >
+        Constitution section 7 — the implementer may not be the sole reviewer.
+        Not yet reviewed by another agent.
+    independent_review:
+      reviewer: "orchestrating session (did not implement this task)"
+      checks:
+        - "Scope: only promedia/core/registry.py changed, plus new tests/test_locking.py. cli.py, web/app.py, core/db.py, ops/system.py, core/posts.py byte-identical to HEAD — PASSED"
+        - "No sabotage leftovers: grep for 'if False' / disabled-guard markers across the package found nothing — PASSED"
+        - "Full suite re-run independently: 231 passed — PASSED"
+        - >
+          MY OWN check, deliberately different from the implementer's per-test
+          assertions: drove a real 8-operation end-to-end slice (connect, ingest,
+          attest, determine, seal, queue, approve, publish) and then asserted the
+          lock table was EMPTY. 0 rows. A leaked lock would not show up in tests
+          that each assert in isolation, and would silently wedge an entity
+          against every future agent — PASSED
+        - >
+          Enumerated lock_target() across all 29 operations: exactly 7 lock
+          (add-evidence, approve-post, attest-declaration, determine-rights,
+          publish-post, release-publish-claim, seal-provenance) and ZERO
+          read-only operations take a lock — PASSED
+        - >
+          Contention on a different entity type than the implementer used (post,
+          not asset): second agent refused with ENTITY_LOCKED naming
+          owner=alpha, owner_task=held-by-alpha — PASSED
+        - >
+          After release the second agent proceeded and failed with
+          ValidationError, NOT EntityLocked, which is what proves the release
+          rather than the refusal — PASSED
+        - "No acceptance criterion anywhere in tasks.yaml is PASSED without evidence — PASSED"
+      accepted_design: >
+        Enforcement in invoke() rather than the adapters is right, and for the
+        reason the implementer gave: both adapters are generic projections of the
+        registry, so anything enforced in them is written twice and the second
+        copy drifts. This is the same argument that put authority there in
+        DR-002, and the now-strict parity gate (62 cases) covers it.
+      not_verified:
+        - >
+          Real multi-process contention. All concurrency exercised here is two
+          SQLite connections inside one interpreter. SQLITE_BUSY under genuine
+          OS-level parallelism is NOT_RUN, and the implementer said so rather
+          than implying otherwise.
 
   - id: T-028
     title: "The web half of the parity gate is a tautology (I8)"
@@ -830,6 +950,56 @@ follow_up_tasks:
         result: NOT_RUN
         evidence: "not implemented"
     required_dimensions: [correctness, security, error_handling, testing]
+
+  - id: T-032
+    title: "ENTITY_LOCKED has no distinct surface signal, so an agent cannot tell 'locked' from 'failed'"
+    objective: >
+      Raised by the T-027 implementer. The web status map does not list
+      ENTITY_LOCKED so it falls through to HTTP 400, and the CLI returns the base
+      exit code 1. Both surfaces agree, so F-1 holds and the parity gate passes —
+      but aef/protocols/05-execution.md tells a blocked agent to "take a different
+      ready task", and it cannot act on that if a contended entity is
+      indistinguishable from a business-rule failure. 409 Conflict is the accurate
+      web status; the CLI needs its own code.
+      Note this changes a documented contract (DR-005 fixes the exit-code
+      meanings), so it needs a decision record, not just an edit.
+    change_class: api_change
+    mode: standard
+    status: ready
+    owned_paths: [promedia/errors.py, promedia/web/app.py, promedia/cli.py, .ai/state/decisions]
+    found_by: "implementer agent during T-027"
+    acceptance_criteria:
+      - id: AC-1
+        statement: "A contended entity returns 409 on the web surface and a dedicated exit code on the CLI, and the two remain in agreement under the parity gate."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "The exit-code change is recorded in a decision record that supersedes the relevant part of DR-005."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, api_contract_stability, backward_compatibility, error_handling, documentation, testing]
+
+  - id: T-033
+    title: "connect-account reconnect is an unlocked write to an existing account"
+    objective: >
+      Raised by the T-027 implementer. Since T-023, connect-account preserves the
+      account id when platform+handle already match, so a credential rotation
+      mutates an existing entity — but the operation declares no account_id
+      parameter, so lock_target() returns None and no lock is taken. Its natural
+      key is platform:handle, which is not an entity id, so locking it needs a
+      different mechanism rather than an invented id.
+      Low impact today: operator authority, and C-17 fixes humans at 1.
+    change_class: auth_or_permissions
+    mode: standard
+    status: ready
+    owned_paths: [promedia/core/registry.py, promedia/core/ops/accounts.py]
+    found_by: "implementer agent during T-027"
+    acceptance_criteria:
+      - id: AC-1
+        statement: "A reconnect of an existing account takes an exclusive lock on that account, and a second agent attempting it concurrently is refused with ENTITY_LOCKED."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, data_integrity, security, testing]
 
 # ---------------------------------------------------------------------------
 # Independent review, round 3 — the T-023/T-024/T-025 hardening.

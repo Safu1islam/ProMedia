@@ -72,6 +72,16 @@ notes:
     probe. The tests also assert publishing.allow_simulation is false, so
     fabrication F-001 stays unreachable while they run.
   - >
+    T-027's tests/test_locking.py monkeypatches promedia.core.rights.determine in
+    four tests. Three replace it with a PROBE that reads the lock table (or makes
+    a second agent's attempt) from inside the handler and then calls the real
+    implementation — a window into a lock that only exists while the handler
+    runs, not a substitute for it. The fourth injects a ZeroDivisionError to
+    reach the unexpected-exception release path. Neither is registered as a
+    fabrication: nothing fake is produced, nothing reaches the operator or the
+    database, and no assertion is satisfied by invented data. A probe that
+    returned a fabricated verdict instead of delegating WOULD have been one.
+  - >
     ffprobe is absent on this machine, so media duration and codec are recorded
     as null with probe_status 'unavailable'. That is NOT registered as a
     fabrication because nothing fake is produced: the absence is recorded
