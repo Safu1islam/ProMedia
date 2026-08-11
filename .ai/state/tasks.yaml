@@ -1222,10 +1222,25 @@ operator_decisions_2026_08_11:
     question: "Keep docs/ANNOUNCEMENT.md public in the AEF repo?"
     answer: "Pull it. Private prep material."
     action_taken: >
-      Removed from the default branch of Safu1islam/aef and pushed. STILL
-      REACHABLE from the v0.1.0 tag, which points at the commit that introduced
-      it — removal from HEAD is not removal from history. Raised with the
-      operator as a separate decision rather than force-pushed unilaterally.
+      Removed from the default branch of Safu1islam/aef and pushed (commit
+      f3c9079). Nothing linked to it, so no dangling references.
+    history_decision:
+      question: "Rewrite history to remove it from the v0.1.0 tag as well?"
+      answer: "No. Leave it in the tag."
+      decided: 2026-08-11
+      status: CLOSED — do not reopen
+      what_this_means: >
+        docs/ANNOUNCEMENT.md is off the default branch and out of the browsable
+        default view, but REMAINS PERMANENTLY REACHABLE at the v0.1.0 tag:
+        `git show v0.1.0:docs/ANNOUNCEMENT.md` returns it, and GitHub serves it
+        at that tag's URL. This is a deliberate, recorded acceptance, not an
+        oversight — the content is draft announcement copy, not a secret, and it
+        was judged not worth a force-push that would rewrite a published tag and
+        release.
+      relevant_if: >
+        Only revisit if something genuinely sensitive is later found in that
+        commit. A rewrite gets more expensive with every clone and fork, so the
+        window narrows over time.
 
   - id: OD-2
     question: "Confirm or correct the inferred jurisdiction."
