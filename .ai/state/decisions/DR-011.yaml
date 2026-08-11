@@ -100,3 +100,15 @@ reversibility_note: >
 revisit_if:
   - "The attestation step measurably threatens S2 (under 3 hrs/week)"
   - "A trusted non-operator declaration source appears (would contradict F-9 today)"
+
+operator_decision_2026_08_11:
+  question: "Is the per-asset attestation step a nuisance worth batching?"
+  answer: "Keep it as-is for now."
+  rationale_given_by_operator: >
+    Do not optimise it on theory. Keep the per-asset step until it has been used
+    on real assets; batch it then if it becomes a noticeable burden.
+  consequence: >
+    No design change. This closes the question as an open item but leaves the
+    revisit_if trigger above live — it is now measured against real use rather
+    than speculation, which is the right order for a cost that lands on the
+    operator's own time budget (S2).

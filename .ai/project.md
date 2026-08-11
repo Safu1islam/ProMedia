@@ -223,14 +223,19 @@ itself.
 | Aspect | Value | Confidence |
 |---|---|---|
 | Applicable regimes | **Copyright and platform terms of service only.** No other regime applies | **Confirmed 2026-08-08** |
-| Operating jurisdiction | **United Arab Emirates** | **INFERRED, UNCONFIRMED.** Evidence: Windows home location = UAE, timezone UTC+04:00. A machine setting, not a legal declaration |
-| Copyright regime | Determined by jurisdiction, plus the terms of each platform | Follows from the above — unverified |
+| Operating jurisdiction | **United Arab Emirates** | **CONFIRMED by the operator, 2026-08-11.** Originally inferred from Windows home location and UTC+04:00; that inference is now superseded by a direct answer |
+| Copyright regime | UAE law, plus the terms of each platform | Follows from the confirmed jurisdiction |
 | GDPR | Not applicable | Confirmed via "no compliance regime beyond copyright and platform ToS" |
 | UAE PDPL | Not applicable | Same |
 
-> **O-2 resolved without blocking.** The operator confirmed that copyright and platform
-> ToS are the only applicable regimes, but jurisdiction — which selects *which*
-> copyright regime — remains inferred. Rather than block the rights engine on this,
+> **O-2 fully resolved.** Copyright and platform ToS are the only applicable
+> regimes, and the jurisdiction that selects *which* copyright regime is now
+> confirmed as the UAE. The engine was built without waiting for this, and the
+> reasoning below is retained because it explains why the shipped ruleset looks
+> the way it does — and why confirming the jurisdiction does **not** by itself
+> unlock doctrine-based rules.
+>
+> Rather than block the rights engine on the unconfirmed answer,
 > **jurisdiction is a runtime configuration parameter of the ruleset** (`DR-007`), and
 > the shipped default ruleset is **jurisdiction-neutral and deliberately
 > conservative**: it recognises only unambiguous permissions (operator-owned, explicit
@@ -342,7 +347,7 @@ ingest), or earlier if any specific trigger below fires.
 | A-5 | 14-day post-publish grace period | Any deletion the operator regrets |
 | A-6 | Storage thresholds 70/85/100 GB | First queued ingest event |
 | A-7 | Local-first, single machine, no remote access | Operator wants to approve a publish while away from the desk |
-| A-8 | Jurisdiction = UAE | **No longer blocking** — ruleset is jurisdiction-parameterised and conservative by default (§7, DR-007). Revisit before any doctrine-based rule (fair use / fair dealing) is added |
+| A-8 | ~~Jurisdiction = UAE~~ | **NO LONGER AN ASSUMPTION.** Confirmed by the operator 2026-08-11; promoted to a fact in §7. Adding any doctrine-based rule (fair use / fair dealing) still requires legal input, which confirmation does not supply |
 | A-9 | GDPR and UAE PDPL not applicable | Confirmed by operator. Revisit on audience targeting or third-party personal data processing |
 | A-10 | Cut order analytics → scheduling → never rights | Operator states a different order |
 | A-11 | Low-ops preferred despite unrestricted capability, because operator *time* is the binding constraint | Ops burden approaches 1 h/week |
@@ -366,7 +371,11 @@ on, and a missed window escalates rather than posting late (C-27). Recorded in
 it is a cost decision, not an architectural one, because the scheduler is a thin caller
 of the same operation layer either way.
 
-**O-2 — RESOLVED without blocking.** See §7. Jurisdiction stays inferred; the ruleset
+**O-2 — CLOSED 2026-08-11.** Jurisdiction confirmed as the UAE by the operator, so
+this is no longer an open item at all. What follows is the original resolution,
+retained because it explains the shipped ruleset's shape.
+
+Previously: see §7. Jurisdiction stays inferred; the ruleset
 is jurisdiction-parameterised with a conservative default that a later answer can only
 relax, never invalidate. No doctrine-based rules are implemented.
 

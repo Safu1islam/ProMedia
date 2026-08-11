@@ -1210,3 +1210,65 @@ review_round_3:
       audits the exception TYPE only, and ops/rights.py routes through
       effective_verdict. Recorded because an inherited "still open" would have
       sent the next agent to re-fix working code.
+
+# ---------------------------------------------------------------------------
+# Operator decisions, 2026-08-11. Recorded here because the constitution says
+# nothing that matters may exist only in a conversation.
+# ---------------------------------------------------------------------------
+
+operator_decisions_2026_08_11:
+
+  - id: OD-1
+    question: "Keep docs/ANNOUNCEMENT.md public in the AEF repo?"
+    answer: "Pull it. Private prep material."
+    action_taken: >
+      Removed from the default branch of Safu1islam/aef and pushed. STILL
+      REACHABLE from the v0.1.0 tag, which points at the commit that introduced
+      it — removal from HEAD is not removal from history. Raised with the
+      operator as a separate decision rather than force-pushed unilaterally.
+
+  - id: OD-2
+    question: "Confirm or correct the inferred jurisdiction."
+    answer: "UAE confirmed."
+    action_taken: >
+      .ai/project.md section 7 changed from INFERRED/UNCONFIRMED to CONFIRMED;
+      assumption A-8 retired; open item O-2 closed. Note recorded there that
+      confirming jurisdiction does NOT by itself unlock doctrine-based rules
+      (fair use / fair dealing) — those still need legal input, which a
+      confirmation does not supply.
+
+  - id: OD-3
+    question: "Is the per-asset attest-declaration step worth batching?"
+    answer: "Keep it for now; revisit against real use, not theory."
+    action_taken: "Recorded in DR-011 under operator_decision_2026_08_11."
+
+  - id: OD-4
+    question: "Supply X and LinkedIn credentials now?"
+    answer: "Defer. The operator will run the credential commands directly when T-019 is actually needed."
+    action_taken: >
+      No change. T-019 stays blocked, fabrication F-001 stays active, and
+      publishing stays simulated and disabled by default. Open item O-3 (API
+      pricing against the $100/month ceiling) stays unanswered by design — it
+      cannot be answered without live access, and must not be answered from
+      model memory.
+
+  - id: OD-5
+    question: "Who performs the human-experience review?"
+    answer: "The operator, on one real screen-recording workflow with simulation on."
+    action_taken: >
+      No change to code. This is the step that closes the review shortfall in
+      OD-6; until it happens the shortfall stays recorded.
+
+  - id: OD-6
+    question: "Is the review shortfall against routing.yaml mode `critical` accepted?"
+    answer: "Accepted, and to remain explicitly recorded in the completion report."
+    detail: >
+      routing.yaml specifies 3 reviewers plus a human_experience_reviewer for
+      this change class. Actual: one independent reviewer agent, run repeatedly.
+      Since T-028 the implementing and reviewing agents have been genuinely
+      separate, which closes the worst of it — but the human-experience pass has
+      always been performed by the implementing session, and
+      framework.yaml sets self_review_counts_as_review false.
+      The operator's position: the implementation/review separation is good but
+      does not replace the independent human-experience pass. The shortfall is
+      NOT waived — it stays in the completion report until OD-5 is done.
