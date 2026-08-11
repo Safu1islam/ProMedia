@@ -6,6 +6,7 @@
   Every capability below is one implementation, reachable from this UI and from
   <code>python -m promedia &lt;operation&gt;</code>. A capability present on only one
   surface is a build failure, and <code>tests/test_parity.py</code> enforces it.
+  Follow an operation name to run it here.
 </p>
 <div class="wrap">
 <table>
@@ -13,7 +14,7 @@
   <tbody>
   {% for op in operations %}
     <tr>
-      <td class="mono">{{ op.name }}</td>
+      <td class="mono"><a href="/ops/{{ op.name }}">{{ op.name }}</a></td>
       <td>{% if op.authority == 'operator' %}<strong>operator</strong>{% else %}agent{% endif %}</td>
       <td>{{ op.summary }}{% if op.danger %}<br><span class="muted">{{ op.danger }}</span>{% endif %}</td>
       <td class="mono muted">

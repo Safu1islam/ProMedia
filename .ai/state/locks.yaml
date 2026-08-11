@@ -57,6 +57,26 @@ history:
       from a scratchpad copy and SHA-256 verified identical
       (d4d1537c428d7928682b514db2f1e9964868152f0e2d125b7af274413f8c8e4e).
 
+  - path: "promedia/web/app.py, promedia/web/templates/op.html, promedia/web/templates/ops.html, promedia/web/templates/base.html, tests/test_ops_forms.py, README.md"
+    task_id: "T-034"
+    agent: "claude-code-session-t034"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-12T00:05:00+04:00"
+    released_at: "2026-08-12T01:15:00+04:00"
+    note: >
+      Operable generic web surface. tests/test_parity.py and tests/test_hardening.py
+      were deliberately NOT claimed: this task adds routes, not operations, so the
+      62-case parity count and the 34-case hardening count both stay unchanged and
+      directly comparable across it (verified: 96 passed).
+      promedia/web/app.py was sabotaged THREE times during verification (GET made
+      to execute; sensitive fields repopulated, jointly with op.html; guarded()
+      swapped for run()) to prove tests/test_ops_forms.py can fail. All reverted
+      from scratchpad copies and SHA-256 verified
+      (app.py 8F2D47115DA899C106D856B2BC2CA4A770DB85F3A2E1ECFEB3C29E06F2B3E6F9,
+      op.html A3C67DA6F655D1376A0194874C116CA31DA42F23FA7EE595A3451B86D996C837).
+      .claude/launch.json was also added, outside the claim — it is editor
+      configuration, not project code, and carries no behaviour.
+
   - path: "tests/test_parity.py"
     task_id: "T-028"
     agent: "claude-code-session-38b1e8a2"

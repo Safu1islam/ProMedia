@@ -15,6 +15,7 @@ Two deliberate properties:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -27,7 +28,7 @@ from ..config import Config, load as load_config
 from ..errors import NotFound, ProMediaError
 from ..core import db
 from ..core.credentials import CredentialStore
-from ..core.principal import agent as agent_principal, resolve
+from ..core.principal import Principal, agent as agent_principal, resolve
 from ..core.registry import Context, Operation, invoke, load_operations
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -110,6 +111,58 @@ def _operation(name: str) -> Operation:
     return op
 
 
+def _token_in_query(request: Request) -> tuple[dict[str, Any], int] | None:
+    """N9 — the operator token must never travel in a URL of a real operation.
+
+    Extracted from ``api_op`` so T-034's form routes enforce the same rule
+    rather than carrying a second copy of it. Returns the error payload and its
+    status, not a response, because the two callers render differently: JSON on
+    ``/api/op/{name}``, an error page on ``/ops/{name}``.
+    """
+    if AUTH_QUERY_PARAM not in request.query_params:
+        return None
+    return (
+        {
+            "ok": False,
+            "error": "VALIDATION",
+            "message": (
+                f"the operator token must not be sent as '?{AUTH_QUERY_PARAM}=' here;"
+                f" send the {AUTH_HEADER} header, or visit / once to obtain a"
+                " session cookie"
+            ),
+            "detail": {"parameter": AUTH_QUERY_PARAM, "use_header": AUTH_HEADER},
+        },
+        400,
+    )
+
+
+def _sensitive_in_query(request: Request, op: Operation) -> tuple[dict[str, Any], int] | None:
+    """T-024 — a sensitive value must never arrive in a query string.
+
+    The browser records a query string in history and leaks it via Referer. The
+    rule is enforced on the form routes too, and on their GET as well as their
+    POST: the harm is that the value reached the URL at all, which has already
+    happened by the time the request arrives. Refusing tells the operator to
+    stop reusing that URL.
+    """
+    in_query = set(request.query_params)
+    for p in op.params:
+        if p.sensitive and p.name in in_query:
+            return (
+                {
+                    "ok": False,
+                    "error": "VALIDATION",
+                    "message": (
+                        f"'{p.name}' is sensitive and must not be sent as a query"
+                        " parameter; send it in a POST body"
+                    ),
+                    "detail": {"parameter": p.name},
+                },
+                400,
+            )
+    return None
+
+
 def _reject_foreign_origin(request: Request, cfg: Config) -> JSONResponse | None:
     """Refuse a state-changing request that did not originate from this app.
 
@@ -181,22 +234,30 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
         cannot read the credential store cannot authenticate — which is the same
         boundary the CLI has, rather than a weaker one.
         """
+        conn = db.connect(cfg.db_path)
+        db.apply_schema(conn)
+        return Context(config=cfg, conn=conn, principal=principal_of(request))
+
+    def principal_of(request: Request) -> Principal:
+        """The caller's authority, without opening a database connection.
+
+        Split out of context() for T-034: the operation form page needs to say
+        whether this browser session can actually run an operator-authority
+        operation, and rendering a page should not cost a connection. It stays
+        the ONE place a principal is derived, so the page's claim and the
+        registry's enforcement cannot disagree.
+        """
         expected = credential_store.operator_token()
         supplied = (
             request.cookies.get(COOKIE_NAME)
             or request.headers.get(AUTH_HEADER)
             # Bootstrap only: "/" exchanges this for a cookie and redirects.
-            # api_op refuses it outright (N9).
+            # api_op and the form routes refuse it outright (N9).
             or request.query_params.get(AUTH_QUERY_PARAM)
         )
-        principal = (
-            resolve(supplied, expected, identifier="ui")
-            if expected and supplied
-            else agent_principal("ui")
-        )
-        conn = db.connect(cfg.db_path)
-        db.apply_schema(conn)
-        return Context(config=cfg, conn=conn, principal=principal)
+        if expected and supplied:
+            return resolve(supplied, expected, identifier="ui")
+        return agent_principal("ui")
 
     def run(request: Request, name: str, params: dict[str, Any]) -> dict[str, Any]:
         # Resolved here too, so the HTML routes below cannot execute something
@@ -315,6 +376,120 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
             context={"operations": sorted(_operations().values(), key=lambda o: o.name)},
         )
 
+    # T-034. /ops listed 29 capabilities and could operate none of them; the
+    # only operable HTML was /posts/{id}. These two routes close that, and they
+    # are a PROJECTION, not a new surface: the form is generated from the same
+    # Operation/Param metadata the listing already renders as prose, and the
+    # submission goes through guarded() -> run() -> _operation() -> invoke(),
+    # which is the identical path /api/op/{name} takes. Nothing about
+    # authority (F-2), locking (C-19) or rights (F-3) is decided here.
+
+    def render_op(
+        request: Request,
+        op: Operation,
+        *,
+        submitted: dict[str, Any] | None = None,
+        result: dict[str, Any] | None = None,
+        error: dict[str, Any] | None = None,
+        status_code: int = 200,
+    ) -> Any:
+        return TEMPLATES.TemplateResponse(
+            request=request,
+            name="op.html",
+            status_code=status_code,
+            context={
+                "op": op,
+                # Sensitive values are stripped rather than re-rendered: a
+                # re-populated password field puts the secret back into the
+                # response body on every subsequent error (T-024's reasoning
+                # applied to the response rather than the request).
+                "submitted": {
+                    p.name: (submitted or {}).get(p.name, "")
+                    for p in op.params
+                    if not p.sensitive
+                },
+                "result": (
+                    json.dumps(result, indent=2, sort_keys=True, default=str)
+                    if result is not None
+                    else None
+                ),
+                "error": error,
+                "principal": principal_of(request),
+            },
+        )
+
+    def op_page_refusal(request: Request, op: Operation) -> Any | None:
+        """The URL-borne-secret rules, rendered as a page rather than JSON."""
+        refusal = _token_in_query(request) or _sensitive_in_query(request, op)
+        if refusal is None:
+            return None
+        payload, status = refusal
+        return TEMPLATES.TemplateResponse(
+            request=request, name="error.html", context={"error": payload}, status_code=status
+        )
+
+    def op_not_found(request: Request, exc: NotFound) -> Any:
+        return TEMPLATES.TemplateResponse(
+            request=request, name="error.html", context={"error": exc.to_dict()}, status_code=404
+        )
+
+    @app.get("/ops/{name}", response_class=HTMLResponse)
+    def op_form(request: Request, name: str) -> Any:
+        """Render the form. Executes nothing, whatever the operation is.
+
+        This is what lets the route exist at all for a mutating or
+        operator-authority operation without reopening T-025: a GET here reads
+        the registry and renders, and there is no path from it to invoke().
+        """
+        try:
+            op = _operation(name)
+        except NotFound as exc:
+            return op_not_found(request, exc)
+        refused = op_page_refusal(request, op)
+        return refused if refused is not None else render_op(request, op)
+
+    @app.post("/ops/{name}", response_class=HTMLResponse)
+    async def op_submit(request: Request, name: str) -> Any:
+        """Run the operation from its form and render what came back.
+
+        Deliberately NOT post/redirect/get: the result of an operation is the
+        point of running it, and a redirect would discard it. The cost is that
+        a browser refresh re-submits — which is why the irreversible operations
+        keep their own PRG routes under /posts/{id}, and why this page tells the
+        operator so.
+        """
+        try:
+            op = _operation(name)
+        except NotFound as exc:
+            return op_not_found(request, exc)
+
+        refused = op_page_refusal(request, op)
+        if refused is not None:
+            return refused
+
+        form = await request.form()
+        # Query parameters are ignored entirely here, so a value typed into the
+        # URL cannot become an operation parameter on this route.
+        params: dict[str, Any] = {k: v for k, v in form.items()}
+
+        try:
+            outcome = guarded(request, op.name, params)
+        except ProMediaError as exc:
+            status = {
+                "FORBIDDEN": 403,
+                "APPROVAL_REQUIRED": 403,
+                "RIGHTS_BLOCKED": 403,
+                "NOT_FOUND": 404,
+                "VALIDATION": 400,
+            }
+            return render_op(
+                request, op, submitted=params, error=exc.to_dict(),
+                status_code=status.get(exc.code, 400),
+            )
+        if isinstance(outcome, JSONResponse):  # cross-origin refusal (T-025)
+            return outcome
+        return render_op(request, op, submitted=params, result=outcome)
+
     @app.get("/api/ops")
     def api_ops() -> Any:
         return JSONResponse(
@@ -352,20 +527,9 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
             )
 
         # N9: the operator token must not travel in the URL of a real operation.
-        if AUTH_QUERY_PARAM in request.query_params:
-            return JSONResponse(
-                {
-                    "ok": False,
-                    "error": "VALIDATION",
-                    "message": (
-                        f"the operator token must not be sent as '?{AUTH_QUERY_PARAM}=' here;"
-                        f" send the {AUTH_HEADER} header, or visit / once to obtain a"
-                        " session cookie"
-                    ),
-                    "detail": {"parameter": AUTH_QUERY_PARAM, "use_header": AUTH_HEADER},
-                },
-                status_code=400,
-            )
+        refusal = _token_in_query(request)
+        if refusal is not None:
+            return JSONResponse(refusal[0], status_code=refusal[1])
 
         params: dict[str, Any] = dict(request.query_params)
 
@@ -384,21 +548,9 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
 
         # T-024: a sensitive value must never arrive in a query string, where the
         # browser records it in history and leaks it via Referer.
-        in_query = set(request.query_params)
-        for p in op.params:
-            if p.sensitive and p.name in in_query:
-                return JSONResponse(
-                    {
-                        "ok": False,
-                        "error": "VALIDATION",
-                        "message": (
-                            f"'{p.name}' is sensitive and must not be sent as a query"
-                            " parameter; send it in a POST body"
-                        ),
-                        "detail": {"parameter": p.name},
-                    },
-                    status_code=400,
-                )
+        refusal = _sensitive_in_query(request, op)
+        if refusal is not None:
+            return JSONResponse(refusal[0], status_code=refusal[1])
 
         if request.method == "POST":
             denied = _reject_foreign_origin(request, cfg)

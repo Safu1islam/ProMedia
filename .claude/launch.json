@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "promedia-ui",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-c", "from promedia.web.app import run_server; run_server()"],
+      "port": 8765
+    }
+  ]
+}

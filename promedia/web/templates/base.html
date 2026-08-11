@@ -31,6 +31,16 @@
   button:focus-visible, a:focus-visible { outline:3px solid #4a90d9; outline-offset:2px; }
   button[disabled] { opacity:.5; cursor:not-allowed; }
   .muted { color:var(--muted); }
+  .field { margin:1.1rem 0; max-width:44rem; }
+  .field label { display:block; margin-bottom:.25rem; }
+  .field .req { color:var(--bad); font-size:.8rem; }
+  .field .hint { margin:.15rem 0 .4rem; font-size:.85rem; }
+  input[type=text], input[type=password], input[type=number], textarea {
+    font:inherit; width:100%; padding:.45rem .55rem; border:1px solid var(--line);
+    border-radius:6px; background:var(--bg); color:inherit; }
+  input[type=checkbox] { width:1.1rem; height:1.1rem; }
+  input:focus-visible, textarea:focus-visible { outline:3px solid #4a90d9; outline-offset:1px; }
+  pre { margin:0; white-space:pre-wrap; word-break:break-word; }
   dl.kv { display:grid; grid-template-columns:max-content 1fr; gap:.35rem 1rem; margin:0; }
   dl.kv dt { color:var(--muted); font-size:.85rem; }
   dl.kv dd { margin:0; }

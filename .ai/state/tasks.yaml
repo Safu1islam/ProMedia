@@ -768,8 +768,13 @@ follow_up_tasks:
         task did not claim.
     decisions: [DR-002, DR-003]
     independent_review:
-      reviewer: null
-      status: NOT_RUN
+      reviewer: "orchestrating session (did not implement this task)"
+      status: PASSED_WITH_ONE_FINDING
+      performed: 2026-08-12
+      note_from_implementer_retained: >
+        The implementing session recorded this as NOT_RUN and did not claim
+        review for itself, which was the correct call and is why the review
+        happened at all.
       note: >
         Constitution section 7 — the implementer may not be the sole reviewer.
         Not yet reviewed by another agent.
@@ -1122,6 +1127,283 @@ follow_up_tasks:
         evidence: "not implemented"
     required_dimensions: [correctness, data_integrity, security, testing]
 
+  - id: T-034
+    title: "The web surface advertises 29 capabilities and can operate 4 of them"
+    objective: >
+      Raised by the operator, 2026-08-11, looking at /ops: "this is just a
+      dashboard". Correct, and the gap is real. /ops renders the registry as a
+      TABLE OF TEXT — name, authority, summary, parameters — with no control on
+      it. The only operable HTML is /posts/{id}, which carries approve, reject,
+      publish and release-claim. The other 25 capabilities are reachable from a
+      browser only by hand-crafting a POST to /api/op/{name}.
+
+      This does NOT violate S4 or F-1: parity is asserted between the registry
+      and /api/op/{name}, and that route does reach all 29. The defect is
+      narrower and is a human-experience one — DR-004 makes the web surface the
+      operator's surface, and an operator cannot use 25 of their own
+      capabilities without a terminal.
+
+      Fix the projection, not the registry: generate a form per operation from
+      the same Operation/Param metadata /ops already renders as prose. No new
+      capability, no new authority path, no business logic in the adapter.
+    change_class: ui_change
+    mode: standard
+    status: complete
+    claimed_by: "claude-code-session-t034"
+    owned_paths:
+      - promedia/web/app.py
+      - promedia/web/templates/op.html
+      - promedia/web/templates/ops.html
+      - promedia/web/templates/base.html
+      - tests/test_ops_forms.py
+      - README.md
+    found_by: "operator, 2026-08-11"
+    depends_on: [T-005, T-031]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "Every registered operation has an HTML page carrying a form with one control per declared parameter, generated from the registry rather than hand-written per operation."
+        result: PASSED
+        evidence: >
+          GET /ops/{name} renders promedia/web/templates/op.html from the
+          Operation/Param metadata: textarea for type json, checkbox for bool,
+          number for int/float, password for sensitive, text otherwise.
+          tests/test_ops_forms.py::test_every_operation_has_a_form_page is
+          parametrised over load_operations() — 29 cases — and asserts a POST
+          form plus a control per declared parameter, so a new capability fails
+          here until it is reachable. ::test_capabilities_index_links_every_operation
+          pins the route off /ops. Executed, observed pass.
+      - id: AC-2
+        statement: "Submitting the form executes the operation through the same guarded path as /api/op/{name}: T-031 resolution, T-025 origin check, F-2 authority in the operation layer, C-19 entity locking."
+        result: PASSED
+        evidence: >
+          op_submit resolves through _operation() and calls guarded() -> run(),
+          the identical path api_op takes. Proven by side effect, not by page
+          text: ::test_submitting_a_form_performs_the_real_side_effect ingests a
+          file from the browser and asserts the asset through list-assets;
+          ::test_agent_authority_is_refused_by_the_operation_layer gets FORBIDDEN
+          and the declaration stays agent-authored;
+          ::test_rights_gate_still_refuses_through_the_form keeps a non-PERMITTED
+          post queued; ::test_entity_lock_is_taken_through_the_form_route gets
+          ENTITY_LOCKED naming agent-beta;
+          ::test_cross_origin_submission_is_refused gets 403 with no state change.
+          Executed, observed pass.
+      - id: AC-3
+        statement: "A GET of an operation form page executes nothing, whatever the operation's authority or mutates flag."
+        result: PASSED
+        evidence: >
+          ::test_get_of_a_mutating_form_changes_nothing, parametrised over the 12
+          mutating operations, GETs each with parameters that WOULD SUCCEED in
+          the query string and compares assets, posts, accounts, publications,
+          provenance, locks and the audit log before and after.
+          ::test_get_of_the_form_writes_no_audit_entry GETs all 29 and asserts an
+          empty audit log — invoke() audits every operator-authority and mutating
+          attempt, so emptiness proves the render never reached it.
+          Executed, observed pass. See verification: the FIRST version of this
+          test passed under sabotage and was rewritten.
+      - id: AC-4
+        statement: "A sensitive parameter renders as a masked control, is never echoed back into the re-rendered form, and is refused if it arrives in the query string (T-024)."
+        result: PASSED
+        evidence: >
+          ::test_sensitive_parameter_renders_masked drives off the registry, so a
+          second sensitive parameter is covered without editing the test.
+          ::test_a_submitted_secret_is_not_echoed_back_into_the_form asserts a
+          canary is absent from both the success and the error re-render —
+          render_op strips sensitive names from `submitted` rather than the
+          template omitting a value attribute, so both halves must fail before it
+          leaks. ::test_the_secret_reaches_the_store_and_nothing_else asserts the
+          canary is absent from the iterdump and the audit log.
+          ::test_sensitive_parameter_is_refused_in_the_query_string covers GET and
+          POST. Executed, observed pass. Also confirmed in a real browser: GET
+          /ops/connect-account?secret=canary rendered the VALIDATION page.
+      - id: AC-5
+        statement: "The operator token is refused in the query string on these routes, as it is on /api/op/{name} (N9)."
+        result: PASSED
+        evidence: >
+          ::test_operator_token_is_refused_in_the_query_string presents a VALID
+          token on both GET and POST and asserts 400 plus an empty audit log, so
+          the refusal is not merely a status code over a completed action. The
+          rule itself was extracted from api_op into _token_in_query() rather
+          than copied, so the two surfaces cannot drift. Executed, observed pass.
+    verification:
+      - command: "python -m pytest -p no:cacheprovider  (baseline, before any edit)"
+        status: PASSED
+        observed: "236 passed, 0 failures, 55.6s"
+      - command: "python -m pytest -p no:cacheprovider  (after the api_op refactor, before any new test)"
+        status: PASSED
+        observed: >
+          236 passed. Run deliberately at this point: _token_in_query and
+          _sensitive_in_query were extracted from api_op's body, and that
+          refactor had to be proven inert before new tests could mask a
+          regression in it.
+      - command: "python -m pytest -p no:cacheprovider"
+        status: PASSED
+        observed: "298 passed, 0 failures, 65.3s (236 before, +62 from tests/test_ops_forms.py)"
+      - command: "python -m pytest -p no:cacheprovider tests/test_parity.py tests/test_hardening.py"
+        status: PASSED
+        observed: >
+          96 passed — 62 parity + 34 hardening, both counts unchanged from before
+          this task. Neither file was claimed or edited, which is what makes the
+          numbers comparable: this task added routes, not operations.
+      - command: "python -m pytest -p no:cacheprovider tests/test_ops_forms.py  (SABOTAGE 1: op_form runs the operation from its query parameters)"
+        status: FAILED
+        observed: >
+          THE IMPORTANT ONE. First run: 1 failure only —
+          test_get_of_the_form_writes_no_audit_entry. The parametrised
+          state-comparison test PASSED under a GET that really did execute,
+          because it probed with the literal 'probe' for every id and validation
+          refused the call before any side effect. The test was asserting that
+          bad input does nothing, not that GET does nothing.
+          Rewritten to seed a real account/asset/post and probe with parameters
+          that would SUCCEED. Re-run under the same sabotage: 13 failures, one
+          per mutating operation plus the audit test, including
+          [publish-post] — i.e. the unfixed version would have let a prefetcher
+          or a pasted link publish. Sabotage reverted; promedia/web/app.py
+          SHA-256 verified back to 8F2D47115DA899C106D856B2BC2CA4A770DB85F3A2E1ECFEB3C29E06F2B3E6F9.
+      - command: "python -m pytest -p no:cacheprovider tests/test_ops_forms.py  (SABOTAGE 2: render_op repopulates sensitive fields, template gains value=)"
+        status: FAILED
+        observed: >
+          1 failure, test_a_submitted_secret_is_not_echoed_back_into_the_form.
+          Two files had to be sabotaged together (app.py and op.html) because the
+          leak needs both halves, which is the point of stripping in render_op
+          rather than relying on the template. Both reverted from a scratchpad
+          copy and SHA-256 verified (app.py 8F2D4711..., op.html
+          A3C67DA6F655D1376A0194874C116CA31DA42F23FA7EE595A3451B86D996C837).
+      - command: "python -m pytest -p no:cacheprovider tests/test_ops_forms.py  (SABOTAGE 3: op_submit calls run() instead of guarded(), op_page_refusal dropped)"
+        status: FAILED
+        observed: >
+          3 failures: cross-origin POST returned 200 instead of 403 (T-025 gone),
+          ?secret= returned 200 instead of 400 (T-024 gone), and ?token= was
+          accepted and used (404 from the operation itself, not 400 from the
+          guard — N9 gone). Sabotage reverted and hash-verified.
+      - command: "Real browser (Chromium), server on 127.0.0.1:8766"
+        status: PASSED
+        observed: >
+          NOT_RUN in every prior task on this surface — T-031's review recorded
+          'Real browser behaviour. Everything is TestClient'. Here: /ops/{name}
+          rendered for connect-account and storage-status; the agent-authority
+          notice appeared; submitting storage-status produced a genuine
+          cross-origin-checked POST with a real Origin header and rendered the
+          JSON result. GET /ops/connect-account?secret=canary rendered the
+          VALIDATION page. Confirms the T-025 origin baseline works against a
+          real browser and not only TestClient.
+          Only read-only operations were exercised — the instance was pointed at
+          the operator's REAL data directory, so no mutating operation was run.
+    fabrications_introduced: []
+    assumptions:
+      - >
+        The form POST renders its result directly rather than post/redirect/get.
+        A redirect would discard the operation's return value, which is the
+        reason to run it. The cost is that a browser refresh re-submits; the page
+        says so for mutating operations, and the irreversible ones keep their own
+        PRG routes under /posts/{id}.
+      - >
+        An empty text input submits "", which registry.validate() already treats
+        as absent (it tests `value is None or value == ""`). Optional parameters
+        left blank therefore fall to their declared default rather than becoming
+        empty strings. Pinned by test_optional_parameter_left_blank_uses_its_default
+        rather than left as a reading of the registry.
+      - >
+        An unchecked checkbox submits nothing at all, so a bool parameter left
+        alone is absent rather than false. No bool parameter is registered today,
+        so this is untested against a real operation — recorded rather than
+        implied.
+    open_items:
+      - >
+        DISCLOSURE, not enforcement: /ops/approve-post presents a bare post_id +
+        decision form, so an operator can approve without the rights verdict,
+        ruleset version and asset hash on screen — which is what T-005 AC-1
+        requires of the approval surface. The server still refuses a
+        non-PERMITTED asset (proven by test_rights_gate_still_refuses_through_the_form),
+        so F-3 holds; what is weaker is what the human SEES before deciding.
+        This is not new — /api/op/approve-post has always allowed exactly this —
+        but it now has an HTML front door. Mitigated for now by rendering
+        op.danger before the control and linking post-entity operator operations
+        to the dashboard's review screen. A stronger fix would redirect
+        approve-post and publish-post to /posts/{id} instead of offering a raw
+        form; that changes T-005's surface and belongs in its own task.
+      - >
+        No file upload. `ingest` takes source_path, a path on the server's
+        filesystem, so the browser form asks the operator to type a path rather
+        than choose a file. Correct for a single-operator local tool and it keeps
+        the two surfaces identical, but it is the least browser-like part of this.
+    decisions: [DR-002, DR-004]
+    required_dimensions: [correctness, human_experience, accessibility, security, error_handling, testing, documentation]
+    independent_review:
+      reviewer: "orchestrating session (did not implement this task)"
+      status: PASSED_WITH_ONE_FINDING
+      performed: 2026-08-12
+      note: >
+        Constitution section 7 — the implementer may not be the sole reviewer.
+        This task was implemented by the session that also proposed it, and has
+        NOT been reviewed by another agent. The three sabotage rounds are
+        self-verification, not review. Note that sabotage 1 caught a genuinely
+        weak test, which is the kind of thing an independent reviewer is meant to
+        find and which self-verification found only by accident of ordering.
+    reviewer_checks:
+      - "Suite re-run independently: 298 passed, exit 0 — PASSED"
+      - "Parity gate unchanged at 62 cases, so the new surface did not weaken it — PASSED"
+      - >
+        Rights gate holds through the new generic form: POST /ops/approve-post
+        on a BLOCKED asset returned 403 and the post stayed queued — PASSED
+      - >
+        Authority holds: unauthenticated POST /ops/publish-post returned 403 and
+        publications stayed 0 — PASSED
+      - >
+        C-19 locking holds through the form: a contended publish was refused and
+        the response names the lock owner — PASSED
+      - >
+        Sensitive parameters render masked: the secret field is
+        type="password" with autocomplete="new-password" — PASSED
+    reviewer_finding:
+      id: "raised as T-035"
+      severity: IMPORTANT
+      summary: >
+        approve-post and publish-post are now reachable from the generic
+        /ops/{name} form, which approves on a typed post_id. The decision
+        context appears in the RESPONSE, after the fact — not before the
+        control. /posts/{id} exists precisely because it shows account, verdict,
+        ruleset version, asset hash and provenance state BEFORE the button.
+      why_not_blocking: >
+        Every hard gate still holds, and the CLI has always been able to
+        approve-post --post-id X without context, so this is a new path to an
+        existing capability rather than a new capability. The implementer was
+        aware and documented it in README.md.
+      why_it_still_matters: >
+        F-2 makes the UI the authority surface. It is the authority surface
+        BECAUSE it shows the basis. A generic form that approves on a typed id
+        is the CLI with a browser skin, and it is the screen a tired operator
+        will reach for.
+
+
+  - id: T-035
+    title: "The generic /ops form can approve and publish without showing the decision context first"
+    objective: >
+      Raised by independent review of T-034, 2026-08-12. /ops/{name} renders a
+      submittable form for every operation including approve-post and
+      publish-post, so the operator can authorise on a typed post_id. The
+      verdict, ruleset version and asset hash appear in the response, after the
+      decision. /posts/{id} exists because those facts belong BEFORE the
+      control.
+      Every hard gate holds — rights 403, authority 403, locking, masked
+      secrets, all verified — so this is a human-experience defect, not a
+      security one. It is exactly the class of thing project.md flags as
+      requiring a human-experience reviewer rather than a code reviewer.
+      Options, for the operator to choose between: (a) the generic form refuses
+      approve-post/publish-post and links to /posts/{id}; (b) it renders the
+      decision context inline before the control; (c) accept it as-is and
+      record why.
+    change_class: ui_change
+    mode: standard
+    status: ready
+    owned_paths: [promedia/web/app.py, promedia/web/templates/op.html]
+    found_by: "independent review of T-034"
+    acceptance_criteria:
+      - id: AC-1
+        statement: "Approving or publishing from a browser is impossible without the decision context having been displayed first, or the decision to allow it is recorded with its reasoning."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [human_experience, correctness, documentation, testing]
+
 # ---------------------------------------------------------------------------
 # Independent review, round 3 — the T-023/T-024/T-025 hardening.
 # ---------------------------------------------------------------------------
@@ -1217,7 +1499,6 @@ review_round_3:
 # ---------------------------------------------------------------------------
 
 operator_decisions_2026_08_11:
-
   - id: OD-1
     question: "Keep docs/ANNOUNCEMENT.md public in the AEF repo?"
     answer: "Pull it. Private prep material."

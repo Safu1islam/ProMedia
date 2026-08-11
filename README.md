@@ -42,6 +42,14 @@ operator authority to the browser session.** Without it the UI runs with agent
 authority and refuses to approve or publish — localhost is not an authentication
 boundary, because an agent can issue local HTTP requests as easily as a browser.
 
+Three pages: `/` is the dashboard, `/ops` lists every capability, and
+`/ops/<operation>` runs one. That last page is generated from the registry, not
+written per operation — the form has one control per declared parameter, and
+submitting it goes through the same path `/api/op/<operation>` takes, so
+authority (F-2), entity locking (C-19) and the rights gate (F-3) are enforced
+identically whichever you use. `/posts/<id>` remains the place to approve and
+publish, because it is the only screen that shows the decision context first.
+
 ## The slice, end to end
 
 ```bash
@@ -89,7 +97,7 @@ tell "hand this to the human" from "this broke".
 | `promedia/core/rulesets/` | The rules, as data. Jurisdiction-neutral and conservative |
 | `promedia/core/storage.py` | Reservation ledger enforcing the 100 GB ceiling |
 | `promedia/core/provenance.py` | Records that outlive the media they describe |
-| `promedia/cli.py`, `promedia/web/` | Thin adapters. No business logic, ever |
+| `promedia/cli.py`, `promedia/web/` | Thin adapters. No business logic, ever. Both generate their surface from the registry |
 | `aef/` | **Read-only.** Version-pinned framework. Never edit |
 | `.ai/` | Project state: constitution, decisions, tasks, fabrications |
 
@@ -99,6 +107,6 @@ tell "hand this to the human" from "this broke".
 python -m pytest
 ```
 
-147 tests. `tests/test_review_regressions.py` and `tests/test_hardening.py` hold
+298 tests. `tests/test_review_regressions.py` and `tests/test_hardening.py` hold
 the ones written from an independent reviewer's reproduced attacks — those are
 the interesting ones, and each was confirmed to fail before its fix.
