@@ -41,6 +41,22 @@ history:
       for T-001..T-013 said the C-19 machinery "has never arbitrated a real
       conflict" — it now does, in the operation layer.
 
+  - path: "promedia/web/app.py, tests/test_hardening.py"
+    task_id: "T-031"
+    agent: "claude-code-session-t031"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-11T10:00:00+04:00"
+    released_at: "2026-08-11T11:30:00+04:00"
+    note: >
+      Closing the web adapter's guard/execution split. tests/test_hardening.py was
+      claimed because the new trapdoor tests belong with the T-024/T-025 guards
+      they protect; tests/test_parity.py was deliberately NOT claimed or edited so
+      its 62-case count stays directly comparable across this change.
+      promedia/web/app.py was reverted to HEAD ONCE during verification (git
+      checkout) to prove the five new tests fail without the fix, then restored
+      from a scratchpad copy and SHA-256 verified identical
+      (d4d1537c428d7928682b514db2f1e9964868152f0e2d125b7af274413f8c8e4e).
+
   - path: "tests/test_parity.py"
     task_id: "T-028"
     agent: "claude-code-session-38b1e8a2"

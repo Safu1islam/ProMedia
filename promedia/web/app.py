@@ -24,11 +24,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from ..config import Config, load as load_config
-from ..errors import ProMediaError
+from ..errors import NotFound, ProMediaError
 from ..core import db
 from ..core.credentials import CredentialStore
 from ..core.principal import agent as agent_principal, resolve
-from ..core.registry import Context, invoke, load_operations
+from ..core.registry import Context, Operation, invoke, load_operations
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -50,6 +50,64 @@ AUTH_HEADER = "X-ProMedia-Token"
 
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _operations() -> dict[str, Operation]:
+    """Everything this surface exposes: the registry, unfiltered, at request time.
+
+    The single accessor. Listing pages, ``/api/ops`` and ``_operation()`` all
+    come through here, so "what the UI advertises" and "what the UI will run"
+    cannot be different sets — which is the whole of T-031.
+    """
+    return load_operations()
+
+
+def _operation(name: str) -> Operation:
+    """Resolve an operation name, or refuse. The adapter's ONE authority (T-031).
+
+    The defect this closes: ``create_app`` captured ``operations =
+    load_operations()`` and consulted that local mapping for the T-025 GET guard
+    and the T-024 sensitive-parameter guard only, then called ``invoke()``, which
+    re-reads the registry itself. The local mapping was therefore not the
+    authority on what exists. An operation absent from it still executed — with
+    both guards silently skipped. The obvious way to take a capability off the
+    web surface removed its protections instead. Verified before the fix: a
+    hidden ``publish-post`` published a post over GET and returned 200.
+
+    Two things fix it, and the order matters:
+
+    * **The second source of truth is removed, not reconciled.** There is no
+      captured snapshot any more. Every path in this module — the dashboard, the
+      capability listing, ``/api/ops``, the guards and execution — reaches the
+      registry through this one function, at request time. Keeping two mappings
+      in sync with a check would be the same bug with a reconciliation step
+      bolted on.
+    * **What this function cannot resolve is refused, before anything runs.**
+      ``invoke()``'s contract is name-based, shared with the CLI (DR-002), so the
+      adapter cannot hand it an already-resolved operation and make the two paths
+      one call. It can, however, make its own resolution the gate: nothing
+      reaches ``invoke()`` that did not come out of here. That is not a sync
+      check between two mappings; it is what makes the single mapping
+      authoritative for this surface.
+
+    The failure direction is now the safe one: absent means REFUSED, never
+    executed unguarded.
+
+    This deliberately does NOT become a way to hide a capability. Nothing filters
+    — the function returns the registry itself, so ``/ops``, ``/api/ops`` and
+    ``/api/op/{name}`` enumerate exactly what the CLI does. F-1 and S4 make a
+    single-surface capability a build failure, and ``tests/test_parity.py``
+    invokes every operation on both surfaces to prove it.
+
+    NOT_FOUND rather than a validation error because an unregistered name is an
+    unknown resource, not a malformed parameter; it also carries exit code 1,
+    which is the signal ``tests/test_parity.py`` pins for this class.
+    """
+    registry = _operations()
+    op = registry.get(name)
+    if op is None:
+        raise NotFound(f"unknown operation '{name}'", operation=name, known=sorted(registry))
+    return op
 
 
 def _reject_foreign_origin(request: Request, cfg: Config) -> JSONResponse | None:
@@ -107,7 +165,6 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
     cfg = config or load_config()
     credential_store = store or CredentialStore()
     app = FastAPI(title="ProMedia", docs_url=None, redoc_url=None)
-    operations = load_operations()
 
     def context(request: Request) -> Context:
         """Resolve the caller's authority from a presented token.
@@ -142,9 +199,13 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
         return Context(config=cfg, conn=conn, principal=principal)
 
     def run(request: Request, name: str, params: dict[str, Any]) -> dict[str, Any]:
+        # Resolved here too, so the HTML routes below cannot execute something
+        # this adapter does not expose either. Costs one dict lookup; buys the
+        # property that every call out of this module went through _operation().
+        op = _operation(name)
         ctx = context(request)
         try:
-            return invoke(ctx, name, params)
+            return invoke(ctx, op.name, params)
         finally:
             ctx.conn.close()
 
@@ -183,7 +244,7 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
                 "posts": posts["posts"],
                 "assets": assets["assets"],
                 "accounts": accounts["accounts"],
-                "operations": sorted(operations.values(), key=lambda o: o.name),
+                "operations": sorted(_operations().values(), key=lambda o: o.name),
             },
         )
 
@@ -251,12 +312,14 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
         return TEMPLATES.TemplateResponse(
             request=request,
             name="ops.html",
-            context={"operations": sorted(operations.values(), key=lambda o: o.name)},
+            context={"operations": sorted(_operations().values(), key=lambda o: o.name)},
         )
 
     @app.get("/api/ops")
     def api_ops() -> Any:
-        return JSONResponse({"ok": True, "operations": [op.to_dict() for op in operations.values()]})
+        return JSONResponse(
+            {"ok": True, "operations": [op.to_dict() for op in _operations().values()]}
+        )
 
     @app.api_route("/api/op/{name}", methods=["GET", "POST"])
     async def api_op(request: Request, name: str) -> Any:
@@ -265,12 +328,19 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
         This is what makes dual-surface parity structural rather than a
         convention someone has to remember.
         """
-        op = operations.get(name)
+        # T-031: resolve first, and refuse what does not resolve. Everything
+        # below — both guards and the call itself — is about THIS operation, so
+        # an unresolvable name must stop here rather than fall through to
+        # invoke() with the guards skipped.
+        try:
+            op = _operation(name)
+        except NotFound as exc:
+            return JSONResponse(exc.to_dict(), status_code=404)
 
         # T-025: a state-changing operation must not be reachable by GET.
         # A GET is fetched by prefetchers, link previews and history restores,
         # and publish-post is irreversible. Refuse before anything else runs.
-        if op is not None and request.method == "GET" and (op.mutates or op.authority == "operator"):
+        if request.method == "GET" and (op.mutates or op.authority == "operator"):
             return JSONResponse(
                 {
                     "ok": False,
@@ -314,22 +384,21 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
 
         # T-024: a sensitive value must never arrive in a query string, where the
         # browser records it in history and leaks it via Referer.
-        if op is not None:
-            in_query = set(request.query_params)
-            for p in op.params:
-                if p.sensitive and p.name in in_query:
-                    return JSONResponse(
-                        {
-                            "ok": False,
-                            "error": "VALIDATION",
-                            "message": (
-                                f"'{p.name}' is sensitive and must not be sent as a query"
-                                " parameter; send it in a POST body"
-                            ),
-                            "detail": {"parameter": p.name},
-                        },
-                        status_code=400,
-                    )
+        in_query = set(request.query_params)
+        for p in op.params:
+            if p.sensitive and p.name in in_query:
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "error": "VALIDATION",
+                        "message": (
+                            f"'{p.name}' is sensitive and must not be sent as a query"
+                            " parameter; send it in a POST body"
+                        ),
+                        "detail": {"parameter": p.name},
+                    },
+                    status_code=400,
+                )
 
         if request.method == "POST":
             denied = _reject_foreign_origin(request, cfg)
@@ -337,7 +406,9 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
                 return denied
 
         try:
-            result = run(request, name, params)
+            # op.name, not the raw path segment: what executes is exactly what
+            # was guarded above.
+            result = run(request, op.name, params)
         except ProMediaError as exc:
             status = {"FORBIDDEN": 403, "APPROVAL_REQUIRED": 403, "NOT_FOUND": 404, "VALIDATION": 400}
             return JSONResponse(exc.to_dict(), status_code=status.get(exc.code, 400))

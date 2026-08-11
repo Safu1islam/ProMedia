@@ -82,6 +82,17 @@ notes:
     database, and no assertion is satisfied by invented data. A probe that
     returned a fabricated verdict instead of delegating WOULD have been one.
   - >
+    T-031's tests/test_hardening.py monkeypatches promedia.web.app.load_operations
+    in five tests, to REMOVE one entry from the real registry as seen by the web
+    adapter. Not registered as a fabrication: nothing fake is produced or
+    substituted — it is a subtraction from a real mapping, which is precisely the
+    manoeuvre the fix must make safe, and every assertion is that the request was
+    REFUSED and that no account, credential or publication came into existence. A
+    stub registry returning invented operations WOULD have been one. One of those
+    tests runs with publishing.allow_simulation true and, before the fix, reached
+    fabrication F-001 and produced a simulated publication over GET; after the
+    fix the same test asserts publications count == 0.
+  - >
     ffprobe is absent on this machine, so media duration and codec are recorded
     as null with probe_status 'unavailable'. That is NOT registered as a
     fabrication because nothing fake is produced: the absence is recorded

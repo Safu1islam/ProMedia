@@ -444,6 +444,151 @@ def test_inline_secret_flag_gives_actionable_error(tmp_path):
 # --- N14: assert the end-state guarantee, not only the entry points ----------
 
 
+# --- T-031: the adapter's operation mapping must be authoritative -------------
+#
+# create_app captured `operations = load_operations()` and consulted it for the
+# T-025 GET guard and the T-024 sensitive-parameter guard only, then called
+# invoke(), which re-reads the global registry itself. So the adapter's mapping
+# was not the authority on what exists: an operation absent from it STILL RAN,
+# with both guards skipped. The obvious way to take a capability off the web
+# surface disabled its protections instead — a trapdoor that fails in the least
+# safe direction.
+#
+# These tests hide one operation from the adapter and assert the request is
+# refused rather than executed. Each fails without the fix, and fails loudly:
+# before it, the publish test below publishes a post over GET.
+
+
+def _hide_from_the_web_adapter(monkeypatch, name: str) -> None:
+    """Make one operation absent from the adapter's view of the registry.
+
+    Patched at the adapter's own import site, so the operation remains in the
+    registry ``invoke()`` reads. That asymmetry is the point: if the adapter is
+    not the authority on what exists, the call reaches invoke() anyway.
+    """
+    import promedia.web.app as web_app
+
+    full = dict(load_operations())
+    monkeypatch.setattr(
+        web_app,
+        "load_operations",
+        lambda: {k: v for k, v in full.items() if k != name},
+    )
+
+
+def test_hidden_operation_is_refused_not_executed(env, monkeypatch):
+    """AC-1: absent from the adapter's mapping must mean refused, not unguarded."""
+    cfg, ctx, store = env
+    _hide_from_the_web_adapter(monkeypatch, "connect-account")
+    client = operator_client(cfg, store)
+
+    response = client.post(
+        "/api/op/connect-account",
+        data={"platform": "x", "handle": "me", "secret": "TRAPDOOR-SECRET"},
+    )
+
+    assert response.status_code == 404, response.text
+    assert response.json()["error"] == "NOT_FOUND"
+    assert invoke(ctx, "list-accounts", {})["count"] == 0, (
+        "an operation the adapter does not expose must not have executed"
+    )
+
+
+def test_hidden_state_changing_operation_cannot_be_published_over_get(env, media_file, monkeypatch):
+    """AC-1: hiding an operation must not take the T-025 GET guard with it.
+
+    publish-post is irreversible and mutating, so a GET of it is refused (405).
+    That refusal was reached only when the operation was present in the
+    adapter's mapping — hide it and the guard was skipped, so the same GET
+    published the post.
+    """
+    cfg, ctx, store = env
+    post_id = _ready_post(ctx, media_file)
+    invoke(ctx, "approve-post", {"post_id": post_id})
+
+    _hide_from_the_web_adapter(monkeypatch, "publish-post")
+    client = operator_client(cfg, store)
+
+    response = client.get(f"/api/op/publish-post?post_id={post_id}")
+
+    assert response.status_code in (404, 405), response.text
+    assert response.json()["error"] in ("NOT_FOUND", "METHOD_NOT_ALLOWED")
+    assert invoke(ctx, "publications", {})["count"] == 0, (
+        "a hidden publish-post must not be publishable over GET"
+    )
+    assert invoke(ctx, "post", {"post_id": post_id})["status"] == "approved"
+
+
+def test_hidden_operation_cannot_take_a_secret_from_the_query_string(env, monkeypatch):
+    """AC-1: nor may hiding an operation take the T-024 guard with it."""
+    cfg, ctx, store = env
+    _hide_from_the_web_adapter(monkeypatch, "connect-account")
+    client = operator_client(cfg, store)
+
+    response = client.post(
+        "/api/op/connect-account?secret=HIDDEN-QUERYSTRING-SECRET",
+        data={"platform": "x", "handle": "me"},
+    )
+
+    assert response.status_code in (400, 404), response.text
+    assert invoke(ctx, "list-accounts", {})["count"] == 0
+
+    from promedia.core.credentials import CredentialStore
+
+    assert not CredentialStore(store.path).has("x:me"), (
+        "a credential must not be stored from a query string by an unguarded path"
+    )
+
+
+def test_hidden_operation_is_refused_on_the_html_routes_too(env, media_file, monkeypatch):
+    """AC-1: the same authority applies to the operator's own publish button.
+
+    The HTML routes call run() with a fixed name, so they went straight to
+    invoke() as well. Resolution lives in run(), so they are refused here too
+    rather than each route remembering to check.
+    """
+    cfg, ctx, store = env
+    post_id = _ready_post(ctx, media_file)
+    invoke(ctx, "approve-post", {"post_id": post_id})
+
+    _hide_from_the_web_adapter(monkeypatch, "publish-post")
+    client = operator_client(cfg, store, follow_redirects=False)
+
+    response = client.post(f"/posts/{post_id}/publish")
+
+    assert response.status_code != 303, "a hidden operation must not have run"
+    assert "NOT_FOUND" in response.text
+    assert invoke(ctx, "publications", {})["count"] == 0
+
+
+def test_web_adapter_and_invoke_cannot_disagree_about_what_exists(env):
+    """AC-2: one mapping decides both what is listed and what may run.
+
+    The other direction matters as much (F-1, S4): this must not become a way to
+    hide a capability from the web surface. Every registered operation resolves
+    here, and tests/test_parity.py invokes all of them on both surfaces.
+    """
+    cfg, ctx, store = env
+    client = operator_client(cfg, store)
+    registry = load_operations()
+
+    listed = {op["name"] for op in client.get("/api/ops").json()["operations"]}
+    assert listed == set(registry), "the listing and the registry must not diverge"
+
+    unknown = client.post("/api/op/no-such-operation", data={})
+    assert unknown.status_code == 404
+    assert unknown.json()["error"] == "NOT_FOUND"
+
+    # GET rather than POST: a mutating operation answers the T-025 guard with
+    # 405, which is itself proof the adapter resolved it, and nothing changes
+    # state. A read operation either runs or fails validation.
+    for name in sorted(registry):
+        response = client.get(f"/api/op/{name}")
+        assert "unknown operation" not in response.text, (
+            f"'{name}' is registered but not resolvable at /api/op/{name}"
+        )
+
+
 def test_secret_never_reaches_database_or_audit_log(env):
     """N14: the earlier tests checked the doors, not the room."""
     cfg, ctx, store = env

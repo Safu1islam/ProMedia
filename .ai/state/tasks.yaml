@@ -937,19 +937,140 @@ follow_up_tasks:
       silently disables its protections instead.
     change_class: auth_or_permissions
     mode: critical
-    status: ready
-    owned_paths: [promedia/web/app.py]
+    status: complete
+    claimed_by: "claude-code-session-t031"
+    owned_paths: [promedia/web/app.py, tests/test_hardening.py]
     found_by: "implementer agent during T-028"
     acceptance_criteria:
       - id: AC-1
         statement: "An operation absent from the web adapter's operations mapping is refused with NOT_FOUND rather than executing without its guards."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          promedia/web/app.py: the captured `operations = load_operations()` snapshot is
+          gone. _operations() is the single accessor (registry, unfiltered, at request
+          time) and _operation(name) resolves through it or raises NotFound. api_op
+          resolves BEFORE the T-025 and T-024 guards and returns 404 NOT_FOUND if it
+          cannot; run() resolves too, so the HTML routes are covered by the same rule.
+          Four tests in tests/test_hardening.py hide one operation from the adapter and
+          assert refusal plus no state change; a fifth covers the HTML publish route. All
+          five FAIL against HEAD and PASS with the fix — see verification below.
       - id: AC-2
         statement: "A parity test proves the two paths cannot disagree about which operations exist."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          tests/test_hardening.py::test_web_adapter_and_invoke_cannot_disagree_about_what_exists
+          asserts /api/ops enumerates exactly load_operations(), that an unregistered name
+          is refused NOT_FOUND, and that every registered name resolves at
+          /api/op/{name} (GET, so mutating operations answer with the T-025 405 — itself
+          proof of resolution — and nothing changes state). The anti-hiding direction
+          (F-1, S4) is carried by tests/test_parity.py, which invokes all 29 operations on
+          both surfaces and still collects exactly 62 cases, all passing.
+    verification:
+      - command: "python -m pytest -p no:cacheprovider  (baseline, before any edit)"
+        status: PASSED
+        observed: "231 passed, 1 warning in 42.40s"
+      - command: "python -m pytest -p no:cacheprovider tests/test_hardening.py -k 'hidden or disagree'  (new tests against unfixed HEAD)"
+        status: FAILED
+        observed: >
+          4 failed, 29 deselected — the trapdoor, demonstrated. Hiding connect-account
+          returned HTTP 200 {"ok":true,"account_id":"acct_d1f6bd6e...","status":"connected"}
+          and the T-024 query-string guard was skipped too (?secret=... stored). Hiding
+          publish-post let GET /api/op/publish-post?post_id=... return HTTP 200 with
+          publication_id pub_c8bcd19e..., i.e. the T-025 no-state-change-over-GET guard
+          silently gone. An unregistered name returned 400, not 404.
+      - command: "python -m pytest -p no:cacheprovider tests/test_hardening.py -k 'hidden or disagree'  (same 5 tests, promedia/web/app.py restored to HEAD by git checkout)"
+        status: FAILED
+        observed: >
+          5 failed, 29 deselected, naming all five new tests. Re-run after the HTML-route
+          test was added, to prove that one fails without the fix as well. app.py restored
+          from a scratchpad copy and SHA-256 verified identical
+          (d4d1537c428d7928682b514db2f1e9964868152f0e2d125b7af274413f8c8e4e).
+      - command: "python -m pytest -p no:cacheprovider tests/test_hardening.py -k 'hidden or disagree'  (with the fix)"
+        status: PASSED
+        observed: "4 passed, 29 deselected in 1.46s; and 1 passed for the HTML-route test added after"
+      - command: "python -m pytest -p no:cacheprovider tests/test_parity.py"
+        status: PASSED
+        observed: "62 passed, 1 warning in 9.70s — unchanged count; the file was deliberately not edited so the number stays comparable"
+      - command: "python -m pytest -p no:cacheprovider tests/test_hardening.py"
+        status: PASSED
+        observed: "34 passed, 1 warning in 9.16s (29 before this task, +5 new)"
+      - command: "python -m pytest -p no:cacheprovider"
+        status: PASSED
+        observed: "236 passed, 1 warning in 44.19s (231 before, +5 new; nothing weakened, skipped or deleted)"
+    fabrications_introduced: []
+    assumptions:
+      - >
+        invoke()'s contract stays name-based, shared with the CLI (DR-002), so the adapter
+        cannot hand it an already-resolved Operation and collapse guard path and execution
+        path into literally one lookup. Instead the adapter refuses anything its own
+        resolution does not yield, so nothing reaches invoke() that did not come out of
+        _operation(). Changing invoke()'s signature would touch the CLI and the registry
+        contract, which is outside this task.
+      - >
+        An unregistered name on the web surface now answers NOT_FOUND/404 where it
+        previously answered VALIDATION/400 (invoke() still raises ValidationError at the
+        registry layer for direct callers, and tests/test_registry.py still pins that). The
+        CLI equivalent is an argparse usage error, exit 2, which is not a JSON payload and
+        is not compared by the parity gate. Deliberate: an unknown operation is an unknown
+        resource, and NOT_FOUND's exit code 1 matches the class in test_parity's
+        SURFACE_SIGNALS.
+      - >
+        The HTML routes render a 400 error page for a hidden operation rather than 404,
+        because their status maps predate this and list only FORBIDDEN/RIGHTS_BLOCKED/
+        APPROVAL_REQUIRED. The call is refused and nothing executes, which is what T-031
+        requires; refining those status maps would be scope growth. Noted, not fixed.
+      - >
+        The NOT_FOUND detail carries the sorted list of known operations, matching what
+        invoke() already does. Not an information leak on this surface: /api/ops and /ops
+        publish the same list to any caller by design (F-1, S4).
     required_dimensions: [correctness, security, error_handling, testing]
+    independent_review:
+      reviewer: "orchestrating session (did not implement this task)"
+      checks:
+        - "Scope: only promedia/web/app.py and tests/test_hardening.py, plus state. cli.py, core/registry.py, core/db.py, core/posts.py and tests/test_parity.py byte-identical to HEAD — PASSED"
+        - "The captured snapshot is genuinely gone: no `operations = load_operations()` remains in create_app, and every path (dashboard, /ops, /api/ops, guards, run(), api_op) reaches the registry through the single accessor — PASSED"
+        - "No sabotage leftovers anywhere in the package — PASSED"
+        - "Full suite re-run independently: 236 passed — PASSED"
+        - >
+          MY OWN exploit, aimed deliberately at the part NOT in the brief — the
+          HTML route. Hid publish-post from the registry and POSTed
+          /posts/{id}/publish: refused, publications table still 0. The
+          implementer found this widening itself (run() is shared with the HTML
+          routes and previously reached invoke() with no resolution at all) and
+          fixed it rather than staying inside the brief — PASSED
+        - "Same exploit on /api/op over GET: 404 NOT_FOUND, nothing published — PASSED"
+        - >
+          Opposite failure direction checked, which is the one a careless fix
+          would introduce: nothing is hidden. Registry 29, /api/ops 29, none
+          missing — PASSED
+        - >
+          The fix did not swallow the guard it sits in front of: a PRESENT
+          operation over GET still returns 405 METHOD_NOT_ALLOWED, not 404 — PASSED
+        - "Real publish still works end to end through the UI: 303, publication recorded, simulated=True — PASSED"
+        - "No acceptance criterion anywhere in tasks.yaml is PASSED without evidence; locks released — PASSED"
+      accepted_design: >
+        Removing the second source of truth rather than reconciling two was the
+        right call and is what the brief asked for. The residual explanation is
+        honest: invoke() stays name-based because that contract is shared with
+        the CLI (DR-002), so the adapter cannot hand it a resolved Operation and
+        literally collapse the two lookups. Making its own resolution the gate —
+        nothing reaches invoke() that did not come out of _operation() — is the
+        available equivalent.
+      accepted_behaviour_change: >
+        An unregistered name at /api/op/{name} now answers 404 NOT_FOUND where it
+        answered 400 VALIDATION. No test asserted the old status, invoke() still
+        raises ValidationError for direct callers, and NOT_FOUND carries exit
+        code 1, which is the pair tests/test_parity.py already pins. Accepted.
+      not_fixed:
+        - >
+          The HTML routes render a 400 error page for a hidden operation rather
+          than 404, because their status maps predate this task. Confirmed by my
+          own run (status=400). The call IS refused and nothing executes, which
+          is what AC-1 requires, so this is cosmetic. Left as the implementer
+          recorded it rather than growing scope — it belongs with T-032, which is
+          already about surface status accuracy.
+      not_verified:
+        - "Real browser behaviour. Everything is TestClient, unchanged from before this task — NOT_RUN."
 
   - id: T-032
     title: "ENTITY_LOCKED has no distinct surface signal, so an agent cannot tell 'locked' from 'failed'"
