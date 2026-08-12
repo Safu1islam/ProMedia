@@ -418,8 +418,12 @@ def test_entity_locked_is_refused_identically_on_both_surfaces(surfaces):
     assert web["detail"]["owner"] == cli_payload["detail"]["owner"] == "agent-gamma"
     assert web["detail"]["owner_task"] == cli_payload["detail"]["owner_task"]
     assert web["detail"]["expires_at"] == cli_payload["detail"]["expires_at"]
-    # Surface-native signals: ENTITY_LOCKED has no dedicated mapping in either
-    # adapter, so both report it as their generic domain refusal. Pinned here
-    # so a change on one surface alone shows up as a parity failure.
-    assert response.status_code == 400
-    assert exit_code == 1
+    # Surface-native signals (T-032, DR-012). Contention now has a signal of
+    # its own on both surfaces: 409 Conflict on the web, exit code 4 on the CLI.
+    # It is deliberately NOT the generic domain refusal (400 / exit 1), because
+    # nothing is wrong with the request — another writer holds the entity, and
+    # protocol 05 tells a blocked agent to take a different ready task, which it
+    # cannot do while contention is indistinguishable from a business-rule
+    # failure. Pinned here so a change on one surface alone is a parity failure.
+    assert response.status_code == 409
+    assert exit_code == 4

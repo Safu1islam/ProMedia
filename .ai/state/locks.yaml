@@ -3,8 +3,49 @@
 
 locks: []
 
-
 history:
+  - path: "aef/**, .ai/state/plan.yaml, .ai/state/decisions/DR-013.yaml, .claude/launch.json"
+    task_id: "AEF-0.2.0"
+    agent: "claude-code-session-aef020"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-12T10:15:00+04:00"
+    released_at: "2026-08-13T00:00:00+04:00"
+    note: >
+      Framework authorship, not project work: AEF 0.1.0 -> 0.2.0 (plan tree,
+      A-to-Z planning protocol, agent assignment, dashboard tooling), plus the
+      retrofit of ProMedia's flat task list into .ai/state/plan.yaml. See DR-013.
+
+      DISCLOSED FAILURE: this claim was recorded AFTER the work, not before, and
+      the omission had a consequence — the session wrote
+      .ai/state/decisions/DR-012.yaml while T-032 held a lock on exactly that
+      path. Constitution rule 3, broken by the session extending the
+      constitution. T-032's record survived intact and this one was renumbered
+      to DR-013; no content was lost, but that was luck rather than process.
+
+      promedia/** and tests/** are deliberately NOT claimed and were not
+      touched. T-032 was live in those paths at the time.
+
+      Released after DR-013's outstanding NOT_RUN check ("ProMedia's own test
+      suite unaffected") was re-run now that T-032 has landed: 322 passed,
+      matching T-032's own claimed count. See DR-013 verification.
+
+  - path: "promedia/errors.py, promedia/web/app.py, tests/test_parity.py, tests/test_locking.py, tests/test_surface_signals.py, .ai/state/decisions/DR-012.yaml, README.md"
+    task_id: "T-032"
+    agent: "claude-code-session-t032"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-12T09:30:00+04:00"
+    released_at: "2026-08-13T00:00:00+04:00"
+    note: >
+      Giving ENTITY_LOCKED a distinct surface signal (409 / exit 4) and fixing
+      the HTML routes' NOT_FOUND status. promedia/cli.py is in the task's
+      owned_paths but is NOT claimed: the CLI derives its exit code from
+      ProMediaError.exit_code, so the whole CLI change is one attribute in
+      errors.py and cli.py needs no edit. tests/test_locking.py is claimed
+      because it currently PINS the old 400/exit-1 pair, which this change
+      invalidates by design.
+
+      Independently reviewed (tasks.yaml T-032, status complete, PASSED_WITH
+      evidence). Released after a fresh full-suite run confirmed 322 passed.
   - path: "promedia/**, tests/**"
     task_id: "T-001..T-013, T-020, T-021"
     agent: "claude-code-session-559528a7"

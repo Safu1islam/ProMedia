@@ -57,11 +57,18 @@ SENTINEL = "parity-probe-no-such-entity"
 # test_cli.py documents exit 3 as "hand this to the operator", and the UI maps
 # the same class to 403. A class that reports differently on the two surfaces is
 # a parity defect even when the code string matches.
+#
+# ENTITY_LOCKED (T-032) is here for completeness of the contract, NOT because
+# these probes reach it: all 62 run against sentinel identifiers in a store with
+# no locks outstanding, so none of them can produce contention. This entry keeps
+# the gate honest if a future probe ever does; the coverage that actually proves
+# 409/4 is tests/test_surface_signals.py, which contends a real entity.
 SURFACE_SIGNALS = {
     "OK": (200, 0),
     "VALIDATION": (400, 2),
     "FORBIDDEN": (403, 3),
     "NOT_FOUND": (404, 1),
+    "ENTITY_LOCKED": (409, 4),
 }
 
 

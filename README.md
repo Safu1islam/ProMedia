@@ -70,8 +70,27 @@ via `--<name>-stdin` or `--<name>-file`. The same declaration makes the web
 surface refuse them in a query string.
 
 An agent can run the un-annotated steps. The three marked `operator` require the
-token, and return exit code 3 without it — distinct from failure, so an agent can
-tell "hand this to the human" from "this broke".
+token.
+
+Exit codes say what to do next, which is the only thing an agent can act on
+without parsing prose (`DR-012`):
+
+- **0** it worked.
+- **1** it failed — a business rule refused, or the thing was not there. Running
+  the same call again will fail the same way.
+- **2** the call itself was wrong: a bad or missing parameter, or a precondition
+  that cannot be undone (the media is gone, the config is broken).
+- **3** operator authority is required. Hand it to the human; no agent can
+  resolve this one.
+- **4** another writer holds this entity right now (`C-19`). Nothing is wrong
+  with the request — take a different ready task and come back to it.
+
+The web surface carries the same distinctions, mapped per error class rather
+than per exit code: **409** for a locked entity, 403 where operator authority is
+required, 404 for something absent, 400 for the rest. (The two are not derivable
+from each other — a missing thing is exit 1 but HTTP 404, while a plain refusal
+is exit 1 and HTTP 400.) `tests/test_parity.py` fails the build if the two
+surfaces ever disagree.
 
 ## Things that are deliberate and look like bugs
 
@@ -107,6 +126,6 @@ tell "hand this to the human" from "this broke".
 python -m pytest
 ```
 
-298 tests. `tests/test_review_regressions.py` and `tests/test_hardening.py` hold
+322 tests. `tests/test_review_regressions.py` and `tests/test_hardening.py` hold
 the ones written from an independent reviewer's reproduced attacks — those are
 the interesting ones, and each was confirmed to fail before its fix.

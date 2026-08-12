@@ -53,6 +53,45 @@ AUTH_HEADER = "X-ProMedia-Token"
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
+# --- the one error -> HTTP status map for this surface (T-032) ---------------
+#
+# There used to be four of these, inline, one per route that caught a
+# ProMediaError: three conditional expressions under /posts/{id}/..., one dict
+# in op_submit, one dict in api_op. They had already drifted apart in two
+# directions at once — api_op had no RIGHTS_BLOCKED entry, so the rights gate
+# reported 403 on the HTML approve route and 400 on the JSON API for the same
+# refusal, and the HTML routes had no NOT_FOUND entry, so an unknown post id
+# came back 400 where /api/op and /ops answered 404.
+#
+# That is the failure mode a duplicated table always has: the status an error
+# carries became a property of the route that happened to raise it rather than
+# of the error itself. One map means a new error class cannot acquire a
+# different meaning per route, and adding one is a single edit here.
+ERROR_STATUS: dict[str, int] = {
+    "FORBIDDEN": 403,
+    "APPROVAL_REQUIRED": 403,
+    "RIGHTS_BLOCKED": 403,
+    "NOT_FOUND": 404,
+    "VALIDATION": 400,
+    # C-19 contention. 409 Conflict, not 400: nothing is wrong with the
+    # request, so the caller should retry later rather than change it. The CLI
+    # carries the same signal as exit code 4 (DR-012), and
+    # tests/test_parity.py pins the pair.
+    "ENTITY_LOCKED": 409,
+}
+
+# Anything unmapped. 400 rather than 500 because every ProMediaError is a
+# refusal the server chose deliberately, not a fault — including the base class
+# invoke() wraps an unexpected exception in, which is reported rather than
+# swallowed (protocol 05: fail loudly).
+DEFAULT_ERROR_STATUS = 400
+
+
+def status_for(error: ProMediaError) -> int:
+    """The HTTP status this error class carries, wherever it was raised."""
+    return ERROR_STATUS.get(error.code, DEFAULT_ERROR_STATUS)
+
+
 def _operations() -> dict[str, Operation]:
     """Everything this surface exposes: the registry, unfiltered, at request time.
 
@@ -132,7 +171,9 @@ def _token_in_query(request: Request) -> tuple[dict[str, Any], int] | None:
             ),
             "detail": {"parameter": AUTH_QUERY_PARAM, "use_header": AUTH_HEADER},
         },
-        400,
+        # Through the same table, so a hand-built refusal payload and a raised
+        # ValidationError cannot report the same class with different statuses.
+        ERROR_STATUS["VALIDATION"],
     )
 
 
@@ -158,7 +199,7 @@ def _sensitive_in_query(request: Request, op: Operation) -> tuple[dict[str, Any]
                     ),
                     "detail": {"parameter": p.name},
                 },
-                400,
+                ERROR_STATUS["VALIDATION"],
             )
     return None
 
@@ -210,7 +251,7 @@ def _reject_foreign_origin(request: Request, cfg: Config) -> JSONResponse | None
                 "expected_port": configured_port,
             },
         },
-        status_code=403,
+        status_code=ERROR_STATUS["FORBIDDEN"],
     )
 
 
@@ -314,8 +355,18 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
         try:
             detail = run(request, "post", {"post_id": post_id})
         except ProMediaError as exc:
+            # Was an unconditional 404 for every ProMediaError. The only error
+            # this read can realistically raise is NOT_FOUND (the 'post'
+            # operation is agent-authority and read-only, so it takes no lock
+            # and cannot be refused on authority), which the map answers 404
+            # exactly as before. Anything else — an unexpected failure wrapped
+            # by invoke() — now reports its own status instead of claiming the
+            # post does not exist.
             return TEMPLATES.TemplateResponse(
-                request=request, name="error.html", context={"error": exc.to_dict()}, status_code=404
+                request=request,
+                name="error.html",
+                context={"error": exc.to_dict()},
+                status_code=status_for(exc),
             )
         return TEMPLATES.TemplateResponse(
             request=request, name="post.html", context={"d": detail}
@@ -332,7 +383,7 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
                 request=request,
                 name="error.html",
                 context={"error": exc.to_dict()},
-                status_code=403 if exc.code in {"FORBIDDEN", "RIGHTS_BLOCKED"} else 400,
+                status_code=status_for(exc),
             )
         return RedirectResponse(url=f"/posts/{post_id}", status_code=303)
 
@@ -347,7 +398,7 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
                 request=request,
                 name="error.html",
                 context={"error": exc.to_dict()},
-                status_code=403 if exc.code in {"FORBIDDEN", "APPROVAL_REQUIRED", "RIGHTS_BLOCKED"} else 400,
+                status_code=status_for(exc),
             )
         return RedirectResponse(url=f"/posts/{post_id}", status_code=303)
 
@@ -362,7 +413,7 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
                 request=request,
                 name="error.html",
                 context={"error": exc.to_dict()},
-                status_code=403 if exc.code == "FORBIDDEN" else 400,
+                status_code=status_for(exc),
             )
         return RedirectResponse(url=f"/posts/{post_id}", status_code=303)
 
@@ -430,7 +481,10 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
 
     def op_not_found(request: Request, exc: NotFound) -> Any:
         return TEMPLATES.TemplateResponse(
-            request=request, name="error.html", context={"error": exc.to_dict()}, status_code=404
+            request=request,
+            name="error.html",
+            context={"error": exc.to_dict()},
+            status_code=status_for(exc),
         )
 
     @app.get("/ops/{name}", response_class=HTMLResponse)
@@ -475,16 +529,9 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
         try:
             outcome = guarded(request, op.name, params)
         except ProMediaError as exc:
-            status = {
-                "FORBIDDEN": 403,
-                "APPROVAL_REQUIRED": 403,
-                "RIGHTS_BLOCKED": 403,
-                "NOT_FOUND": 404,
-                "VALIDATION": 400,
-            }
             return render_op(
                 request, op, submitted=params, error=exc.to_dict(),
-                status_code=status.get(exc.code, 400),
+                status_code=status_for(exc),
             )
         if isinstance(outcome, JSONResponse):  # cross-origin refusal (T-025)
             return outcome
@@ -510,7 +557,7 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
         try:
             op = _operation(name)
         except NotFound as exc:
-            return JSONResponse(exc.to_dict(), status_code=404)
+            return JSONResponse(exc.to_dict(), status_code=status_for(exc))
 
         # T-025: a state-changing operation must not be reachable by GET.
         # A GET is fetched by prefetchers, link previews and history restores,
@@ -562,8 +609,7 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
             # was guarded above.
             result = run(request, op.name, params)
         except ProMediaError as exc:
-            status = {"FORBIDDEN": 403, "APPROVAL_REQUIRED": 403, "NOT_FOUND": 404, "VALIDATION": 400}
-            return JSONResponse(exc.to_dict(), status_code=status.get(exc.code, 400))
+            return JSONResponse(exc.to_dict(), status_code=status_for(exc))
         return JSONResponse(result)
 
     return app

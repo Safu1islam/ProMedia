@@ -50,9 +50,25 @@ class Forbidden(ProMediaError):
 
 
 class EntityLocked(ProMediaError):
-    """Another agent owns this entity (C-19). Take a different ready task."""
+    """Another writer owns this entity right now (C-19).
+
+    Exit code 4 is distinct so an agent can tell "this call was wrong" from
+    "this call was early". Exit 1 means the operation failed and repeating it
+    unchanged will fail again; 4 means nothing is wrong with the request at all
+    — another writer holds the entity for the moment, so the correct response is
+    the one protocol 05 already prescribes: take a different ready task and come
+    back to this one later.
+
+    Without a code of its own, contention was indistinguishable from a
+    business-rule refusal on both surfaces, and an agent could not act on that
+    instruction (DR-012 supersedes DR-005's exit-code table).
+
+    4 is used because it is the first free value: 0 success, 1 failed,
+    2 usage/validation, 3 FORBIDDEN, and 130 is KeyboardInterrupt.
+    """
 
     code = "ENTITY_LOCKED"
+    exit_code = 4
 
 
 class CeilingExceeded(ProMediaError):

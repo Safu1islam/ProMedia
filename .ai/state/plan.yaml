@@ -1,0 +1,290 @@
+# .ai/state/plan.yaml — the project plan as a tree.
+# Schema: aef/schemas/plan.schema.yaml   Protocol: aef/protocols/04-planning.md
+#
+# WHAT THIS FILE IS, AND IS NOT
+#
+# It is the STRUCTURE of the work: how the project decomposes, what weight each
+# piece carries, and which agent owns it.
+#
+# It is NOT the status of the work. Every leaf below links a task in
+# tasks.yaml, and that task's `status:` is the only place its state is written.
+# Group status and every percentage on the dashboard are DERIVED on read and
+# stored nowhere. Two places to answer "is this done?" is two answers, and the
+# second one is wrong — this project has already paid for that lesson twice
+# (T-031, and the tautological parity gate in T-028).
+#
+# `aef/tools/aef.py validate` fails if any task is missing from this tree or
+# claimed by two nodes, so the denominator of the percentage cannot silently
+# drift from the real task set.
+#
+# Retrofitted 2026-08-12 from the flat task list produced by protocol 04 at
+# plan_version 1. The tasks themselves were not renumbered, rewritten or
+# rescoped — only arranged. See DR-012.
+
+meta:
+  plan_version: 2
+  schema_version: 1
+  project: ProMedia
+  aef_version: 0.2.0
+  planned_at: 2026-08-08
+  restructured_at: 2026-08-12
+  planned_by_role: analyst
+  mode: critical
+
+  # Protocol 04 requires the planner to state coverage explicitly rather than
+  # let an unstated gap read as "nothing to do".
+  completeness:
+    declared_complete: true
+    basis: >
+      Retrofit of an executed plan, not a forecast. Every task that exists in
+      tasks.yaml appears here exactly once, which the validator enforces. The
+      v1 slice boundary recorded in tasks.yaml meta.slice still holds: work
+      outside it is present as deferred tasks (T-018, T-019, T-022), not
+      omitted.
+    known_omissions:
+      - >
+        Off-site backup of the permanent set is in scope per project.md 5.4 but
+        has no task. Recorded here rather than left to be noticed later; it
+        needs a planning pass, not a guess at its shape.
+      - >
+        The independent human-experience review (OD-5) is an operator action,
+        not an agent task, so it is deliberately not a node. It remains open in
+        the completion report.
+
+tree:
+  id: PRJ
+  type: project
+  title: ProMedia
+  children:
+
+    - id: S-FOUNDATION
+      type: section
+      title: Foundation
+      note: The substrate every other section is a thin caller of.
+      children:
+        - id: N-001
+          agent: architect
+          type: task
+          title: Project scaffold, configuration, error taxonomy
+          task: T-001
+        - id: N-002
+          agent: backend-agent
+          type: task
+          title: SQLite layer — schema, pragmas, migrations, entity locks
+          task: T-002
+        - id: N-003
+          agent: security-agent
+          type: task
+          title: Operation registry and authority model
+          task: T-003
+
+    - id: S-SURFACES
+      type: section
+      title: Surfaces
+      note: >
+        F-1: every capability callable identically from both surfaces, with one
+        implementation. S4 makes a single-surface capability a build failure.
+      children:
+        - id: F-ADAPTERS
+          type: feature
+          title: Adapters
+          children:
+            - id: N-004
+              agent: backend-agent
+              type: task
+              title: CLI adapter — repo-callable surface
+              task: T-004
+            - id: N-005
+              agent: frontend-agent
+              type: task
+              title: Web adapter — operator UI and approval surface
+              task: T-005
+            - id: N-034
+              agent: frontend-agent
+              type: task
+              title: Make every capability operable from the browser
+              task: T-034
+        - id: F-PARITY
+          type: feature
+          title: Parity enforcement
+          children:
+            - id: N-020
+              agent: architect
+              type: task
+              title: Dual-surface parity gate
+              task: T-020
+            - id: N-028
+              agent: architect
+              type: task
+              title: Replace the tautological web half of the gate
+              task: T-028
+
+    - id: S-RIGHTS
+      type: section
+      title: Rights and provenance
+      note: >
+        F-3, F-5, C-20. The hard gate: deterministic verdicts over recorded
+        evidence, and records that outlive the media they describe (F-8).
+      children:
+        - id: N-008
+          agent: backend-agent
+          type: task
+          title: Asset ingest with rights declaration
+          task: T-008
+        - id: N-009
+          agent: architect
+          type: task
+          title: Rights determination engine
+          task: T-009
+        - id: N-010
+          agent: backend-agent
+          type: task
+          title: Provenance record sealing
+          task: T-010
+        - id: N-029
+          agent: backend-agent
+          type: task
+          title: Refuse re-ingest of a retention-deleted asset
+          task: T-029
+
+    - id: S-STORAGE
+      type: section
+      title: Storage and retention
+      note: F-7 — the 100 GB ceiling is enforced by reservation, before bytes land.
+      children:
+        - id: N-007
+          agent: backend-agent
+          type: task
+          title: Storage ledger and admission control
+          task: T-007
+
+    - id: S-PUBLISHING
+      type: section
+      title: Publishing
+      children:
+        - id: F-ACCOUNTS
+          type: feature
+          title: Accounts and credentials
+          children:
+            - id: N-006
+              agent: security-agent
+              type: task
+              title: Credential store and account connection
+              task: T-006
+            - id: N-023
+              agent: backend-agent
+              type: task
+              title: Preserve account identity across reconnect
+              task: T-023
+        - id: F-PIPELINE
+          type: feature
+          title: Queue, approval and publish
+          children:
+            - id: N-012
+              agent: architect
+              type: task
+              title: Publisher interface and stub implementation
+              task: T-012
+            - id: N-011
+              agent: security-agent
+              type: task
+              title: Post queue, approval gate, publish, publication record
+              task: T-011
+            - id: N-019
+              agent: backend-agent
+              type: task
+              title: Live X and LinkedIn publisher adapters
+              task: T-019
+              note: >
+                Blocked on operator credentials. Replaces fabrication F-001;
+                until it lands, publishing is simulated and off by default.
+
+    - id: S-SECURITY
+      type: section
+      title: Security hardening
+      note: >
+        Every node here except the audit log came out of adversarial review
+        rather than the original plan. Recorded as its own section because that
+        is what the work actually was.
+      children:
+        - id: N-013
+          agent: security-agent
+          type: task
+          title: Audit log
+          task: T-013
+        - id: N-024
+          agent: security-agent
+          type: task
+          title: Keep secrets out of argv and query strings
+          task: T-024
+        - id: N-025
+          agent: security-agent
+          type: task
+          title: Origin and method guards on mutating operations
+          task: T-025
+        - id: N-026
+          agent: backend-agent
+          type: task
+          title: Namespace and relocate the operator token
+          task: T-026
+        - id: N-027
+          agent: backend-agent
+          type: task
+          title: Enforce C-19 entity ownership in the operation layer
+          task: T-027
+        - id: N-031
+          agent: security-agent
+          type: task
+          title: One authority on which operations exist
+          task: T-031
+        - id: N-033
+          agent: security-agent
+          type: task
+          title: Lock the account reconnect path
+          task: T-033
+        - id: N-022
+          agent: security-agent
+          type: task
+          title: DPAPI credential backend
+          task: T-022
+
+    - id: S-SCHEDULING
+      type: section
+      title: Scheduling
+      note: DR-009. Missed windows escalate; they never post late (C-27).
+      children:
+        - id: N-018
+          agent: infra-agent
+          type: task
+          title: Publish tick and Windows Task Scheduler registration
+          task: T-018
+
+    - id: S-EXPERIENCE
+      type: section
+      title: Operator experience
+      children:
+        - id: N-035
+          agent: frontend-agent
+          type: task
+          title: Show decision context before approve and publish controls
+          task: T-035
+
+    - id: S-QUALITY
+      type: section
+      title: Quality and follow-ups
+      children:
+        - id: N-021
+          agent: backend-agent
+          type: task
+          title: CLI cold-start measurement against C-4
+          task: T-021
+        - id: N-032
+          agent: backend-agent
+          type: task
+          title: Give ENTITY_LOCKED a distinct signal on both surfaces
+          task: T-032
+        - id: N-030
+          agent: implementer
+          type: task
+          title: Minor correctness and hygiene items
+          task: T-030

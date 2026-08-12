@@ -37,6 +37,23 @@ Every task, without exception:
 The user never has to ask for documentation, tests, or review. They are not extras.
 They are what "done" means. Detail: `aef/core/OPERATING-LOOP.md`.
 
+## 4a. Plan the whole project before executing any of it
+
+A new project is planned end to end — every part that must be built, configured,
+integrated, tested, operated and validated — **before the first line of code**.
+The plan lives in `.ai/state/plan.yaml` as a tree, and its leaves are the tasks in
+`.ai/state/tasks.yaml`.
+
+The plan is not shortened because the work is long. A hundred meaningful tasks is
+a hundred nodes. Gaps you cannot yet fill are named in `completeness.known_omissions`,
+not left silent — an unnamed gap reads as "nothing to do".
+
+Structure lives in the plan; status lives in the tasks; **every rollup and every
+percentage is derived on read and stored nowhere.** Two places to answer "is this
+done?" is two answers, and the second one is wrong.
+
+Protocol: `protocols/04-planning.md`. Gate: `python aef/tools/aef.py validate`.
+
 ## 5. Autonomy budget
 
 Inspect first. Infer second. Implement third. Ask last.
@@ -122,17 +139,19 @@ Read only what the current stage requires.
 
 | When | Read |
 |---|---|
-| Starting any session | `.ai/project.md`, `.ai/state/tasks.yaml` |
+| Starting any session | `.ai/project.md`, `.ai/state/plan.yaml`, `.ai/state/tasks.yaml` |
 | Full loop detail | `core/OPERATING-LOOP.md` |
 | Limits and escalation | `core/NON-NEGOTIABLES.md` |
 | New project, no code | `protocols/01-intake.md` |
 | Choosing any technology | `protocols/02-technology-selection.md` |
 | Existing repo, first run | `protocols/03-discovery.md` |
-| Goals into tasks | `protocols/04-planning.md` |
+| Goals into a plan and tasks | `protocols/04-planning.md` |
 | Doing the work | `protocols/05-execution.md` |
 | Checking the work | `protocols/06-verification.md` |
 | Declaring done | `protocols/07-completion.md` |
+| Deciding who does a task | `protocols/09-agent-assignment.md` |
 | Acting in a role | `roles/<role-id>.md` |
 | Writing a state file | `schemas/<name>.schema.yaml` |
+| Seeing project state | `python aef/tools/aef.py progress` — or `dashboard` for the tree |
 
 If unsure which stage you are in, read `core/OPERATING-LOOP.md`.

@@ -1158,18 +1158,55 @@ follow_up_tasks:
       meanings), so it needs a decision record, not just an edit.
     change_class: api_change
     mode: standard
-    status: ready
+    status: complete
     owned_paths: [promedia/errors.py, promedia/web/app.py, promedia/cli.py, .ai/state/decisions]
     found_by: "implementer agent during T-027"
+    implemented_by: "claude-code-session-t032 (implementer agent)"
+    reviewed_by: "orchestrating session (Constitution 7 — not the implementing role)"
     acceptance_criteria:
       - id: AC-1
         statement: "A contended entity returns 409 on the web surface and a dedicated exit code on the CLI, and the two remain in agreement under the parity gate."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          EntityLocked.exit_code = 4; ERROR_STATUS['ENTITY_LOCKED'] = 409 in a
+          single module-level map now consulted by all five web routes (four
+          duplicated inline maps removed). Suite 309 -> 322 passed, exit 0, run
+          by the reviewer independently of the implementer's report.
+          tests/test_surface_signals.py asserts 409 and exit 4 together in ONE
+          test against a genuinely contended entity, so the pair cannot drift.
+          Reviewer sabotage, at injection points the implementer did not use:
+          (1) exit_code 4 -> 3, the plausible "reuse FORBIDDEN" edit, caught by 4
+          assertions across 3 files; (2) the /ops/{name} route de-unified back to
+          its own local dict, caught by exactly the one test covering that route.
+          Both failures came from assertions, not collection errors. Both files
+          restored and verified byte-identical by SHA-256
+          (errors.py f4f4b1b5e33a2465124467e3bbd31c25cbee6c7bc9ec6032fa41bab9c292a602,
+          app.py 83843d935e5e65e14367c131482852dab54acf18ca1a0ec01d5e3ae6386c4e43).
+          Opposite direction also proven: VALIDATION still 400, FORBIDDEN still
+          403, and a present unlocked post still approves (303) and renders (200).
+          tests/test_parity.py's _assert_agreed was NOT touched; SURFACE_SIGNALS
+          gained (409, 4). Noted honestly in that file: its 62 probes use
+          sentinel ids against an unlocked store and therefore cannot produce
+          ENTITY_LOCKED, so the map entry alone proves nothing — the proof is in
+          tests/test_surface_signals.py.
       - id: AC-2
         statement: "The exit-code change is recorded in a decision record that supersedes the relevant part of DR-005."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          .ai/state/decisions/DR-012.yaml, with supersedes: DR-005 and a
+          supersedes_scope limiting the replacement to DR-005's
+          contract.exit_codes table only. DR-005 is NOT edited (verified: no diff)
+          — protocol 02 requires superseding to create a new record referencing
+          the old one. Four alternatives ruled out with reasons, including reusing
+          exit 3 and sysexits 75 EX_TEMPFAIL. Reviewer corrected one factual error
+          in the record before acceptance: web_equivalents was keyed by exit code
+          and claimed 1 -> 400, which is wrong for NOT_FOUND (exit 1, HTTP 404).
+          Re-keyed per error class and every row verified by executing
+          status_for() against each class. README carried the same error and was
+          corrected with it.
+    residual_findings:
+      - "RIGHTS_BLOCKED on /api/op/{name} changed 400 -> 403 as a side effect of unifying the maps. Deliberate and disclosed, not discovered: the HTML approve route already answered 403, so the surfaces disagreed about the hard rights gate (F-3). No test pinned the old 400; one pins the new 403."
+      - "NOT_FOUND on the HTML /posts/{id}/... routes changed 400 -> 404. This also closes the residual item T-031 recorded as 'noted, not fixed'."
     required_dimensions: [correctness, api_contract_stability, backward_compatibility, error_handling, documentation, testing]
 
   - id: T-033

@@ -1,0 +1,222 @@
+id: DR-012
+date: 2026-08-12
+decision_area: agent_facing_failure_signals_for_entity_contention
+status: accepted
+supersedes: DR-005
+supersedes_scope: >
+  ONLY DR-005's `contract.exit_codes` table, which is replaced in full by the
+  table restated below. Nothing else in DR-005 is affected: the argparse CLI
+  generated from the registry, JSON in / JSON out, the `ops` discovery index,
+  the invocation shape and the authority_enforcement clause all stand exactly as
+  recorded there, and the reasoning that chose argparse over Typer/Click is
+  untouched. DR-005 itself is NOT edited — a decision record is permanent, and
+  superseding creates a new record referencing the old one
+  (`aef/protocols/02-technology-selection.md`).
+prompted_by: "T-032 — C-19 contention had no distinct surface signal"
+
+binding_constraints:
+  - "C-19: exactly one writer per entity, enforced, with a visible lock owner"
+  - "C-18: up to 4 concurrent agent sessions, so contention is a normal event, not an anomaly"
+  - "F-1: one implementation, two surfaces; a signal on one must have an equal on the other"
+  - "protocols/05-execution.md: a blocked agent takes a different ready task"
+  - "DR-005: consumers are AI agents; the contract optimises for machine legibility"
+
+problem_statement: >
+  `EntityLocked` (C-19) carried no signal of its own on either surface. The web
+  adapter had no entry for `ENTITY_LOCKED` in any of its status maps, so it fell
+  through to HTTP 400; the CLI returned the base `exit_code = 1`. Both surfaces
+  agreed, so F-1 held and `tests/test_parity.py` passed — the defect was not a
+  parity defect.
+
+  It was an actionability defect. `aef/protocols/05-execution.md` instructs a
+  blocked agent to take a different ready task and return later. An agent cannot
+  follow that instruction while contention is indistinguishable from a
+  business-rule failure: exit 1 means "this failed and repeating it unchanged
+  will fail again", which is the opposite of what contention means. With C-18
+  allowing four concurrent sessions, the one condition the protocol has a
+  prescribed response for was the one condition the contract could not express.
+
+  The available machine-readable evidence — the `error` field in the JSON body —
+  requires the agent to parse a payload it may not have (a CLI caller branching
+  on `$?` in a shell step has an exit status and nothing else), and puts the
+  decision after the failure rather than in the process boundary DR-005 chose
+  precisely because it gives agents "an unambiguous success/failure signal".
+
+ruled_out:
+  - option: "Keep exit 1 and let agents branch on the machine-readable `error` field"
+    reason: >
+      It is the status quo, and it is what does not work. The exit code IS the
+      contract at the process boundary DR-005 selected; requiring a JSON parse
+      to recover a distinction the boundary already had room for makes the
+      cheapest, most reliable signal the least informative one. It also fails
+      the plain shell case (`promedia determine-rights ... || <handler>`), where
+      stdout may be consumed or discarded and only `$?` survives. And it leaves
+      the web surface answering 400 Bad Request for a request that is not bad,
+      which misleads every HTTP-native client and cache.
+  - option: "Reuse exit 3 (FORBIDDEN), since both mean 'you may not proceed'"
+    reason: >
+      They mean opposite things about what to do next, which is the only thing
+      an exit code is for. 3 means the agent lacks authority and must hand the
+      work to the operator (F-2) — a human action, and permanent until taken.
+      Contention needs no human at all and clears by itself when the other
+      session finishes. Merging them would send an agent to the operator with a
+      request the operator cannot act on, and would train the operator to ignore
+      the escalation that F-2 depends on being meaningful.
+  - option: "Use a high sysexits-style code such as 75 (EX_TEMPFAIL)"
+    reason: >
+      EX_TEMPFAIL is the closest existing convention in meaning, but this
+      contract does not use sysexits anywhere: 1/2/3 are already a small
+      hand-assigned set, and introducing one value from a different numbering
+      scheme means the table is now two schemes with no rule saying which
+      applies where. It also buys nothing — no consumer of this CLI reads
+      sysexits, the consumers are agents reading `ops --json` and this record —
+      while spending the readability that made the small set legible. Rejected
+      on coherence, not on the semantics, which are right.
+  - option: "Retry inside the CLI adapter until the lock clears"
+    reason: >
+      Puts a scheduling policy in an adapter, which DR-005 and F-1 both forbid
+      (logic in an adapter is logic the other surface does not have), and blocks
+      a session against a lock whose TTL is 90 minutes. The framework's answer to
+      contention is to do other useful work, not to wait.
+
+candidates:
+  - option: "Dedicated exit code 4 on the CLI, HTTP 409 Conflict on the web"
+    advantages:
+      - "4 is the first free value: 0 success, 1 failed, 2 usage, 3 FORBIDDEN, 130 KeyboardInterrupt"
+      - "409 Conflict is the precise HTTP meaning — the request is valid, the target's current state refuses it — so HTTP-native clients, proxies and caches read it correctly without ProMedia-specific knowledge"
+      - "Both signals are available at the boundary, before any payload is parsed"
+      - "Additive: no existing code changes meaning, so 0/1/2/3 keep their contracts"
+      - "The pair is pinned in tests/test_parity.py's SURFACE_SIGNALS, so the two surfaces cannot drift apart silently"
+    disadvantages:
+      - "A caller that today treats `exit == 1` as 'contention included' stops seeing contention there (see consequences)"
+      - "One more number for an agent to know; the mitigation is that `ops --json` and this record are the documentation, and neither is optional reading"
+  - option: "Exit 1 plus HTTP 409 (web-only distinction)"
+    advantages: ["Half the change; no CLI contract movement at all"]
+    disadvantages:
+      - "Directly violates F-1: the capability would report a distinction on one surface and not the other, which S4 calls a build failure. It also fails the parity gate, correctly."
+  - option: "A `retryable: true` flag in the error payload, no code change"
+    advantages:
+      - "Generalises beyond ENTITY_LOCKED — a future transient class inherits it for free"
+      - "No exit-code table change, so nothing to supersede"
+    disadvantages:
+      - "Same defect as ruled_out #1 at the process boundary: invisible to `$?` and to a client reading only the status line"
+      - "A boolean loses the reason, so an agent still cannot tell contention from any other transient condition; recorded as a possible ADDITION later, not a replacement"
+
+decision: >
+  `EntityLocked` gets `exit_code = 4`, and the web adapter maps `ENTITY_LOCKED`
+  to HTTP 409 through a single module-level `ERROR_STATUS` table consulted by
+  every route (the four previously duplicated inline maps are removed). The pair
+  (409, 4) is pinned in tests/test_parity.py's SURFACE_SIGNALS and asserted
+  against a genuinely contended entity in tests/test_surface_signals.py.
+
+contract:
+  invocation: "python -m promedia <operation> [--param value ...] [--json]"
+  discovery: "python -m promedia ops --json  ->  full operation index with parameters and authority"
+  exit_codes:
+    0: "success"
+    1: "operation failed (business rule, not-found, sealed-record integrity). Retrying the identical call will not help"
+    2: "usage error, invalid parameter, or an operation whose precondition cannot be undone (VALIDATION, MEDIA_UNAVAILABLE, CONFIGURATION)"
+    3: "FORBIDDEN / APPROVAL_REQUIRED — operator authority is required (F-2). Hand it to the operator; an agent cannot resolve it"
+    4: "ENTITY_LOCKED — another writer holds this entity right now (C-19). Nothing is wrong with the request. Take a different ready task and retry later (protocols/05)"
+  reserved:
+    130: "KeyboardInterrupt. Not assignable"
+  web_equivalents:
+    # Per ERROR CLASS, not per exit code. The two signals are parallel
+    # projections of the class, and neither is derivable from the other:
+    # NOT_FOUND and the base failure share exit 1 but answer 404 and 400, so a
+    # table keyed on the exit code would be wrong for exactly one row and
+    # invisibly so. tests/test_parity.py's SURFACE_SIGNALS is keyed the same way.
+    OK: {http: 200, exit: 0}
+    NOT_FOUND: {http: 404, exit: 1}
+    ERROR: {http: 400, exit: 1}          # base class; unmapped codes default here
+    VALIDATION: {http: 400, exit: 2}
+    MEDIA_UNAVAILABLE: {http: 400, exit: 2}
+    CONFIGURATION: {http: 400, exit: 2}
+    FORBIDDEN: {http: 403, exit: 3}
+    APPROVAL_REQUIRED: {http: 403, exit: 3}
+    RIGHTS_BLOCKED: {http: 403, exit: 1}  # 403 since T-032; exit code unchanged
+    ENTITY_LOCKED: {http: 409, exit: 4}
+  authority_enforcement: >
+    Unchanged from DR-005. Enforced in the operation layer, not the adapters, so
+    it holds identically on both surfaces. Locking (C-19) is enforced in the same
+    place and for the same reason, which is why both surfaces can be given one
+    signal for it without either adapter deciding anything.
+
+rationale: >
+  An exit code exists to tell the caller what to do next, and the four values
+  now partition exactly that: 1 "this is wrong, change it or report it",
+  2 "the input or precondition is wrong", 3 "you are not allowed — a human must
+  act", 4 "you are early — do something else and come back". Contention was the
+  only one of these the contract could not express, and it is the one the
+  framework has a written response for.
+
+  409 is chosen on meaning rather than convenience: RFC 9110's Conflict is a
+  request that is valid but incompatible with the target resource's current
+  state, and that is a literal description of C-19 contention. 400 asserted the
+  opposite — that the request was malformed — about a request that was perfect.
+
+  Collapsing the adapter's four duplicated status maps into one is part of the
+  decision, not incidental tidying. Duplicated tables are how a class acquires
+  a different meaning per route: the maps had already drifted, with
+  RIGHTS_BLOCKED at 403 on /posts/{id}/approve and 400 on /api/op/{name}, and
+  NOT_FOUND at 404 on /api/op and /ops but 400 on the /posts routes. Adding
+  ENTITY_LOCKED to four maps would have re-created the same trap for the fifth
+  class.
+
+consequences:
+  - >
+    BACKWARD COMPATIBILITY. Any existing caller branching on `exit == 1` to mean
+    "including contention" now sees 4 for the contention case and will fall
+    through its failure branch. This is the intended break — the whole defect is
+    that the two were indistinguishable — but it is a contract change, so it is
+    recorded here rather than left to be discovered. Nothing inside this
+    repository branched on exit 1 for contention; the only pin was
+    tests/test_locking.py's, which is invalidated deliberately and updated. No
+    external consumer exists yet (v1 slice, single operator), which is why the
+    change is cheap now and would not be later.
+  - >
+    HTTP clients treating any 4xx as "bad request, do not retry" will now
+    correctly retry contention if they honour 409 semantics, and will otherwise
+    behave exactly as they did with 400. No client is made worse.
+  - >
+    RIGHTS_BLOCKED on /api/op/{name} changes from 400 to 403, as a side effect
+    of unifying the maps. It is a widening of the fix beyond ENTITY_LOCKED and
+    is recorded as such: the HTML approve route already answered 403, so the two
+    surfaces disagreed about the class of answer the hard rights gate (F-3)
+    gives. The direction chosen is the one the HTML route already had right. No
+    test pinned the old 400.
+  - >
+    NOT_FOUND on the HTML /posts/{id}/... routes changes from 400 to 404,
+    matching /api/op/{name} and /ops/{name}. This closes the residual item
+    recorded under T-031 ("the HTML routes render a 400 error page ... Noted,
+    not fixed").
+  - >
+    post_detail no longer renders 404 for every ProMediaError; it consults the
+    same map. NOT_FOUND — the only error that read can realistically raise, the
+    'post' operation being agent-authority and read-only — still answers 404, so
+    the observable behaviour is unchanged. An unexpected failure now reports its
+    own status instead of claiming the post does not exist.
+
+fluency_bias_check: >
+  Two habits were available here and both are wrong. The first is reaching for
+  HTTP 423 Locked because the error class is named EntityLocked — 423 is WebDAV,
+  scoped to a lock protocol this system does not implement, and would invite a
+  client to look for a Lock-Token header that does not exist. Name-matching is
+  not semantics. The second, stronger habit is treating exit codes as a
+  formality where 0/1 is "enough" and any further distinction is over-design.
+  That instinct is calibrated for a human at a terminal who can read the error
+  text. The consumers here are agents (DR-005's opening constraint), for which
+  the exit code is frequently the entire observable result, and the cost of an
+  undistinguished code is not a worse message — it is an agent that cannot
+  follow the framework's own instruction.
+
+reversibility: cheap
+reversibility_note: >
+  Two lines: `exit_code` on the class and one entry in ERROR_STATUS. Reverting
+  would restore the defect, so the bar for doing so is a record superseding this
+  one — but nothing structural depends on the value, and no data is migrated.
+
+revisit_if:
+  - "A second transient, self-clearing condition appears (rate limiting, a queued ingest awaiting storage). Then 4 should probably generalise to 'transient — retry later', with the specific class in the payload, rather than each condition taking its own number"
+  - "An external consumer of the CLI exists whose exit-code table cannot be updated in step"
+  - "The exit-code set grows past about six values, at which point the small hand-assigned scheme has stopped being more legible than sysexits and the choice above should be re-argued"
