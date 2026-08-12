@@ -907,13 +907,80 @@ follow_up_tasks:
     objective: "The duplicate branch matches on content_hash without consulting state, so re-ingest of a deleted asset returns duplicate:true while the row stays deleted with no object_path and the reservation is released."
     change_class: data_model_change
     mode: standard
-    status: ready
+    status: complete
     owned_paths: [promedia/core/ingest.py]
     acceptance_criteria:
       - id: AC-1
         statement: "Re-ingesting a file whose asset row is state='deleted' restores the object and re-commits storage, or fails loudly."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: "tests/test_phantom_asset.py — 11 tests, executed, observed pass"
+
+    decision_restore_vs_refuse:
+      chosen: REFUSE
+      implementer_reasoning: >
+        Deduplication is a claim that the media is already here. For a deleted
+        asset that claim is false, and a false ok=True is worse than a refusal.
+      reviewer_note: >
+        I had argued restoration was the more useful option when briefing this.
+        The implementer chose refusal and made the better case: restoring would
+        silently resurrect media the retention policy deliberately destroyed,
+        and F-7's whole point is that deletion is final. Accepted.
+    phantom_verdict_line:
+      still_works: >
+        Reading rights facts. `rights` reports verdict=PERMITTED alongside
+        media_state=deleted and publishable=False; determine-rights still
+        evaluates; the sealed provenance record is readable and its integrity
+        verifies. F-8 and C-20 require exactly this — the verdict is a fact
+        about a rights position, and it does not stop being true because the
+        bytes were deleted.
+      now_refuses: >
+        Acting on absent media. approve-post and publish-post raise
+        MediaUnavailable, and decision_context reports approvable=false and
+        media_available=false so no surface offers a control the server will
+        refuse.
+      why_a_new_error: >
+        MediaUnavailable is deliberately neither RightsBlocked nor NotFound.
+        Reporting an availability problem as a rights problem would send the
+        operator to repair a rights record that has nothing wrong with it.
+    independent_review:
+      reviewer: "orchestrating session (did not implement this task)"
+      status: PASSED
+      circumstances: >
+        The implementing agent died TWICE on API errors — once after writing
+        "Now the tests", and again mid-revert, immediately after "Both defects
+        reproduced end to end. Now restoring the fix." The second death left the
+        working tree with the fix backed out of five files while errors.py still
+        carried the new exception class: a tree that imported but did not
+        behave. Recovered from the agent's own scratchpad backups, verified as
+        the fixed versions by diffing each against HEAD before restoring.
+      checks:
+        - "All six restored files verified to differ from HEAD and to carry the fix markers before use — PASSED"
+        - "Full suite: 309 passed (298 before, +11 from tests/test_phantom_asset.py) — PASSED"
+        - >
+          Falsification, first attempt: reverted all six files including
+          errors.py. pytest reported a COLLECTION ERROR, not failures — the test
+          module could not import MediaUnavailable. That proves the tests
+          reference a new name, NOT that they detect the defect. Rejected as
+          insufficient.
+        - >
+          Falsification, second attempt: reverted the five behaviour files and
+          KEPT errors.py, so the import succeeds and any failure must come from
+          an assertion. Result: 9 failed, 2 passed, on assertions including
+          "DID NOT RAISE MediaUnavailable" and "KeyError: 'media_available'" —
+          PASSED. Restored from an in-memory snapshot in a finally block and
+          verified byte-identical by SHA-256.
+        - >
+          F-7 ledger across the lifecycle: 0 -> 15000 -> 0 after retention -> 0
+          after the refused re-ingest. The refusal leaks no quota — PASSED
+        - >
+          F-8 preserved: with the media gone, the sealed provenance record is
+          still readable, its integrity still verifies, and the verdict inside
+          it is still PERMITTED — PASSED
+      not_verified:
+        - >
+          The implementer's own account of its reasoning. It died before
+          reporting, so the design rationale recorded above is read from the
+          code comments and docstrings it left, not from its explanation.
 
   - id: T-030
     title: "Minor correctness and hygiene items (O2, O3, O4, N6)"

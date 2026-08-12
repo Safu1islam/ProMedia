@@ -83,6 +83,28 @@ class IntegrityError(ProMediaError):
     code = "INTEGRITY"
 
 
+class MediaUnavailable(ProMediaError):
+    """The media this operation needs is not on disk (F-7 retention, T-029).
+
+    Deliberately NOT ``RightsBlocked``. Whether an asset may be used is a rights
+    question and survives deletion by design (F-8); whether its bytes still
+    exist is an availability question and does not. Reporting the second as the
+    first would tell the operator that a clean asset was blocked on rights, and
+    would invite "fixing" the rights record for a problem the rights record does
+    not have.
+
+    Deliberately not ``NotFound`` either: the asset, its declaration, its
+    verdict and its sealed provenance are all present and readable. It is the
+    media alone that is gone, and that distinction is the point.
+
+    Exit code 2, like ValidationError: retrying the identical call cannot
+    succeed. Retention deletion is final (project.md section 10).
+    """
+
+    code = "MEDIA_UNAVAILABLE"
+    exit_code = 2
+
+
 class LedgerDrift(ProMediaError):
     """The storage ledger and reality disagree (F-7).
 

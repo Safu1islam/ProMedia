@@ -118,9 +118,17 @@ def rights(ctx: Context, asset_id: str) -> dict[str, Any]:
     """
     stored = rights_layer.latest_verdict(ctx, asset_id)
     effective = rights_layer.effective_verdict(ctx, asset_id)
+    # T-029, same reasoning as finding N4 above: a reporting operation that
+    # disagrees with the gate is worse than none. The gate now also requires the
+    # media to exist, so this must say whether it does — without touching the
+    # verdict, which is a rights fact and survives deletion by design (F-8).
+    state = rights_layer.media_state(ctx, asset_id)
     return {
         "ok": True,
         "asset_id": asset_id,
+        "media_state": state,
+        "media_available": state == "stored",
+        "publishable": bool(effective["verdict"] == "PERMITTED" and state == "stored"),
         "verdict": effective["verdict"],
         "matched_rule": effective.get("matched_rule"),
         "ruleset_version": effective.get("ruleset_version"),
@@ -130,5 +138,11 @@ def rights(ctx: Context, asset_id: str) -> dict[str, Any]:
         "reason": effective.get("reason"),
         "stored_verdict": stored["verdict"] if stored else None,
         "differs_from_stored": bool(stored and stored["verdict"] != effective["verdict"]),
-        "note": None if stored else "no verdict yet; run determine-rights",
+        "note": (
+            "no verdict yet; run determine-rights"
+            if not stored
+            else f"media is '{state}'; the verdict stands (F-8) but publication is refused"
+            if state != "stored"
+            else None
+        ),
     }

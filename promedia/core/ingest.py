@@ -14,6 +14,10 @@ how a system ends up over its ceiling with no way to discover it.
 Ingest without a rights declaration is refused. Rights metadata is not an
 optional enrichment: an asset with no declaration cannot be evaluated, and an
 asset that cannot be evaluated must never become publishable.
+
+Re-ingesting content whose asset was deleted by retention is refused too, and
+loudly (T-029). Deduplication is a claim that the media is already here; for a
+deleted asset that claim is false, and a false ok=True is worse than a refusal.
 """
 
 from __future__ import annotations
@@ -25,7 +29,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from ..errors import CeilingExceeded, NotFound, ValidationError
+from ..errors import CeilingExceeded, MediaUnavailable, NotFound, ValidationError
 from . import storage
 from .db import iso, new_id, transaction
 from .registry import Context
@@ -136,12 +140,57 @@ def ingest_file(
         existing = ctx.conn.execute(
             "SELECT id, state FROM assets WHERE content_hash = ?", (content_hash,)
         ).fetchone()
+        if existing is not None and existing["state"] == "deleted":
+            # Finding I9 (T-029). The duplicate branch used to match on
+            # content_hash alone and return ok=True, duplicate=True — for a row
+            # whose state is 'deleted', whose object_path is NULL, with nothing
+            # on disk and zero bytes accounted. The reassuring note was the
+            # defect: a caller that trusts ok=True believes the media is back.
+            #
+            # REFUSE rather than restore, for three reasons:
+            #
+            #  1. project.md section 10 makes retention deletion FINAL and says
+            #     so on arithmetic, not on preference: "Deletion is final and
+            #     forecloses repurposing." Section 4 then lists publishing a
+            #     deleted asset to a new platform as permanently OUT OF SCOPE,
+            #     "foreclosed by the storage ceiling, not an oversight". A quiet
+            #     restore inside ingest reopens exactly that, by a side door.
+            #  2. The verdict and the sealed provenance survive deletion by
+            #     design (F-8). So a restored asset is immediately publishable
+            #     again — no attestation, no re-determination. Ingest is AGENT
+            #     authority (F-2). Restoring here would let an agent resurrect
+            #     an asset that policy deleted and hand it back publish-ready,
+            #     which is an authority escalation dressed as deduplication.
+            #  3. Restore is a different capability from ingest, with different
+            #     authority and its own decisions to make (does the old verdict
+            #     still govern? does the grace period restart?). Inventing it
+            #     inside this branch would be scope creep on a bug fix.
+            #
+            # The reservation taken above is released by the except handler
+            # below, so a refusal leaks no quota.
+            raise MediaUnavailable(
+                "these bytes were ingested before and the media was deleted by"
+                " retention; re-ingest does not restore it",
+                asset_id=existing["id"],
+                content_hash=content_hash,
+                asset_state="deleted",
+                why=(
+                    "retention deletion is final and forecloses repurposing"
+                    " (project.md section 10); the rights and provenance records"
+                    " for this content remain readable (F-8)"
+                ),
+                remedy=(
+                    "read the sealed provenance for this content hash; there is"
+                    " deliberately no operation that restores deleted media"
+                ),
+            )
         if existing is not None:
             storage.release(ctx.conn, reservation_id)
             return {
                 "ok": True,
                 "asset_id": existing["id"],
                 "content_hash": content_hash,
+                "asset_state": existing["state"],
                 "duplicate": True,
                 "note": "identical bytes already ingested; storage not double-counted",
             }

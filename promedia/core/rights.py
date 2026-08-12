@@ -19,9 +19,56 @@ from . import rights_engine as engine
 from .db import canonical_json, iso, new_id
 from .registry import Context
 
-__all__ = ["add_evidence", "ancestry", "attest", "determine", "effective_verdict", "latest_verdict"]
+__all__ = [
+    "add_evidence",
+    "ancestry",
+    "attest",
+    "determine",
+    "effective_verdict",
+    "latest_verdict",
+    "media_available",
+    "media_state",
+]
 
 _WORST_FIRST = {engine.BLOCKED: 0, engine.ESCALATE: 1, engine.PERMITTED: 2}
+
+
+def media_state(ctx: Context, asset_id: str) -> str:
+    """Whether the BYTES still exist: 'stored' | 'deleted' | 'absent'.
+
+    Finding I9b (T-029). ``determine-rights`` returns PERMITTED for an asset
+    retention has deleted, and that is correct — this function exists precisely
+    so it can stay correct.
+
+    The line drawn here, and why it is drawn there:
+
+      * A verdict is a statement about RIGHTS. F-8 says a rights record must
+        remain valid and readable after the media it describes is deleted, so a
+        verdict must survive deletion; and C-20 says the same asset, evidence
+        and ruleset version must always produce the identical verdict. Media
+        existence is not evidence. If deleting a file could turn PERMITTED into
+        BLOCKED, C-20 would be broken and every sealed provenance record would
+        become unreadable in the only sense that matters — you could no longer
+        re-derive the basis on which publication was permitted.
+
+      * Availability is a statement about BYTES. It is not a rights fact, it is
+        not durable, and it is not the engine's business.
+
+    So the engine is untouched, and availability is reported alongside every
+    verdict and enforced at the two gates that actually need the media to exist:
+    approving a post for publication, and publishing it. Refusing to PUBLISH a
+    phantom asset is right; refusing to READ its provenance would break F-8.
+    """
+    row = ctx.conn.execute("SELECT state FROM assets WHERE id = ?", (asset_id,)).fetchone()
+    if row is None:
+        # The asset row itself is gone. Provenance still reads (F-8: no foreign
+        # key), so this is 'absent', not an error to raise from here.
+        return "absent"
+    return str(row["state"])
+
+
+def media_available(ctx: Context, asset_id: str) -> bool:
+    return media_state(ctx, asset_id) == "stored"
 
 
 def _declaration_for(ctx: Context, asset_id: str) -> engine.Declaration:
@@ -273,4 +320,18 @@ def determine(ctx: Context, asset_id: str) -> dict[str, Any]:
     result = {"ok": True, "verdict_id": verdict_id, "asset_id": asset_id, **verdict.to_dict()}
     if inherited_from:
         result["inherited_from"] = inherited_from
+
+    # T-029. The verdict above is unchanged by this and is NOT stamped with it:
+    # availability is not evidence, and writing it into rights_verdicts would
+    # make the same inputs yield two different rows (C-20). It is reported, so a
+    # caller cannot read PERMITTED as "ready to publish" for media that is gone.
+    state = media_state(ctx, asset_id)
+    result["media_state"] = state
+    result["media_available"] = state == "stored"
+    if state != "stored":
+        result["publication_blocked"] = True
+        result["note"] = (
+            f"this verdict is valid and remains valid (F-8), but the media is"
+            f" '{state}': publication is refused until the bytes exist"
+        )
     return result

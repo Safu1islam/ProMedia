@@ -6,7 +6,15 @@ than being enforced by hiding a control:
 
   1. an operator approval exists for this post;
   2. the asset's latest verdict is PERMITTED;
-  3. a provenance record has been sealed.
+  3. a provenance record has been sealed;
+  4. the asset's media still exists (T-029).
+
+The fourth is deliberately not expressed as a rights verdict. A verdict about
+deleted media stays valid and stays PERMITTED — F-8 requires the record to
+outlive the media, and C-20 requires the same inputs to yield the same verdict
+for ever. Availability is a separate fact, checked separately, so that "you may
+publish this" and "there is something to publish" never get confused for one
+another.
 
 Agents may queue. Only the operator may approve or publish.
 
@@ -22,7 +30,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..errors import ApprovalRequired, NotFound, RightsBlocked, ValidationError  # noqa: F401
+from ..errors import (  # noqa: F401
+    ApprovalRequired,
+    MediaUnavailable,
+    NotFound,
+    RightsBlocked,
+    ValidationError,
+)
 from . import provenance, publishers
 from . import rights as rights_layer
 from .db import iso, new_id, transaction
@@ -131,7 +145,18 @@ def decision_context(ctx: Context, post_id: str) -> dict[str, Any]:
         } if declaration else None,
         "provenance_sealed": prov is not None,
         "provenance_id": prov["id"] if prov else None,
-        "approvable": bool(verdict["verdict"] == "PERMITTED" and post["status"] == "queued"),
+        # T-029: the media check is one of the four publish gates, so it belongs
+        # in the decision context too. Otherwise the surface renders an enabled
+        # approve control for an asset the server will refuse — and the operator
+        # is being asked to authorise the publication of nothing.
+        "media_state": asset["state"] if asset else "absent",
+        "media_available": bool(asset and asset["state"] == "stored"),
+        "approvable": bool(
+            verdict["verdict"] == "PERMITTED"
+            and post["status"] == "queued"
+            and asset is not None
+            and asset["state"] == "stored"
+        ),
         "publication": {
             "id": publication["id"],
             "platform_post_id": publication["platform_post_id"],
@@ -204,6 +229,24 @@ def approve(ctx: Context, *, post_id: str, decision: str = "approved") -> dict[s
             matched_rule=verdict.get("matched_rule"),
             governing_asset=verdict.get("source_asset"),
             reason=verdict.get("reason"),
+        )
+
+    # T-029. PERMITTED is not the same as available. Retention deletes the media
+    # while the verdict, the declaration and the sealed provenance all remain —
+    # so without this check a phantom asset walks straight through the rights
+    # gate and an operator approves a publication of nothing.
+    state = rights_layer.media_state(ctx, post["asset_id"])
+    if state != "stored":
+        raise MediaUnavailable(
+            f"cannot approve: this asset's media is '{state}', so there is nothing to publish",
+            post_id=post_id,
+            asset_id=post["asset_id"],
+            asset_state=state,
+            verdict=verdict["verdict"],
+            why=(
+                "the rights verdict is unaffected and remains valid (F-8); it is"
+                " the media that is gone, and retention deletion is final"
+            ),
         )
 
     with transaction(ctx.conn):
@@ -329,6 +372,23 @@ def publish(ctx: Context, *, post_id: str) -> dict[str, Any]:
         "SELECT * FROM accounts WHERE id = ?", (post["account_id"],)
     ).fetchone()
     asset = ctx.conn.execute("SELECT * FROM assets WHERE id = ?", (post["asset_id"],)).fetchone()
+
+    # T-029. Re-checked here and not merely at approval, for the same reason the
+    # verdict is: retention can fire in the window between the two, and the
+    # approval records that publication was authorised, not that the bytes are
+    # still there. This sits BEFORE the claim, so a refusal leaves the post
+    # approved and retryable rather than stranded in 'publishing'.
+    if asset is None or asset["state"] != "stored":
+        raise MediaUnavailable(
+            "cannot publish: this asset's media no longer exists",
+            post_id=post_id,
+            asset_id=post["asset_id"],
+            asset_state=asset["state"] if asset is not None else "absent",
+            why=(
+                "the rights verdict and the sealed provenance record remain valid"
+                " and readable (F-8); the media itself was deleted by retention"
+            ),
+        )
 
     # N11: account.status existed but nothing consulted it, so the system could
     # report an account as broken and then publish to it anyway.

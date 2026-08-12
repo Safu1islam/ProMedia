@@ -72,6 +72,19 @@
 </p>
 {% endif %}
 
+{# T-029: a control that is disabled without a stated reason reads as a UI bug.
+   The rights verdict is NOT the problem here and the banner must not imply it
+   is — the verdict is valid and survives deletion by design (F-8). #}
+{% if not d.media_available %}
+<p class="banner bad">
+  <strong>This asset's media is gone</strong> (state: {{ d.media_state }}). Retention
+  deleted the bytes, and deletion is final. The rights verdict and the sealed
+  provenance record remain valid and readable — nothing is wrong with them — but
+  there is nothing to publish, so approval and publication are both refused by the
+  server.
+</p>
+{% endif %}
+
 {% if d.status == 'queued' %}
 <form method="post" action="/posts/{{ d.post_id }}/approve">
   <input type="hidden" name="decision" value="approved">
