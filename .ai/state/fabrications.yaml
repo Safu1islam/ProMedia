@@ -53,13 +53,42 @@ fabrications:
     visible_to_user: false
     replacement_condition: "DPAPI backend implemented behind the same interface."
     replacement_task: T-022
-    status: active
+    status: resolved
+    resolved_at: "2026-08-13"
+    resolved_by_task: T-022
     blocks_release: false
     residual_risk: >
-      Plaintext at rest under the operator profile. On a single-user machine an
-      attacker with the operator's live session defeats DPAPI too, so the real
-      exposure delta is narrower than it appears — but it is not zero, and it is
-      not silently accepted.
+      HISTORICAL, describing the plaintext file this entry tracked: plaintext at
+      rest under the operator profile. On a single-user machine an attacker with
+      the operator's live session defeats DPAPI too, so the real exposure delta
+      was narrower than it appeared — but it was not zero, and it was not
+      silently accepted.
+    resolution: >
+      promedia/core/dpapi.py binds credentials to the Windows user via
+      CryptProtectData, and CredentialStore writes base64 DPAPI blobs behind the
+      unchanged interface — the swap DR-008 predicted, with no caller change.
+      An existing plaintext store is still read and is re-encrypted on the next
+      write, so it upgrades by being used. tests/test_dpapi.py (18 tests)
+      asserts the secret and the operator token are absent from the file, that
+      the store records which backend it is, and that DPAPI cannot silently
+      degrade to plaintext when unavailable — it refuses instead.
+    residual_risk_now: >
+      NOT eliminated, narrowed. DPAPI closes the COPIED-FILE case: a backup, a
+      synced folder or a stolen disk read from another Windows account cannot be
+      decrypted. It does not defend against code running AS the operator in the
+      operator's live session, which can call CryptUnprotectData exactly as this
+      code does. On a single-user machine that is the realistic attacker, so the
+      honest claim is 'credentials are no longer readable outside this user
+      account', not 'credentials are encrypted' full stop.
+    not_verified: >
+      AC-1's literal statement — ciphertext copied to ANOTHER Windows account
+      cannot be decrypted — has NOT been executed, because it needs a second
+      Windows account this machine does not have. What is verified: a blob
+      produced under different key-derivation entropy fails to decrypt (the same
+      failure path), and CRYPTPROTECT_LOCAL_MACHINE is asserted absent from the
+      call by AST inspection, since that flag is precisely what would downgrade
+      user-binding to machine-binding and make the cross-account case pass
+      trivially.
 
 notes:
   - >

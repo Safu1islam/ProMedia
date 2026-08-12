@@ -5,6 +5,24 @@ Importing this package registers every capability. Both surfaces call
 different set of operations than the other (F-1, S4).
 """
 
-from . import accounts, assets, posts, provenance, rights, storage, system  # noqa: F401
+from . import (  # noqa: F401
+    accounts,
+    assets,
+    posts,
+    provenance,
+    rights,
+    schedule,
+    storage,
+    system,
+)
 
-__all__ = ["accounts", "assets", "posts", "provenance", "rights", "storage", "system"]
+__all__ = [
+    "accounts",
+    "assets",
+    "posts",
+    "provenance",
+    "rights",
+    "schedule",
+    "storage",
+    "system",
+]

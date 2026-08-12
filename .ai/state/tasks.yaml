@@ -480,22 +480,145 @@ tasks:
     required_dimensions: [measured_baseline, measured_after, correctness_preserved, documentation]
 
   - id: T-018
-    title: "DEFERRED — publish-tick command and Windows Task Scheduler registration"
+    title: "publish-tick command and Windows Task Scheduler registration"
     objective: "Implements DR-009. Outside the operator-scoped v1 slice."
     change_class: infrastructure
     mode: critical
     owner_role: implementer
     assigned_model_tier: standard
-    status: ready
+    status: complete
+    claimed_by: "claude-code-session-next3"
     depends_on: [T-011]
     blocks: []
-    owned_paths: [promedia/core/ops/schedule.py]
+    owned_paths:
+      - promedia/core/scheduling.py
+      - promedia/core/ops/schedule.py
+      - promedia/core/ops/__init__.py
+      - tests/test_schedule.py
+      - tests/test_registry.py
+      - docs/HUMAN-ACTIONS.md
+    owned_paths_note: >
+      Split the way every other capability is split: logic in core/scheduling.py,
+      registration in ops/schedule.py. tests/test_registry.py was added to the
+      claim because it PINS the operator-authority set, and publish-tick joins it
+      — see the AC-2 evidence; that pin firing is what forced the authority
+      question rather than letting it pass unexamined.
     acceptance_criteria:
       - id: AC-1
         statement: "A window missed by more than the configured tolerance is marked missed and escalated, never posted late."
-        result: NOT_RUN
-        evidence: "Not implemented — outside v1 slice scope."
+        result: PASSED
+        evidence: >
+          C-27, the constraint the whole design exists to honour.
+          test_a_missed_window_is_marked_missed_and_not_published schedules an
+          hour in the past against a 300s tolerance and asserts status 'missed'
+          AND publications count 0 — the negative assertion is the one that
+          matters. test_the_miss_is_escalated_not_just_recorded asserts the audit
+          entry. test_a_window_just_inside_the_tolerance_still_publishes covers
+          the opposite direction, so over-strictness would fail too.
+          test_the_tolerance_boundary_comes_from_configuration moves the CONFIG
+          rather than the clock and shows the same post is due or missed
+          accordingly (C-26, protocol 05).
+          Falsified: treating every past window as due produced 4 failures
+          including a real publication for a long-closed window.
+      - id: AC-2
+        statement: "The tick publishes only what the operator already approved, and creates no authority of its own."
+        result: PASSED
+        evidence: >
+          F-2. publish-tick is operator authority because it reaches external
+          platforms — test_an_agent_cannot_run_the_tick. It publishes through
+          posts.publish, so every gate re-runs at publish time:
+          test_the_rights_gate_still_refuses_through_the_tick approves a post
+          while PERMITTED, degrades the asset with model evidence, and asserts
+          the tick refuses with RIGHTS_BLOCKED and leaves the post approved —
+          B3 variant C on a timer, which is the case where a scheduler could
+          publish something the operator would no longer approve.
+          test_an_unapproved_post_is_never_published_by_the_tick and
+          test_an_unscheduled_post_is_never_touched cover the two ways a tick
+          could sweep up work nobody authorised.
+      - id: AC-3
+        statement: "The tick is idempotent and preserves scheduled order."
+        result: PASSED
+        evidence: >
+          test_running_the_tick_twice_publishes_once asserts publications == 1.
+          Idempotence is INHERITED, not restated: posts.publish claims the post
+          transactionally before the external call (finding B2), so the tick adds
+          nothing on top — which is the point, since a scheduler with its own
+          copy of the publish path is how the two drift.
+          test_ordering_is_scheduled_order queues three posts out of order and
+          asserts they publish in scheduled order (C-22).
+      - id: AC-4
+        statement: "Task Scheduler registration is documented for the operator rather than performed."
+        result: PASSED
+        evidence: >
+          docs/HUMAN-ACTIONS.md section 1: the command, the interval rule
+          (shorter than the tolerance), the token via environment rather than the
+          Arguments field (T-024's rule, which applies to the scheduler for the
+          same reason), and the limitation DR-009 accepts — nothing runs while
+          the machine is off. Registering a scheduled task is a persistent OS
+          configuration change and is therefore an operator action, not an agent
+          one.
+    verification:
+      - command: "python -m pytest -p no:cacheprovider tests/test_schedule.py"
+        status: PASSED
+        observed: "17 passed"
+      - command: "python -m pytest -p no:cacheprovider"
+        status: PASSED
+        observed: "401 passed (359 before this task; +17 schedule, +18 dpapi, +4 parity, +2 misc)"
+      - command: "python -m pytest -p no:cacheprovider tests/test_parity.py"
+        status: PASSED
+        observed: >
+          66 passed, up from 62 — the gate picked up the two new operations
+          automatically (2 ops x 2 probes) with no edit to the parity test. That
+          is the S4 machinery working: a capability reachable from one surface
+          only would have failed here on the day it was registered.
+      - command: "python -m pytest -p no:cacheprovider tests/test_schedule.py, with expired windows treated as due"
+        status: FAILED
+        observed: >
+          The C-27 violation itself. 4 failures including
+          test_a_missed_window_is_marked_missed_and_not_published, which found a
+          real publication recorded for a window closed an hour earlier — a post
+          sent late, which is the outcome C-27 exists to forbid. Reverted;
+          scheduling.py SHA-256
+          163fbc503365dfc801bd3ceab5acd9bfa175676e708cd1c250e3059cad6bed48.
+      - command: "python -m promedia publish-tick --json  and  python -m promedia schedule-status --json"
+        status: PASSED
+        observed: >
+          Real CLI, not TestClient. publish-tick refuses with FORBIDDEN
+          ('requires operator authority') without a token; schedule-status
+          returns ok:true with tolerance_seconds 300 and empty queues against the
+          operator's own store. Both are the surfaces Task Scheduler will call.
+    fabrications_introduced: []
+    assumptions:
+      - >
+        A missed window is audited as outcome 'failed' with a 'MISSED WINDOW'
+        detail rather than a new 'missed' outcome value. audit_log's CHECK admits
+        only allowed/denied/failed, and widening it means migrating a table
+        SQLite cannot ALTER a CHECK on — a data_model_change for a distinction
+        the detail already carries and schedule-status reports structurally.
+      - >
+        publish-tick declares no entity and therefore takes no C-19 lock of its
+        own; each publish locks its own post inside invoke(). A lock spanning the
+        whole tick would hold every post against every other agent for the
+        duration. Pinned by test_the_tick_takes_no_entity_lock.
+    open_items:
+      - >
+        NOT RUN UNDER A REAL SCHEDULER. Every test here calls the tick directly.
+        Whether Windows Task Scheduler starts it correctly — working directory,
+        environment, the token arriving, behaviour on wake-from-sleep — is
+        untested and cannot be tested by an agent that may not register the task.
+        This is the operator step in docs/HUMAN-ACTIONS.md, and until it is done
+        scheduled publishing is implemented but not in service.
+      - >
+        schedule-status is a new agent-readable operation added alongside the
+        tick, on the reasoning that a scheduler whose only output is a side
+        effect cannot be checked. It was not in the original task scope.
+    decisions: [DR-009]
     required_dimensions: [correctness, reliability, observability, rollback, testing]
+    independent_review:
+      status: NOT_RUN
+      note: >
+        Constitution section 7 — implemented by this session, not reviewed by
+        another agent.
 
   - id: T-019
     title: "DEFERRED — live X and LinkedIn publisher adapters"
@@ -517,22 +640,118 @@ tasks:
     required_dimensions: [correctness, security, secrets_handling, error_handling, reliability, cost, testing]
 
   - id: T-022
-    title: "DEFERRED — DPAPI credential backend"
+    title: "DPAPI credential backend"
     objective: "Replaces the plaintext-at-rest file backend from DR-008 with OS-bound encryption."
     change_class: auth_or_permissions
     mode: critical
     owner_role: implementer
     assigned_model_tier: standard
-    status: ready
+    status: complete
+    claimed_by: "claude-code-session-next3"
     depends_on: [T-006]
     blocks: []
-    owned_paths: [promedia/core/credentials.py]
+    owned_paths: [promedia/core/credentials.py, promedia/core/dpapi.py, tests/test_dpapi.py, .ai/state/fabrications.yaml]
+    retires_fabrication: F-002
     acceptance_criteria:
       - id: AC-1
         statement: "Credential ciphertext copied to another Windows account cannot be decrypted."
         result: NOT_RUN
-        evidence: "Not implemented — v1 uses the file backend behind the same interface."
+        evidence: >
+          NOT EXECUTED, and deliberately not claimed as passed. The literal test
+          needs a SECOND Windows account, which this machine does not have.
+          Creating one is a system configuration change an agent must not make
+          (NON-NEGOTIABLES list A), so the criterion stays NOT_RUN rather than
+          being quietly restated as something easier.
+          What IS verified by execution, as the closest reachable proxies:
+          (1) a blob produced under different key-derivation entropy fails to
+          decrypt — the same failure path a foreign blob takes, proving the
+          scoping input genuinely participates in the key
+          (test_a_blob_from_different_entropy_cannot_be_decrypted);
+          (2) CRYPTPROTECT_LOCAL_MACHINE is absent from the call, asserted by
+          walking the AST for the dwFlags argument and requiring the literal 0 —
+          that flag binds ciphertext to the MACHINE, which is exactly the
+          downgrade that would make a cross-account test pass while providing
+          nothing (test_local_machine_scope_is_not_used).
+      - id: AC-2
+        statement: "Credentials are absent from the store file in the clear, and the swap changes no caller."
+        result: PASSED
+        evidence: >
+          The half that can be executed here, and the one F-002's replacement
+          condition actually names. test_the_secret_is_not_on_disk_in_the_clear
+          and test_the_operator_token_is_encrypted_too assert the canary and the
+          operator token are absent from the file;
+          test_a_rotated_credential_leaves_no_earlier_plaintext covers the
+          rewrite case. The interface is unchanged — the full suite went 359 ->
+          359 passed with DPAPI active before a single test was written for it,
+          which is the evidence that DR-008's "swap, not a rewrite" held.
+      - id: AC-3
+        statement: "The backend cannot silently degrade to plaintext."
+        result: PASSED
+        evidence: >
+          The failure that would be invisible in production: a store reporting
+          itself encrypted while writing clear text. dpapi.protect raises
+          DpapiUnavailable rather than returning its input, default_backend()
+          refuses an explicit dpapi request on a platform without it, and the
+          file records which backend wrote it so what a store IS can be read off
+          it. test_dpapi_cannot_be_forced_where_it_does_not_exist,
+          test_protect_raises_rather_than_returning_plaintext,
+          test_the_store_records_what_it_is,
+          test_the_plaintext_backend_says_so_on_disk.
+      - id: AC-4
+        statement: "An existing plaintext store keeps working and upgrades."
+        result: PASSED
+        evidence: >
+          The operator's real store predates this change. The v1 flat
+          {ref: plaintext} format is still read, and the next write re-encrypts
+          every entry — upgrade by use, not by a migration command nobody runs.
+          test_an_existing_plaintext_store_is_still_readable and
+          test_using_a_plaintext_store_upgrades_it (which asserts the
+          pre-existing secret is gone from the file afterwards).
+    verification:
+      - command: "python -m pytest -p no:cacheprovider  (with DPAPI active, before any new test existed)"
+        status: PASSED
+        observed: >
+          359 passed — unchanged from before the backend swap. Run deliberately
+          at that point: every existing credential test goes through the store's
+          interface, so an unchanged suite is what demonstrates the interface
+          did not move.
+      - command: "python -m pytest -p no:cacheprovider tests/test_dpapi.py"
+        status: PASSED
+        observed: "18 passed"
+      - command: "python -m pytest -p no:cacheprovider tests/test_dpapi.py, with _write always taking the plaintext branch while the envelope still says 'dpapi'"
+        status: FAILED
+        observed: >
+          Sabotage aimed at the exact defect that would be invisible — a store
+          that CLAIMS encryption and writes clear text. 6 failures led by
+          test_the_secret_is_not_on_disk_in_the_clear and
+          test_the_operator_token_is_encrypted_too. Reverted; credentials.py
+          SHA-256 4af73f96a8894303384333a9984cf8d90cb6318ed027229359f17059723a3fde.
+    fabrications_introduced: []
+    assumptions:
+      - >
+        Backend is chosen by PLATFORM, not by promedia.toml, with an explicit env
+        override. Configuration would invite a machine-wide default that silently
+        downgrades; the platform either provides DPAPI or it does not, and the
+        override is recorded in the store file so the choice is always readable.
+    open_items:
+      - >
+        The cross-account case (AC-1) needs a second Windows account to execute.
+        It belongs with the operator, alongside the OD-5 walkthrough — creating
+        a Windows account is not an agent action.
+      - >
+        DPAPI does not defend against code running AS the operator in the live
+        session. On a single-user machine that is the realistic attacker, so the
+        honest claim is "no longer readable outside this user account", not
+        "encrypted" without qualification. Recorded in fabrications.yaml under
+        residual_risk_now rather than allowed to read as a stronger guarantee.
+    decisions: [DR-008]
     required_dimensions: [correctness, security, secrets_handling, threat_model, testing]
+    independent_review:
+      status: NOT_RUN
+      note: >
+        Constitution section 7 — implemented by this session, not reviewed by
+        another agent. This is an auth_or_permissions change, which routing.yaml
+        puts at 3 reviewers; the shortfall is the standing one in OD-6.
 
 # ---------------------------------------------------------------------------
 # Independent review (protocol 06 stage 7). Reviewer role, separate agent and

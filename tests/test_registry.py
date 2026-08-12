@@ -82,6 +82,15 @@ def test_operator_only_operations_are_the_expected_set():
     attest-declaration is operator-only because an agent asserting authorship or
     a licence is a proposal, not an attestation — permitting rules fire only on
     an operator attestation.
+
+    publish-tick joined the set in T-018, and the pin firing is what forced the
+    question rather than letting it slip in. It reaches external platforms, so it
+    carries publish-post's authority even though every post it touches was
+    already approved through the F-2 gate: the tick executes prior authorisation
+    and never creates any. Windows Task Scheduler presents the operator token the
+    same way the CLI does (PROMEDIA_OPERATOR_TOKEN) — there is no
+    scheduler-specific credential path, which is the thing that would have
+    deserved a decision record.
     """
     ops = load_operations()
     operator_ops = {name for name, op in ops.items() if op.authority == "operator"}
@@ -91,4 +100,5 @@ def test_operator_only_operations_are_the_expected_set():
         "publish-post",
         "attest-declaration",
         "release-publish-claim",
+        "publish-tick",
     }

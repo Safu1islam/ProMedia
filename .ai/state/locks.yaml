@@ -4,6 +4,45 @@
 locks: []
 
 history:
+  - path: "promedia/core/credentials.py, promedia/core/dpapi.py, tests/test_dpapi.py, .ai/state/fabrications.yaml"
+    task_id: "T-022"
+    agent: "claude-code-session-next3"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-13T03:40:00+04:00"
+    released_at: "2026-08-13T05:10:00+04:00"
+    note: >
+      DPAPI credential backend, retiring fabrication F-002. promedia/core/dpapi.py
+      is new — the ctypes binding is kept out of credentials.py so the store stays
+      a store and the platform call has one home. fabrications.yaml is claimed
+      because closing F-002 is part of the task, not a follow-up: Constitution
+      section 6 makes the registry the record of what is still fake.
+
+      credentials.py was sabotaged ONCE during verification (the dpapi branch of
+      _write removed while the envelope still declared 'dpapi') and restored,
+      SHA-256 verified 4af73f96a8894303384333a9984cf8d90cb6318ed027229359f17059723a3fde.
+
+  - path: "promedia/core/ops/schedule.py, promedia/core/scheduling.py, promedia/core/ops/__init__.py, tests/test_schedule.py, tests/test_registry.py, docs/HUMAN-ACTIONS.md"
+    task_id: "T-018"
+    agent: "claude-code-session-next3"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-13T03:40:00+04:00"
+    released_at: "2026-08-13T05:10:00+04:00"
+    note: >
+      publish-tick per DR-009. The tick logic lives in core/scheduling.py with
+      ops/schedule.py as the registration, matching how every other capability is
+      split. Task Scheduler registration is an OPERATOR action, not something an
+      agent may perform — it is a persistent OS configuration change — so it is
+      documented rather than executed.
+
+      Both locks were released only after AEF 0.3.0's new coordination check
+      flagged them: `aef.py validate` reported "still holds a lock on T-022,
+      which is 'complete' — a finished task's lock is a leak". The check landed
+      hours earlier in this same repository and caught a real leak on its first
+      encounter with one.
+
+      scheduling.py was sabotaged ONCE (expired windows treated as due, i.e. C-27
+      removed) and restored, SHA-256
+      163fbc503365dfc801bd3ceab5acd9bfa175676e708cd1c250e3059cad6bed48.
   - path: "promedia/core/registry.py, promedia/core/ops/accounts.py, tests/test_account_locking.py, tests/test_locking.py"
     task_id: "T-033"
     agent: "claude-code-session-next3"
