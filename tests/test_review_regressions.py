@@ -226,7 +226,7 @@ def test_concurrent_publish_calls_the_platform_once(tmp_path, media_file):
     proceed. A double-click on the publish button was enough to trigger this.
     """
     cfg = make_config(tmp_path, **{"publishing.allow_simulation": True})
-    from promedia.core import db, publishers
+    from promedia.core import db, posts, publishers
     from promedia.core.publishers.stub import StubPublisher
 
     conn = db.connect(cfg.db_path)
@@ -250,14 +250,48 @@ def test_concurrent_publish_calls_the_platform_once(tmp_path, media_file):
         return original(self, **kwargs)
 
     StubPublisher.publish = counting_publish
-    barrier = threading.Barrier(2)
     errors: list[Exception] = []
+
+    # T-030 (the fourth item). The barrier sat before invoke(), which is wider
+    # than the race it exists to force: authority, validation, C-19 locking and
+    # the whole read-gate prologue run inside the window, and SQLite then
+    # serialises the two writers anyway. One thread could finish the entire
+    # publish — including flipping the post to 'published' — before the other
+    # read the post's status at all. What deduplicated them in that case was the
+    # status gate, NOT the claim under test.
+    #
+    # Moved to the entry of the publish handler, which is the tightest point
+    # that is still INDEPENDENT of the thing being tested. That independence is
+    # the whole design constraint, and this task nearly got it wrong: the
+    # obvious "tightest" placement is inside _claim_for_publish itself, and a
+    # barrier living inside the function under test vanishes along with it.
+    # Verified by sabotage rather than reasoned about — with the barrier inside
+    # the claim, deleting the claim made this test PASS, because nothing waited
+    # and the threads simply ran one after the other.
+    #
+    # ops/posts.py calls posts_layer.publish by attribute, so patching the
+    # module attribute is what the operation actually reaches.
+    barrier = threading.Barrier(2)
+    real_publish = posts.publish
+
+    def publish_in_lockstep(ctx, *args, **kwargs):
+        # Both threads enter the read gates and the claim together, so the
+        # critical section is genuinely contended on every run rather than by
+        # luck of scheduling. Signature is pass-through: the operation calls
+        # this by keyword, and a wrapper that quietly fails to match would make
+        # the test report zero platform calls and look like a different bug.
+        try:
+            barrier.wait(timeout=10)
+        except threading.BrokenBarrierError:  # pragma: no cover - safety valve
+            pass
+        return real_publish(ctx, *args, **kwargs)
+
+    posts.publish = publish_in_lockstep
 
     def worker():
         c = db.connect(cfg.db_path)
         ctx = Context(config=cfg, conn=c, principal=operator("op"))
         try:
-            barrier.wait(timeout=10)
             invoke(ctx, "publish-post", {"post_id": post_id})
         except Exception as exc:  # noqa: BLE001 - recorded, asserted below
             errors.append(exc)
@@ -272,6 +306,7 @@ def test_concurrent_publish_calls_the_platform_once(tmp_path, media_file):
             t.join(timeout=30)
     finally:
         StubPublisher.publish = original
+        posts.publish = real_publish
 
     assert len(external_calls) == 1, (
         f"the platform was called {len(external_calls)} times; a double post is "

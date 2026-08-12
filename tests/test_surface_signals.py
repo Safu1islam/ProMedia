@@ -196,13 +196,50 @@ def test_contended_entity_is_409_on_the_html_route_too(surface):
     assert OTHER_AGENT in response.text  # C-19: the owner stays visible
 
 
-def test_contended_entity_is_409_on_the_generic_form_route(surface):
-    """/ops/{name} is the fifth site the old maps were duplicated across."""
-    response = surface.operator_client().post(
-        "/ops/approve-post", data={"post_id": CONTENDED_POST, "decision": "approved"}
+def test_contended_entity_is_409_on_the_generic_form_route(surface, media_file):
+    """/ops/{name} is the fifth site the old maps were duplicated across.
+
+    Two submissions since T-035: approve-post shows its decision context first
+    and executes nothing, so the first POST cannot report contention — nothing
+    has been attempted yet. The 409 belongs on the request that actually tries
+    the write, and that is what is asserted here. The adapter deliberately does
+    not pre-check the lock table to surface it sooner; that would be C-19 logic
+    living in a surface, which is what DR-002 keeps out of the adapters.
+
+    Uses a post that REALLY EXISTS and is then locked, rather than the module's
+    phantom CONTENDED_POST. The phantom is fine for routes that go straight to
+    invoke() — the lock is taken before the handler, so ENTITY_LOCKED precedes
+    NOT_FOUND — but this route reads the post first, and for an id with no row
+    404 is the correct answer and the more specific one. Seeding a real post
+    keeps the test about contention instead of about a fixture artefact.
+    """
+    from tests.test_decision_context import confirmation
+
+    ctx = surface.ctx
+    account = invoke(ctx, "connect-account", {"platform": "x", "handle": "me", "secret": "t"})
+    asset = invoke(
+        ctx, "ingest", {"source_path": str(media_file), "declaration": declaration_original()}
     )
+    post_id = invoke(
+        ctx, "queue-post",
+        {"account_id": account["account_id"], "asset_id": asset["asset_id"], "body": "hi"},
+    )["post_id"]
+    db.acquire_lock(
+        ctx.conn, "post", post_id,
+        task_id="approve-post", agent=OTHER_AGENT, model="claude-opus-5",
+        ttl_minutes=int(surface.cfg.get("locks", "ttl_minutes")),
+    )
+
+    client = surface.operator_client()
+    data = {"post_id": post_id, "decision": "approved"}
+
+    shown = client.post("/ops/approve-post", data=data)
+    assert shown.status_code == 200, "the decision context should render, not execute"
+
+    response = client.post("/ops/approve-post", data={**data, **confirmation(shown)})
     assert response.status_code == 409
     assert "ENTITY_LOCKED" in response.text
+    assert OTHER_AGENT in response.text  # C-19: the owner stays visible
 
 
 # --- (b) NOT_FOUND on the HTML routes is 404, not 400 ------------------------

@@ -39,6 +39,13 @@ from ..registry import Context, Param, register
     mutates=True,
     entity="account",
     danger="Establishes publishing capability for this account.",
+    # T-033. Since T-023 this operation is create-OR-UPDATE: a reconnect
+    # preserves the account id and rotates the credential, so it writes a row
+    # that already exists — but it takes no account_id, so lock_target()'s id
+    # rule saw a pure creation and let it run unlocked. platform+handle is the
+    # identity it actually has (UNIQUE(platform, handle) in the schema), and
+    # locking on it must use the SAME normalisation the handler does below.
+    lock_by=("platform", "handle"),
 )
 def connect_account(ctx: Context, platform: str, handle: str, secret: str | None = None) -> dict[str, Any]:
     key = platform.strip().lower()

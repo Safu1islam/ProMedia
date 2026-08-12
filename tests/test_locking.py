@@ -66,7 +66,16 @@ LOCKING_OPERATIONS = {
 # Mutating operations that CREATE their entity. There is no id to lock because
 # the entity does not exist yet — recorded here so the skip is a stated
 # decision rather than a gap nobody noticed.
-CREATING_OPERATIONS = {"ingest", "queue-post", "connect-account"}
+#
+# connect-account was in this set until T-033 and should not have been: since
+# T-023 a reconnect preserves the account id, so it writes an EXISTING row. It
+# now locks on its natural key instead — see NATURAL_KEY_OPERATIONS and
+# tests/test_account_locking.py.
+CREATING_OPERATIONS = {"ingest", "queue-post"}
+
+# Mutating operations that write an entity that may already exist but were not
+# handed its id. They lock on a declared natural key (Operation.lock_by).
+NATURAL_KEY_OPERATIONS = {"connect-account"}
 
 
 @pytest.fixture
@@ -96,8 +105,20 @@ def _ingest(ctx: Context, media_file: Path) -> str:
 # --- which operations lock, and which deliberately do not ---------------------
 
 
+def _probe_params(op) -> dict[str, str]:
+    """Every parameter lock_target() could read, so a probe never starves it.
+
+    Supplies the natural key as well as the id (T-033): omitting it would make
+    lock_target refuse, and a test that cannot tell "refused because the key is
+    missing" from "declined to lock" is not testing the rule.
+    """
+    params = {f"{op.entity}_id": "entity_1"} if op.entity else {}
+    params.update({part: "probe" for part in op.lock_by})
+    return params
+
+
 def test_lock_target_follows_the_registry_rule():
-    """A capability locks iff it mutates a named entity whose id it was given.
+    """A capability locks iff it mutates a named entity it can identify.
 
     Asserted as a rule over the whole registry rather than a list, so a new
     operation is covered the day it is registered (the DR-002 reasoning that
@@ -106,11 +127,13 @@ def test_lock_target_follows_the_registry_rule():
     from promedia.core.registry import lock_target
 
     for name, op in OPERATIONS.items():
-        params = {f"{op.entity}_id": "entity_1"} if op.entity else {}
-        target = lock_target(op, params)
+        target = lock_target(op, _probe_params(op))
         declares_id = op.entity is not None and f"{op.entity}_id" in {p.name for p in op.params}
         if op.mutates and declares_id:
             assert target == (op.entity, "entity_1"), f"'{name}' should lock its entity"
+        elif op.mutates and op.lock_by:
+            expected = "key:" + ":".join("probe" for _ in op.lock_by)
+            assert target == (op.entity, expected), f"'{name}' should lock its natural key"
         else:
             assert target is None, f"'{name}' must not take a lock"
 
@@ -122,20 +145,21 @@ def test_read_only_operations_never_lock():
     for name, op in OPERATIONS.items():
         if op.mutates:
             continue
-        params = {f"{op.entity}_id": "entity_1"} if op.entity else {}
-        assert lock_target(op, params) is None, f"read-only '{name}' took a lock"
+        assert lock_target(op, _probe_params(op)) is None, f"read-only '{name}' took a lock"
 
 
 def test_the_locking_and_creating_sets_are_what_this_task_intended():
-    """Pins the two sets above against the registry as it actually stands."""
+    """Pins the sets above against the registry as it actually stands."""
     from promedia.core.registry import lock_target
 
-    locking = set()
+    by_id, by_key = set(), set()
     for name, op in OPERATIONS.items():
-        params = {f"{op.entity}_id": "entity_1"} if op.entity else {}
-        if lock_target(op, params) is not None:
-            locking.add(name)
-    assert locking == LOCKING_OPERATIONS
+        target = lock_target(op, _probe_params(op))
+        if target is None:
+            continue
+        (by_key if target[1].startswith("key:") else by_id).add(name)
+    assert by_id == LOCKING_OPERATIONS
+    assert by_key == NATURAL_KEY_OPERATIONS
 
     for name in CREATING_OPERATIONS:
         op = OPERATIONS[name]

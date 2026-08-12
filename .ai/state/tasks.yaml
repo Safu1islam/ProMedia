@@ -987,14 +987,116 @@ follow_up_tasks:
     objective: "ffprobe timeout and busy_timeout still hardcoded; provenance.seal and rights.latest_verdict disagree on same-timestamp ties; config.load assigns the mutable module-level DEFAULTS on the no-file path; the concurrent-publish test's barrier is placed wider than necessary."
     change_class: bug_fix
     mode: fast
-    status: ready
-    owned_paths: [promedia/core/ingest.py, promedia/core/db.py, promedia/core/provenance.py, promedia/config.py, tests/test_review_regressions.py]
+    status: complete
+    claimed_by: "claude-code-session-next3"
+    owned_paths: [promedia/core/ingest.py, promedia/core/db.py, promedia/core/provenance.py, promedia/config.py, promedia/cli.py, promedia/web/app.py, tests/test_review_regressions.py, tests/test_hygiene.py]
+    owned_paths_note: >
+      SCOPE GROWTH, recorded rather than left implicit. promedia/cli.py and
+      promedia/web/app.py were added during the run: moving busy_timeout out of
+      db.py only RELOCATES the literal unless the two callers that hold a loaded
+      Config actually pass it, and without that a promedia.toml override still
+      does nothing — which is the defect O3 names. One line each.
     acceptance_criteria:
       - id: AC-1
         statement: "Each of the four items is addressed or explicitly declined with a reason."
-        result: NOT_RUN
-        evidence: "not implemented"
-
+        result: PASSED
+        evidence: >
+          All four addressed, none declined. O2: probe_media takes
+          timeout_seconds from ingest.probe_timeout_seconds. O3: db.connect takes
+          busy_timeout_ms from database.busy_timeout_ms, passed by cli.py and
+          web/app.py. O4: config.load() returns defaults() — a fresh copy —
+          instead of the module-level DEFAULTS dict itself. N6: provenance.seal
+          calls rights.latest_verdict instead of running its own query.
+          The fifth item (the concurrent-publish barrier) is covered by AC-3.
+          tests/test_hygiene.py — 11 tests, executed, observed pass.
+      - id: AC-2
+        statement: "N6: the sealed provenance record and the publish gate select the same verdict when two verdicts share a decided_at."
+        result: PASSED
+        evidence: >
+          The one with teeth. seal() ran "ORDER BY decided_at DESC LIMIT 1" while
+          rights.latest_verdict runs "ORDER BY decided_at DESC, id DESC" — a
+          tiebreaker apart. Windows' coarse timer granularity makes two verdicts
+          in one tick ordinary, and SQLite was then free to return either row, so
+          the record could freeze a different verdict than the gate enforces.
+          F-8 makes that record the durable account of the decision, and nothing
+          downstream can tell it is wrong.
+          Fixed by DELETING the second query rather than syncing it — one
+          authority, the same reasoning that collapsed the four status maps in
+          T-032. Falsified: with the old query restored, the test fails
+          "the sealed record froze 'tie-marker-0' while the gate enforces
+          'tie-marker-1'".
+      - id: AC-3
+        statement: "The concurrent-publish regression test's barrier is placed so the claim is genuinely contended, and the test still detects B2."
+        result: PASSED
+        evidence: >
+          Moved from before invoke() to the entry of posts.publish. Both halves
+          were verified by sabotage, and the FIRST attempt was wrong in a way
+          worth recording — see verification below.
+    verification:
+      - command: "python -m pytest -p no:cacheprovider"
+        status: PASSED
+        observed: "346 passed (335 after T-033, +11 from tests/test_hygiene.py)"
+      - command: "python -m pytest -p no:cacheprovider tests/test_hygiene.py, with provenance.seal reverted to its own untiebroken query"
+        status: FAILED
+        observed: >
+          N6 reproduced deterministically: "the sealed record froze
+          'tie-marker-0' while the gate enforces 'tie-marker-1' — the record and
+          the gate disagree", plus the structural test that forbids a second
+          rights_verdicts query in provenance.py. The fixture rewrites the two
+          verdict ids so lexicographic order MATCHES insertion order, which is
+          what makes the disagreement certain rather than a coin flip: the
+          tiebroken query then takes the last-inserted row and an untiebroken one
+          takes SQLite's rowid order, i.e. the first. Reverted; provenance.py
+          SHA-256 dd86fcb537e3f96ca5c22d2ae436d9f0ddbaaffb0b9595c05d52ccc0e5182cf0.
+      - command: "python -m pytest -p no:cacheprovider tests/test_review_regressions.py, with the _claim_for_publish call replaced by `pass` (B2 reintroduced)"
+        status: FAILED
+        observed: >
+          "the platform was called 2 times; a double post is not recoverable once
+          seen (C-32)" — the B2 defect itself, on every run. posts.py reverted and
+          SHA-256 verified 0b9ef1d68d3d1512c42867547321321f55866ecb968c83ce9c99ab4d690dfd50.
+      - command: "Same sabotage, against the FIRST version of the barrier move (barrier inside _claim_for_publish)"
+        status: FAILED
+        observed: >
+          RECORDED BECAUSE IT NEARLY SHIPPED. The obvious "tightest" placement is
+          inside the function under test, and it makes the test VACUOUS: deleting
+          the claim also deletes the barrier, so the threads never overlap and the
+          test PASSED with the defect present. Caught only by running the sabotage
+          rather than trusting the reasoning. The barrier now sits at the entry of
+          posts.publish — the tightest point that still exists when the claim does
+          not.
+      - command: "Same sabotage, against the ORIGINAL pre-invoke barrier"
+        status: FAILED
+        observed: >
+          Also worth recording: the original placement reported "the platform was
+          called 0/1 times" rather than 2, because SQLite serialises the two
+          writers and the post's status gate — not the claim — is what
+          deduplicated them. The shipped test was passing for a reason other than
+          the one it documented. This is the finding behind the item, not just
+          tidier placement.
+    fabrications_introduced: []
+    assumptions:
+      - >
+        db.connect() and probe_media() keep a parameter with a DEFAULTS fallback
+        rather than requiring a Config, so both stay callable from tests and from
+        conftest without one. The fallback is the default value, never a second
+        copy of it; tests/test_hygiene.py asserts by AST that neither literal
+        appears as a code constant in the module that uses it.
+      - >
+        The literal scan walks the AST rather than the file text. This project
+        explains its fixes in prose and those explanations name the old values,
+        so a regex over the source reports the comment as an offender — which it
+        did, on the first run.
+    open_items:
+      - >
+        rights_declarations are selected with "ORDER BY declared_at DESC LIMIT 1"
+        in THREE places (provenance.py and rights.py twice) with no tiebreaker.
+        Unlike the verdict case they all AGREE, so there is no disagreement to
+        fix and no defect today — but they share the same nondeterminism under a
+        same-timestamp tie. Not touched: two of the three are in rights.py, which
+        this task did not claim, and making provenance.py alone deterministic
+        would CREATE the disagreement N6 was about. Recorded for a task that can
+        claim both.
+    decisions: [DR-003, DR-006]
 
   - id: T-031
     title: "create_app's operations dict is decorative — filtering it does not disable an operation"
@@ -1221,15 +1323,95 @@ follow_up_tasks:
       Low impact today: operator authority, and C-17 fixes humans at 1.
     change_class: auth_or_permissions
     mode: standard
-    status: ready
-    owned_paths: [promedia/core/registry.py, promedia/core/ops/accounts.py]
+    status: complete
+    claimed_by: "claude-code-session-next3"
+    owned_paths: [promedia/core/registry.py, promedia/core/ops/accounts.py, tests/test_account_locking.py, tests/test_locking.py]
+    owned_paths_note: >
+      tests/test_locking.py was added to the claim during the run. It PINNED
+      connect-account in CREATING_OPERATIONS with the comment "there is no id to
+      lock because the entity does not exist yet" — a claim this task makes
+      false. Leaving a stale assertion in place to keep a case count comparable
+      is how N5 happened, so it was claimed and corrected instead.
     found_by: "implementer agent during T-027"
     acceptance_criteria:
       - id: AC-1
         statement: "A reconnect of an existing account takes an exclusive lock on that account, and a second agent attempting it concurrently is refused with ENTITY_LOCKED."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          Operation gained a declarative natural key (lock_by=("platform","handle"))
+          and lock_target() gained a second branch that composes the lock id from
+          it, prefixed "key:" so it cannot collide with a generated acct_ id in
+          the shared entity_locks table. agent-beta attempting the same account
+          from inside agent-alpha's handler is refused with ENTITY_LOCKED,
+          detail.owner == "agent-alpha", detail.entity_id == "key:x:acme".
+          tests/test_account_locking.py — 13 tests, executed, observed pass.
+          Full suite 335 passed (322 before, +13).
+      - id: AC-2
+        statement: "The lock key normalises identically to the handler, so two spellings of one account cannot take two locks."
+        result: PASSED
+        evidence: >
+          Not in the original brief; found while writing the tests and treated as
+          part of AC-1 rather than deferred, because a lock key that disagrees
+          with the handler's own lookup key is locking that appears present and
+          excludes nothing. lock_target strips and lowercases each part, matching
+          connect_account's own normalisation (N13).
+          test_the_key_normalises_exactly_as_the_handler_does and
+          test_the_contended_account_is_the_one_named_in_the_refusal (which has
+          beta contend with "ACME" against alpha's "acme").
+    verification:
+      - command: "python -m pytest -p no:cacheprovider tests/test_account_locking.py tests/test_locking.py"
+        status: PASSED
+        observed: "26 passed (13 new + 13 existing lock tests, the latter unchanged in count)"
+      - command: "python -m pytest -p no:cacheprovider tests/test_parity.py tests/test_hardening.py"
+        status: PASSED
+        observed: "96 passed — 62 parity + 34 hardening, both unchanged; this task adds a lock, not an operation"
+      - command: "python -m pytest -p no:cacheprovider, with the lock_by branch in lock_target disabled (`if False and op.lock_by`)"
+        status: FAILED
+        observed: >
+          Intentional sabotage, to prove the new tests can fail. 9 failures
+          including the behavioural ones — test_a_second_agent_is_refused_mid_reconnect,
+          test_the_contended_account_is_the_one_named_in_the_refusal,
+          test_a_first_time_connect_also_locks — plus the two structural pins in
+          tests/test_locking.py. Reverted; registry.py SHA-256 verified
+          e36757acd0577b2e7b14b6d450fab73fbf39741a185181085c42430d928a4e7b.
+      - command: "python -m pytest -p no:cacheprovider tests/test_account_locking.py, with `parts.append(value.strip().lower())` weakened to `parts.append(value)`"
+        status: FAILED
+        observed: >
+          Second sabotage, at the subtle point rather than the obvious one. THE
+          IMPORTANT RESULT: test_the_contended_account_is_the_one_named_in_the_refusal
+          failed with a real sqlite3.IntegrityError surfacing as
+          "operation 'connect-account' failed unexpectedly (IntegrityError)" —
+          i.e. two spellings escaped the lock and BOTH wrote the same
+          UNIQUE(platform, handle) row. That is the data-corruption failure mode
+          itself, not an assertion mismatch. Reverted and hash-verified.
+    fabrications_introduced: []
+    assumptions:
+      - >
+        Over-locking is the safe direction where handler and key normalisation
+        cannot be proven to agree. A spurious ENTITY_LOCKED is transient and
+        retryable (DR-012 exit 4 / HTTP 409); under-locking is a concurrent write
+        to one row. Stated in lock_target's docstring rather than left implicit.
+    open_items:
+      - >
+        Natural-key locks and id locks on the same entity type are different
+        rows in entity_locks and therefore do NOT exclude each other. No
+        operation locks an account by id today, so only one mechanism is in use
+        and the gap is currently unreachable. Rather than leave that to be
+        discovered, test_no_operation_locks_accounts_by_id_while_this_one_locks_by_key
+        fails the day such an operation is registered, forcing the two to be
+        reconciled. Recorded because a build failure is a mitigation, not a fix.
+      - >
+        Still single-process concurrency, as T-027 disclosed. Two SQLite
+        connections in one interpreter; genuine OS-level parallelism and
+        SQLITE_BUSY remain NOT_RUN.
+    decisions: [DR-002, DR-003]
     required_dimensions: [correctness, data_integrity, security, testing]
+    independent_review:
+      status: NOT_RUN
+      note: >
+        Constitution section 7 — implemented by this session and NOT yet reviewed
+        by another agent. The two sabotage rounds are self-verification, which
+        framework.yaml explicitly does not count as review.
 
   - id: T-034
     title: "The web surface advertises 29 capabilities and can operate 4 of them"
@@ -1498,15 +1680,162 @@ follow_up_tasks:
       record why.
     change_class: ui_change
     mode: standard
-    status: ready
-    owned_paths: [promedia/web/app.py, promedia/web/templates/op.html]
+    status: complete
+    claimed_by: "claude-code-session-next3"
+    owned_paths: [promedia/web/app.py, promedia/web/templates/op.html, tests/test_decision_context.py, tests/test_ops_forms.py, tests/test_surface_signals.py]
     found_by: "independent review of T-034"
+    option_chosen:
+      chosen: "(b) render the decision context inline before the control"
+      as_a_two_step: >
+        (b) cannot be a single render: the form starts empty, so there is no
+        post_id to fetch a context for until something is submitted. The
+        submission therefore shows the basis and executes NOTHING; a second,
+        deliberate confirmation runs the operation.
+      why_not_a: >
+        Refusing approve-post/publish-post on /ops and linking to /posts/{id}
+        would take back part of what T-034 delivered — the operator asked for a
+        browser-operable surface, and a capability that redirects is not
+        operable. It also leaves the /ops form as the screen that ALMOST works.
+      why_not_c: >
+        Accepting it would leave F-2's authority surface authorising on a typed
+        id. The UI is the authority surface BECAUSE it shows the basis; without
+        that it is the CLI with a browser skin, which is the reviewer's phrasing
+        and is correct.
+      operator_may_downgrade: >
+        This is the strongest of the three options and preserves capability. If
+        the operator prefers (a) or (c), the change is small and this record is
+        the argument to weigh against.
     acceptance_criteria:
       - id: AC-1
         statement: "Approving or publishing from a browser is impossible without the decision context having been displayed first, or the decision to allow it is recorded with its reasoning."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          A POST to /ops/{approve-post,publish-post,release-publish-claim}
+          carrying a post_id renders the decision context and executes nothing;
+          only a submission carrying a confirmation matching that context runs.
+          test_approve_does_not_execute_on_the_first_submission asserts the post
+          is still 'queued' after the first POST; test_publish_is_gated_too
+          asserts publications == 0. tests/test_decision_context.py — 13 tests,
+          executed, observed pass. Full suite 359 passed.
+      - id: AC-2
+        statement: "The facts shown are the ones T-005 AC-1 requires of the approval surface: target account, rights verdict, ruleset version, asset hash."
+        result: PASSED
+        evidence: >
+          test_the_first_response_carries_the_facts_t005_requires looks each value
+          up through the 'post' operation and then requires it to appear on the
+          page, so a template that drops a row fails rather than passing on a
+          plausible-looking screen. The context is fetched THROUGH invoke(), not
+          read from the database in the adapter, so this screen and /posts/{id}
+          cannot show different facts about the same post.
+      - id: AC-3
+        statement: "The confirmation is bound to the facts displayed, not a bare acknowledgement."
+        result: PASSED
+        evidence: >
+          The confirmation carries a SHA-256 over the canonical JSON of the
+          decision context. If the basis changes between display and
+          confirmation, the digest no longer matches and the operator is re-shown
+          the current facts instead of authorising ones that stopped being true.
+          test_a_confirmation_goes_stale_when_the_basis_changes covers it, and it
+          was also driven end to end against a live server: verdict PERMITTED at
+          display, degraded to ESCALATE by new model evidence, stale confirmation
+          submitted — post stayed 'queued'.
+      - id: AC-4
+        statement: "The requirement does not over-apply, and the other surfaces are unchanged."
+        result: PASSED
+        evidence: >
+          A confirmation on everything is a confirmation nobody reads, so this is
+          asserted in both directions. test_ordinary_operations_are_not_gated and
+          test_ingest_still_runs_in_one_submission pin that non-post operations
+          still complete in one submission. test_the_api_route_is_unchanged pins
+          that /api/op/approve-post still executes directly — the confirmation is
+          a projection detail of one HTML route, NOT an operation-layer rule.
+          Had it been enforced in invoke() it would have become a capability the
+          CLI could not perform, and the parity gate would have been right to
+          fail. Parity stayed at 62 cases.
+    verification:
+      - command: "python -m pytest -p no:cacheprovider"
+        status: PASSED
+        observed: "359 passed (346 before this task, +13 from tests/test_decision_context.py)"
+      - command: "python -m pytest -p no:cacheprovider tests/test_parity.py"
+        status: PASSED
+        observed: "62 passed — unchanged; this task adds a step to one HTML route, not an operation"
+      - command: "python -m pytest -p no:cacheprovider tests/test_decision_context.py, with the confirmation branch disabled (`if False and _needs_decision_context(op)`)"
+        status: FAILED
+        observed: >
+          6 failures, including the two that ARE the defect —
+          test_approve_does_not_execute_on_the_first_submission (the post was
+          approved on a typed id, no context ever shown) and
+          test_publish_is_gated_too. Reverted; app.py SHA-256
+          7a1b2b9fee0f8087af0c0dee50af8b27c1699cc4b1ee4c46720ea07512f0a7a3.
+      - command: "python -m pytest -p no:cacheprovider tests/test_decision_context.py, with _decision_digest returning a constant"
+        status: FAILED
+        observed: >
+          Second sabotage, at the subtle point: the plausible weaker design is a
+          bare "did you mean it?" flag. test_a_confirmation_goes_stale_when_the_basis_changes
+          fails, which is the test that distinguishes a content-bound
+          confirmation from an acknowledgement. Reverted and hash-verified.
+      - command: "Live server on 127.0.0.1:8765 against a throwaway data directory, driven over real HTTP"
+        status: PASSED
+        observed: >
+          Not TestClient: a real uvicorn process, real cookie exchange from the
+          startup URL, real Origin headers. Submitting approve-post returned the
+          confirmation screen showing account 'demo', verdict PERMITTED, ruleset
+          'conservative 1.0.0' and the 64-hex asset hash, with the post still
+          'queued'. A forged confirmation left it queued. A confirmation issued
+          before new model evidence degraded the verdict PERMITTED -> ESCALATE
+          left it queued. Confirming the current facts approved it.
+          The instance was pointed at a sandbox data directory, so unlike T-034's
+          browser pass this one could exercise the MUTATING operations.
+      - command: "Browser rendering of the confirmation screen"
+        status: NOT_RUN
+        observed: >
+          The Browser pane was not compositing in this session — screenshots time
+          out and synthetic keystrokes do not reach the page, so form submissions
+          never left the browser (verified: only GETs appear in the network log).
+          The HTTP-level check above exercises the same server and the same
+          rendered HTML, but nobody has LOOKED at this screen. For a task whose
+          entire subject is what a human sees before deciding, that gap is worth
+          naming rather than glossing: OD-5's human-experience pass is the right
+          place to close it.
+    fabrications_introduced: []
+    assumptions:
+      - >
+        The rule is DERIVED (operator authority + mutates + entity 'post' +
+        declares post_id) rather than a name list in the adapter, so a future
+        operator decision on a post inherits it on the day it is registered.
+        Pinned as the current set {approve-post, publish-post,
+        release-publish-claim} by test_the_rule_is_derived_not_a_hardcoded_list.
+      - >
+        release-publish-claim is included by that rule. It is recovery rather
+        than authorisation, so the confirmation is arguably surplus there — but
+        it is an operator write to a post, showing its state first is harmless,
+        and carving out an exception would reintroduce the name list.
+    open_items:
+      - >
+        ENTITY_LOCKED now surfaces on the CONFIRMED submission of /ops/{name}
+        rather than the first, because the confirmation step executes nothing and
+        cannot report an execution-time condition. T-032's contract is unchanged
+        (409 on the request that attempts the write) and the adapter deliberately
+        does NOT pre-check the lock table, which would put C-19 logic in a
+        surface. tests/test_surface_signals.py updated to match, and rewritten to
+        use a post that really exists — the module's phantom CONTENDED_POST now
+        correctly answers 404 on this route, which is a fixture artefact rather
+        than a behaviour question.
+      - >
+        The confirmation is a UI affordance, not a security control. An agent
+        with the operator token can still POST /api/op/approve-post directly, as
+        it always could and as the CLI does. That is deliberate — F-1 requires
+        the capability on both surfaces — but it means this task closes a
+        human-experience gap and nothing more.
+    decisions: [DR-002, DR-004]
     required_dimensions: [human_experience, correctness, documentation, testing]
+    independent_review:
+      status: NOT_RUN
+      note: >
+        Constitution section 7 — implemented by this session and NOT yet reviewed
+        by another agent. Both sabotage rounds are self-verification. This task
+        came out of independent review of T-034, so leaving its own fix
+        unreviewed is exactly the asymmetry OD-6 records.
 
 # ---------------------------------------------------------------------------
 # Independent review, round 3 — the T-023/T-024/T-025 hardening.

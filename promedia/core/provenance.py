@@ -22,6 +22,7 @@ import sqlite3
 from typing import Any
 
 from ..errors import IntegrityError, NotFound
+from . import rights
 from .db import canonical_json, iso, new_id
 from .registry import Context
 
@@ -47,10 +48,20 @@ def seal(ctx: Context, asset_id: str) -> dict[str, Any]:
     if decl is None:
         raise NotFound(f"asset {asset_id} has no rights declaration", asset_id=asset_id)
 
-    verdict = ctx.conn.execute(
-        "SELECT * FROM rights_verdicts WHERE asset_id = ? ORDER BY decided_at DESC LIMIT 1",
-        (asset_id,),
-    ).fetchone()
+    # T-030 (N6). This was its own "ORDER BY decided_at DESC LIMIT 1", which
+    # differs from rights.latest_verdict's "ORDER BY decided_at DESC, id DESC"
+    # by a tiebreaker. Two verdicts sharing a decided_at — determine-rights
+    # called twice in the same clock tick, which is ordinary on Windows, where
+    # the timer granularity is coarse — and SQLite was free to return either
+    # row. The seal could then freeze a DIFFERENT verdict than the one the
+    # publish gate enforces, and the record's whole purpose (F-8) is to be the
+    # durable account of what was decided.
+    #
+    # Fixed by deleting the second copy rather than syncing it: one authority on
+    # "which verdict is current", for the same reason T-032 collapsed the four
+    # duplicated status maps into one. A tiebreaker that must be repeated in
+    # every caller is a tiebreaker that will eventually not be.
+    verdict = rights.latest_verdict(ctx, asset_id)
     if verdict is None:
         raise NotFound(
             f"asset {asset_id} has no rights verdict; determine rights before sealing",

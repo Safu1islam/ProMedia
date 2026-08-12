@@ -92,6 +92,61 @@ def status_for(error: ProMediaError) -> int:
     return ERROR_STATUS.get(error.code, DEFAULT_ERROR_STATUS)
 
 
+# --- T-035: decision context before the control -------------------------------
+#
+# Raised by independent review of T-034. The generic /ops/{name} form made every
+# capability operable from a browser, approve-post and publish-post included —
+# so the operator could authorise on a typed post_id, with the verdict, ruleset
+# version and asset hash appearing in the RESPONSE, after the decision. F-2
+# makes the UI the authority surface, and it is the authority surface BECAUSE it
+# shows the basis; a generic form that approves on a typed id is the CLI with a
+# browser skin.
+#
+# The rule is DERIVED from the operation rather than listed by name, for the
+# DR-002 reason that has come up in every task here: a hardcoded set in the
+# adapter is a second source of truth that drifts. An operator decision that
+# mutates an existing post is exactly the class /posts/{id} exists for.
+CONFIRM_FIELD = "__confirm"
+
+# The read-only operation that assembles the basis. Registered, agent-authority,
+# and the same one /posts/{id} renders — so the confirmation screen and the
+# review screen cannot show different facts about the same post.
+DECISION_CONTEXT_OP = "post"
+
+
+def _needs_decision_context(op: Operation) -> bool:
+    """Does authorising this require its basis on screen first?
+
+    True for an operator-authority write to an existing post: approve-post,
+    publish-post, release-publish-claim. Deriving it means a future operator
+    decision on a post inherits the requirement the day it is registered,
+    rather than the day someone remembers to add it to a list.
+    """
+    return (
+        op.authority == "operator"
+        and op.mutates
+        and op.entity == "post"
+        and "post_id" in {p.name for p in op.params}
+    )
+
+
+def _decision_digest(decision: dict[str, Any]) -> str:
+    """A fingerprint of the facts that were actually displayed.
+
+    Binding the confirmation to the CONTENT rather than to a bare "yes" is what
+    makes "shown first" checkable, and it buys a second guarantee for free: if
+    the basis changes between display and confirmation — retention deletes the
+    media, new evidence degrades an ancestor's verdict, the account goes to
+    'error' — the digest no longer matches and the operator is re-shown the
+    facts instead of authorising ones that have stopped being true.
+    """
+    import hashlib
+
+    from ..core.db import canonical_json
+
+    return hashlib.sha256(canonical_json(decision).encode("utf-8")).hexdigest()
+
+
 def _operations() -> dict[str, Operation]:
     """Everything this surface exposes: the registry, unfiltered, at request time.
 
@@ -275,7 +330,9 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
         cannot read the credential store cannot authenticate — which is the same
         boundary the CLI has, rather than a weaker one.
         """
-        conn = db.connect(cfg.db_path)
+        conn = db.connect(
+            cfg.db_path, busy_timeout_ms=int(cfg.get("database", "busy_timeout_ms"))
+        )
         db.apply_schema(conn)
         return Context(config=cfg, conn=conn, principal=principal_of(request))
 
@@ -443,6 +500,8 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
         result: dict[str, Any] | None = None,
         error: dict[str, Any] | None = None,
         status_code: int = 200,
+        decision: dict[str, Any] | None = None,
+        confirm_digest: str | None = None,
     ) -> Any:
         return TEMPLATES.TemplateResponse(
             request=request,
@@ -450,6 +509,12 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
             status_code=status_code,
             context={
                 "op": op,
+                # T-035. The decision context, when this operation is one that
+                # must show its basis before its control. None for everything
+                # else, so the template renders exactly as it did before.
+                "decision": decision,
+                "confirm_digest": confirm_digest,
+                "confirm_field": CONFIRM_FIELD,
                 # Sensitive values are stripped rather than re-rendered: a
                 # re-populated password field puts the secret back into the
                 # response body on every subsequent error (T-024's reasoning
@@ -525,6 +590,32 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
         # Query parameters are ignored entirely here, so a value typed into the
         # URL cannot become an operation parameter on this route.
         params: dict[str, Any] = {k: v for k, v in form.items()}
+        # T-035. Never an operation parameter — stripped before validate() sees
+        # it, exactly as the operator token is on /api/op (T-026).
+        confirmed = params.pop(CONFIRM_FIELD, None)
+
+        if _needs_decision_context(op) and params.get("post_id"):
+            # The basis is fetched THROUGH the registry, not read from the
+            # database here: 'post' is an operation, so this cannot show the
+            # operator something the CLI's `post` command would not.
+            try:
+                decision = guarded(request, DECISION_CONTEXT_OP, {"post_id": params["post_id"]})
+            except ProMediaError as exc:
+                return render_op(
+                    request, op, submitted=params, error=exc.to_dict(),
+                    status_code=status_for(exc),
+                )
+            if isinstance(decision, JSONResponse):  # cross-origin refusal (T-025)
+                return decision
+            digest = _decision_digest(decision)
+            if confirmed != digest:
+                # Nothing has executed. Either no confirmation was presented, or
+                # it was for a DIFFERENT set of facts than the ones true now —
+                # both mean the operator has not yet seen what they are
+                # authorising, so show it and require a second, deliberate act.
+                return render_op(
+                    request, op, submitted=params, decision=decision, confirm_digest=digest
+                )
 
         try:
             outcome = guarded(request, op.name, params)

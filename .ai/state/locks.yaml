@@ -4,6 +4,105 @@
 locks: []
 
 history:
+  - path: "promedia/core/registry.py, promedia/core/ops/accounts.py, tests/test_account_locking.py, tests/test_locking.py"
+    task_id: "T-033"
+    agent: "claude-code-session-next3"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-13T00:10:00+04:00"
+    released_at: "2026-08-13T03:30:00+04:00"
+    note: >
+      Locking the account reconnect path. registry.py is claimed because the
+      natural-key mechanism belongs in lock_target(), not in the handler —
+      putting it in accounts.py would be per-operation logic of exactly the kind
+      DR-002 keeps out of the callers.
+
+      tests/test_locking.py was initially left unclaimed to keep its 13-case
+      count comparable, and that was the wrong call: it PINS connect-account in
+      CREATING_OPERATIONS with the comment "there is no id to lock because the
+      entity does not exist yet", which this task makes false. Keeping a stale
+      assertion to protect a number is how N5 happened. Claimed and corrected
+      instead.
+
+  - path: "promedia/web/app.py, promedia/web/templates/op.html, tests/test_decision_context.py, tests/test_ops_forms.py, tests/test_surface_signals.py"
+    task_id: "T-035"
+    agent: "claude-code-session-next3"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-13T00:10:00+04:00"
+    released_at: "2026-08-13T03:30:00+04:00"
+    note: >
+      Decision context before the approve/publish control on the generic /ops
+      form.
+
+      tests/test_ops_forms.py was initially left unclaimed to keep T-034's 62
+      cases comparable, and one of them had to be claimed after all:
+      test_rights_gate_still_refuses_through_the_form POSTs approve-post ONCE
+      and asserts 403. Under this task the first POST returns the confirmation
+      screen having executed nothing, so it is 200 — the gate is not weakened
+      (the post stays queued, which that test also asserts) but the test encodes
+      the old one-step flow. Updated to go through the confirmation and assert
+      403 on the confirmed submission, which is a strictly stronger claim than
+      it made before. The other 61 cases are untouched.
+
+      tests/test_surface_signals.py claimed for the same reason and only for
+      test_contended_entity_is_409_on_the_generic_form_route: the confirmation
+      step executes nothing, so it cannot report an execution-time condition,
+      and ENTITY_LOCKED now surfaces on the CONFIRMED submission instead of the
+      first one. T-032's contract is unchanged — 409 on the request that
+      attempts the write — and the adapter deliberately does NOT pre-check the
+      lock table, which would be C-19 logic duplicated into a surface.
+
+  - path: "promedia/config.py, promedia/core/db.py, promedia/core/ingest.py, promedia/core/provenance.py, promedia/cli.py, promedia/web/app.py, tests/test_review_regressions.py, tests/test_hygiene.py"
+    task_id: "T-030"
+    agent: "claude-code-session-next3"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-13T00:10:00+04:00"
+    released_at: "2026-08-13T03:30:00+04:00"
+    note: >
+      Four hygiene items: ffprobe timeout and busy_timeout still hardcoded,
+      provenance/rights disagreeing on same-timestamp ties, config.load handing
+      out the mutable module-level DEFAULTS. tests/test_hygiene.py is new.
+
+      SCOPE GROWTH, recorded rather than left implicit: promedia/cli.py and
+      promedia/web/app.py were added after starting. Moving busy_timeout out of
+      db.py only relocates the literal unless the two callers that HAVE a loaded
+      Config actually pass it — otherwise a promedia.toml override still does
+      nothing, which is the defect O3 names. One line each. web/app.py is
+      already claimed above by T-035 in this same session.
+
+  - path: "aef/**, .ai/state/decisions/DR-014.yaml, .ai/state/plan.yaml"
+    task_id: "AEF-0.3.0"
+    agent: "claude-code-session-aef030"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-13T02:30:00+04:00"
+    released_at: "2026-08-13T03:05:00+04:00"
+    note: >
+      Framework authorship, not project work: AEF 0.2.0 -> 0.3.0. The dashboard
+      answered "what is being worked on right now" from tasks.yaml `status`
+      alone, which is the wrong source. A lock is claimed BEFORE editing
+      (Constitution rule 3); `status: claimed` depends on an agent remembering
+      to write it. Observed live in this repository at 02:25 on 2026-08-13:
+      T-030, T-033 and T-035 all held by claude-code-session-next3, all
+      `status: ready` in tasks.yaml, and the dashboard reporting "Nothing is
+      claimed right now" while that session was editing
+      promedia/core/registry.py. See DR-014.
+
+      CLAIMED BEFORE THE WORK, deliberately. The 0.2.0 authoring session
+      recorded its claim afterwards and collided with T-032 over a decision
+      record; that failure is disclosed below and was not repeated. DR-014 was
+      claimed for the same reason. .ai/state/plan.yaml is in this claim for one
+      line only — meta.aef_version 0.2.0 -> 0.3.0.
+
+      promedia/** and tests/** were NOT claimed and were NOT touched:
+      claude-code-session-next3 was live in those paths throughout, and the
+      operator directed that those locks be respected. That session edited
+      locks.yaml concurrently with this one, adding paths to its own T-030 and
+      T-035 claims; both sets of edits survived, which is the outcome the
+      surgical-edit approach was chosen for.
+
+      OUTSTANDING: ProMedia's full suite is not green (1 failed, 358 passed at
+      release time), and the failure belongs to that session's in-flight work,
+      not to this one. Recorded in DR-014 as FAILED rather than omitted.
+
   - path: "aef/**, .ai/state/plan.yaml, .ai/state/decisions/DR-013.yaml, .claude/launch.json"
     task_id: "AEF-0.2.0"
     agent: "claude-code-session-aef020"

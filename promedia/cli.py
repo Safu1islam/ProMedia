@@ -186,7 +186,9 @@ def main(argv: list[str] | None = None) -> int:
         expected = CredentialStore().operator_token()
         principal = resolve(supplied, expected, identifier="cli")
 
-        conn = db.connect(config.db_path)
+        conn = db.connect(
+            config.db_path, busy_timeout_ms=int(config.get("database", "busy_timeout_ms"))
+        )
         try:
             if args.operation != "init":
                 db.apply_schema(conn)  # idempotent; keeps a fresh checkout usable

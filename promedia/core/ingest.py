@@ -50,19 +50,29 @@ def object_path_for(root: Path, content_hash: str) -> Path:
     return root / content_hash[0:2] / content_hash[2:4] / content_hash
 
 
-def probe_media(path: Path) -> dict[str, Any]:
+def probe_media(path: Path, *, timeout_seconds: float | None = None) -> dict[str, Any]:
     """Best-effort technical metadata.
 
     ffprobe is absent on this machine (project.md A-15). When it is missing the
     duration is recorded as null with probe_status 'unavailable' — never as a
     guessed number. An invented duration would be a fabrication, and it would
     be one that later arithmetic silently trusts.
+
+    T-030 (O2): the timeout was a literal 30. It is the ceiling on how long an
+    ingest can block on an external binary, which is a limit an operator has a
+    real reason to change on slow media, so it belongs in configuration like
+    every other limit (protocol 05). Resolved from ``ingest.probe_timeout_seconds``
+    by the caller; the parameter keeps this function callable without a Config.
     """
+    if timeout_seconds is None:
+        from ..config import DEFAULTS
+
+        timeout_seconds = DEFAULTS["ingest"]["probe_timeout_seconds"]
     try:
         proc = subprocess.run(
             ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", str(path)],
             capture_output=True,
-            timeout=30,
+            timeout=timeout_seconds,
             check=False,
         )
     except (FileNotFoundError, OSError):
@@ -200,7 +210,10 @@ def ingest_file(
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, target)
 
-        probe = probe_media(target)
+        probe = probe_media(
+            target,
+            timeout_seconds=float(ctx.config.get("ingest", "probe_timeout_seconds")),
+        )
         asset_id = new_id("as")
 
         # 4. Record asset and declaration atomically.

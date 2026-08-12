@@ -43,7 +43,21 @@ def canonical_json(payload: Any) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
-def connect(db_path: Path, *, busy_timeout_ms: int = 5000) -> sqlite3.Connection:
+def connect(db_path: Path, *, busy_timeout_ms: int | None = None) -> sqlite3.Connection:
+    """Open a connection with the pragmas C-19 concurrency depends on.
+
+    T-030 (O3): ``busy_timeout_ms`` defaulted to a literal 5000 here while
+    ``database.busy_timeout_ms`` is what configuration says. With up to four
+    concurrent sessions (C-18) this is the value that decides whether a
+    contended write waits or fails, so a caller raising it in promedia.toml and
+    seeing no effect is exactly the silent failure protocol 05 forbids.
+    Resolved from configuration when not supplied; the parameter stays so tests
+    can pin a short timeout without a config file.
+    """
+    if busy_timeout_ms is None:
+        from ..config import DEFAULTS
+
+        busy_timeout_ms = DEFAULTS["database"]["busy_timeout_ms"]
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path), isolation_level=None)
     conn.row_factory = sqlite3.Row

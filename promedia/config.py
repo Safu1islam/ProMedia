@@ -43,7 +43,26 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "locks": {"ttl_minutes": 90},
     "web": {"host": "127.0.0.1", "port": 8765},
+    # T-030 (O2, O3). Both were literals in the modules that used them, which
+    # protocol 05 forbids for the same reason as any other limit: the value a
+    # reader finds in configuration was not the value the code used.
+    "database": {"busy_timeout_ms": 5000},
+    "ingest": {"probe_timeout_seconds": 30},
 }
+
+
+def defaults() -> dict[str, dict[str, Any]]:
+    """A fresh copy of DEFAULTS.
+
+    T-030 (O4). ``load()`` used to hand out the module-level dict itself on the
+    no-file path, so every Config built without a promedia.toml SHARED one
+    mutable object with the module and with each other. Config is frozen, but
+    ``values`` is a plain nested dict and freezing does not reach into it: one
+    ``cfg.values["storage"]["ceiling_bytes"] = 1`` would have moved the ceiling
+    for every subsequent load in the process, including the test suite's. The
+    file path never had the bug — ``_deep_merge`` already copies.
+    """
+    return {section: dict(keys) for section, keys in DEFAULTS.items()}
 
 
 @dataclass(frozen=True)
@@ -130,7 +149,7 @@ def default_data_dir() -> Path:
 def load(start: Path | None = None) -> Config:
     """Load configuration. Absent file is not an error — defaults apply."""
     path = find_config_file(start)
-    values = DEFAULTS
+    values = defaults()
     if path is not None:
         # Decoded here rather than handed to tomllib.load() because Notepad —
         # the default editor on the operator's platform — writes UTF-8 with a

@@ -260,9 +260,20 @@ def test_rights_gate_still_refuses_through_the_form(env, media_file):
         {"account_id": account["account_id"], "asset_id": asset["asset_id"], "body": "hi"},
     )
 
-    response = operator_client(cfg, store).post(
-        "/ops/approve-post", data={"post_id": post["post_id"], "decision": "approved"}
-    )
+    client = operator_client(cfg, store)
+    data = {"post_id": post["post_id"], "decision": "approved"}
+
+    # T-035: approve-post now confirms first, so the single POST that used to
+    # execute returns the decision screen having run nothing. The gate is
+    # asserted on the CONFIRMED submission, which is the stronger claim — the
+    # refusal survives the operator explicitly saying yes.
+    from tests.test_decision_context import confirmation
+
+    first = client.post("/ops/approve-post", data=data)
+    assert first.status_code == 200
+    assert invoke(ctx, "post", {"post_id": post["post_id"]})["status"] == "queued"
+
+    response = client.post("/ops/approve-post", data={**data, **confirmation(first)})
     assert response.status_code == 403
     assert invoke(ctx, "post", {"post_id": post["post_id"]})["status"] == "queued"
 

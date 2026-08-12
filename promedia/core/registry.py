@@ -117,6 +117,11 @@ class Operation:
     mutates: bool = False
     entity: str | None = None
     danger: str | None = None  # shown on the approval surface before the control
+    # T-033. The parameters forming this entity's NATURAL key, for an operation
+    # that writes an existing entity it was not handed an id for. Declared here
+    # rather than resolved in the handler for the DR-002 reason: a rule stated
+    # on the operation is enforced once, in invoke(), for both surfaces.
+    lock_by: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -126,6 +131,7 @@ class Operation:
             "mutates": self.mutates,
             "entity": self.entity,
             "danger": self.danger,
+            "lock_by": list(self.lock_by),
             "params": [p.to_dict() for p in self.params],
         }
 
@@ -142,6 +148,7 @@ def register(
     mutates: bool = False,
     entity: str | None = None,
     danger: str | None = None,
+    lock_by: tuple[str, ...] = (),
 ) -> Callable[[Handler], Handler]:
     """Register a capability. Duplicate names are a hard error at import time.
 
@@ -151,6 +158,17 @@ def register(
     """
     if authority not in {"agent", "operator"}:
         raise ValueError(f"unknown authority '{authority}' for operation '{name}'")
+    declared = {p.name for p in params}
+    unknown_key = [p for p in lock_by if p not in declared]
+    if unknown_key:
+        # A natural key naming a parameter that does not exist would silently
+        # never lock. Caught at import time, like the duplicate-name check.
+        raise ValueError(
+            f"operation '{name}' declares lock_by {unknown_key} "
+            f"which is not among its parameters {sorted(declared)}"
+        )
+    if lock_by and entity is None:
+        raise ValueError(f"operation '{name}' declares lock_by but names no entity to lock")
 
     def decorate(fn: Handler) -> Handler:
         if name in OPERATIONS:
@@ -167,6 +185,7 @@ def register(
             mutates=mutates,
             entity=entity,
             danger=danger,
+            lock_by=lock_by,
         )
         return fn
 
@@ -218,33 +237,70 @@ def lock_target(op: Operation, params: dict[str, Any]) -> tuple[str, str] | None
       take a lock (C-19 constrains writers only), and ``init`` /
       ``reclaim-reservations`` mutate but name no entity, so there is no owner
       to record.
-    * **No ``<entity>_id`` parameter declared** — the operation *creates* the
-      entity (``ingest``, ``queue-post``, ``connect-account``). There is no id
-      yet, so there is nothing another agent could be holding and nothing to
-      wait for. Skipped explicitly, not by accident. The residual gap is
-      ``connect-account``, which updates an existing account when one already
-      matches platform+handle; its natural key is not an entity id and locking
-      on it would be a different mechanism, so it is recorded as a known limit
-      rather than approximated here.
+    * **No ``<entity>_id`` parameter declared, and no ``lock_by``** — the
+      operation *creates* the entity (``ingest``, ``queue-post``). There is no
+      id yet, so there is nothing another agent could be holding and nothing to
+      wait for. Skipped explicitly, not by accident.
     * **Declared** — its value is the lock key.
+
+    ``lock_by`` (T-033) covers the case between the two: an operation that
+    writes an entity that may ALREADY EXIST but was not handed an id for it.
+    ``connect-account`` is the only one — since T-023 a reconnect preserves the
+    account id and rotates the credential, so it mutates an existing row, but
+    its identity is the natural key ``platform:handle`` rather than an
+    ``account_id`` parameter. Inventing an id to satisfy the id rule would have
+    been the wrong shape; the key it actually has is the thing to lock.
+
+    Natural keys are prefixed ``key:`` so they cannot collide with a generated
+    id (``acct_…``) in the shared ``entity_locks`` table. That prefix also makes
+    the two namespaces *visibly* different in ``list_locks``, which C-19 needs —
+    an owner you cannot identify is not a visible owner. The cost is that an
+    operation locking accounts by id would NOT exclude one locking by key: they
+    are different rows. No operation does today, and
+    ``tests/test_account_locking.py`` fails the day one is added rather than
+    leaving that to be discovered.
+
+    Key parts are stripped and lowercased, matching the normalisation
+    ``connect-account`` itself applies (N13). They must agree: if the lock key
+    case-folded but the handler did not, ``x/Case`` and ``x/case`` would take
+    ONE lock and write TWO accounts. Where they cannot be proven to agree, over-
+    locking is the safe direction — a spurious ENTITY_LOCKED is transient and
+    retryable (DR-012), whereas under-locking is a concurrent write to one row.
     """
     if not op.mutates or op.entity is None:
         return None
     key = f"{op.entity}_id"
-    if key not in {p.name for p in op.params}:
-        return None
-    value = params.get(key)
-    if not isinstance(value, str) or not value:
-        # Unreachable while every such parameter is required — validate() has
-        # already refused a missing one. A hard error rather than a silent
-        # unlocked write if that ever changes: writing to a named entity with
-        # no recorded owner is the exact hole C-19 exists to close.
-        raise ValidationError(
-            f"operation '{op.name}' mutates a {op.entity} but supplied no '{key}' to lock",
-            operation=op.name,
-            parameter=key,
-        )
-    return (op.entity, value)
+    if key in {p.name for p in op.params}:
+        value = params.get(key)
+        if not isinstance(value, str) or not value:
+            # Unreachable while every such parameter is required — validate() has
+            # already refused a missing one. A hard error rather than a silent
+            # unlocked write if that ever changes: writing to a named entity with
+            # no recorded owner is the exact hole C-19 exists to close.
+            raise ValidationError(
+                f"operation '{op.name}' mutates a {op.entity} but supplied no '{key}' to lock",
+                operation=op.name,
+                parameter=key,
+            )
+        return (op.entity, value)
+    if op.lock_by:
+        parts: list[str] = []
+        for part_name in op.lock_by:
+            value = params.get(part_name)
+            if not isinstance(value, str) or not value.strip():
+                # Same reasoning as the id branch above: every lock_by parameter
+                # is required today, so validate() has already refused a missing
+                # one. Refusing rather than falling through to "no lock" keeps
+                # an unlocked write from being the failure mode.
+                raise ValidationError(
+                    f"operation '{op.name}' locks its {op.entity} by "
+                    f"{list(op.lock_by)} but supplied no '{part_name}'",
+                    operation=op.name,
+                    parameter=part_name,
+                )
+            parts.append(value.strip().lower())
+        return (op.entity, "key:" + ":".join(parts))
+    return None
 
 
 def invoke(ctx: Context, name: str, raw_params: dict[str, Any] | None = None) -> dict[str, Any]:
