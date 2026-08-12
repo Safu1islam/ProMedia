@@ -25,7 +25,7 @@ meta:
   plan_version: 2
   schema_version: 1
   project: ProMedia
-  aef_version: 0.2.0
+  aef_version: 0.3.0
   planned_at: 2026-08-08
   restructured_at: 2026-08-12
   planned_by_role: analyst

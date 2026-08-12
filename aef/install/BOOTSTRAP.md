@@ -6,10 +6,14 @@ Run once per project. Creates the mutable project layer and wires up the tools.
 
 ```
 git submodule add <framework-repo-url> aef
-git -C aef checkout v0.1.0
+git -C aef checkout v0.3.0
 ```
 
 Any copy works, provided `aef/VERSION` is recorded and `aef/` is never edited.
+
+Pin the current release. Checking out an older tag is a deliberate choice, not a
+default — 0.1.x has no plan tree and no tooling, so a project pinned there
+cannot run steps 5 or 6 of this file at all.
 
 ## 2. Create the project layer
 
@@ -69,6 +73,9 @@ is not required.
 - [ ] State files exist and parse — `python aef/tools/aef.py doctor`
 - [ ] `.ai/state/plan.yaml` exists and `aef.py validate` exits 0
 - [ ] Every plan leaf has an agent, or is deliberately unassigned
+- [ ] Coordination notices from `validate` are empty, or each one is understood.
+      They do not fail the gate; an unexplained one still means two state files
+      disagree about who is working on what
 - [ ] Adapter present for each tool in use
 - [ ] `aef/` is git-ignored for edits or protected in review
 

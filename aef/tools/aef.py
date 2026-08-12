@@ -97,7 +97,8 @@ def cmd_progress(args) -> int:
     print(f"  {'-' * 4}")
     print(f"  {progress.leaf_count:>4}  tasks in the plan")
 
-    def section(title: str, nodes: list[model.Node], reason: bool = False) -> None:
+    def section(title: str, nodes: list[model.Node], reason: bool = False,
+                holder: bool = False) -> None:
         print(f"\n{title}")
         if not nodes:
             print("  (none)")
@@ -111,10 +112,18 @@ def cmd_progress(args) -> int:
             print(line + agent)
             if where:
                 print(f"        in: {where}")
+            # WHO, not just what. The assigned agent is a plan-time intention;
+            # the lock owner is the session actually holding the files, and on a
+            # project with concurrent agents they are not always the same.
+            if holder and node.lock is not None:
+                print(f"        held by: {node.lock.agent}"
+                      f"{f' until {node.lock.expires_at}' if node.lock.expires_at else ''}")
+            elif holder and node.task and node.task.get("claimed_by"):
+                print(f"        claimed by: {node.task['claimed_by']}")
             if reason and node.task and node.task.get("blocked_reason"):
                 print(f"        why: {' '.join(str(node.task['blocked_reason']).split())}")
 
-    section("Being worked on now:", plan.current())
+    section("Being worked on now:", plan.current(), holder=True)
     section("Coming next:", plan.upcoming(8))
     section("Needs attention:", plan.attention(), reason=True)
 
@@ -133,13 +142,28 @@ def cmd_progress(args) -> int:
 
 def cmd_validate(args) -> int:
     plan = _load(args)
+
+    def notices() -> None:
+        # Printed whether or not the structural check passed, and never fatal.
+        # A coordination notice describes this moment — somebody is mid-task —
+        # and gating the plan on it would mean a plan cannot be validated while
+        # anyone is working on the project.
+        if not plan.notices:
+            return
+        print(f"\n{len(plan.notices)} coordination notice(s) — not a plan failure:",
+              file=sys.stderr)
+        for notice in plan.notices:
+            print(f"  - {notice}", file=sys.stderr)
+
     if not plan.problems:
         progress = plan.progress()
         print(f"plan OK — {progress.leaf_count} leaves, {len(plan.tasks)} tasks, all accounted for")
+        notices()
         return 0
     print(f"{len(plan.problems)} problem(s):", file=sys.stderr)
     for problem in plan.problems:
         print(f"  - {problem}", file=sys.stderr)
+    notices()
     return 1
 
 
@@ -208,16 +232,23 @@ def cmd_doctor(args) -> int:
         with open(version_path, encoding="utf-8") as handle:
             pinned = handle.read().strip()
         print(f"aef/VERSION  {pinned}" + ("" if pinned == AEF_TOOLS_VERSION else "   <-- MISMATCH with tools"))
+    # locks.yaml is optional — a project nobody edits concurrently has none —
+    # so its absence is reported as such rather than as MISSING.
     for relative in (".ai/state/plan.yaml", ".ai/state/tasks.yaml", "aef/config/agents.yaml"):
         full = os.path.join(root, relative)
         print(f"{'found  ' if os.path.exists(full) else 'MISSING'}      {relative}")
+    locks_relative = ".ai/state/locks.yaml"
+    if os.path.exists(os.path.join(root, locks_relative)):
+        print(f"found        {locks_relative}")
+    else:
+        print(f"absent       {locks_relative}   (optional; no concurrent work recorded)")
 
     # Prove the bundled reader on this project's own files, both ways when
     # PyYAML is present. Claiming the fallback works without running it would be
     # exactly the unverified claim the constitution forbids.
     if yamlio.USING_PYYAML:
         import yaml as pyyaml
-        for relative in (".ai/state/plan.yaml", ".ai/state/tasks.yaml"):
+        for relative in (".ai/state/plan.yaml", ".ai/state/tasks.yaml", ".ai/state/locks.yaml"):
             full = os.path.join(root, relative)
             if not os.path.exists(full):
                 continue

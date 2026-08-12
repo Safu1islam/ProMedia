@@ -1,0 +1,197 @@
+id: DR-014
+title: Adopt AEF 0.3.0 — derive live work from locks.yaml, not from task status alone
+date: 2026-08-13
+status: accepted
+decided_by: operator
+recorded_by: claude-code-session-aef030
+decision_area: framework_version_and_progress_reporting
+
+context: >
+  The operator asked for a review of the AEF planning and progress dashboard
+  update. AEF 0.2.0 already delivered most of it — A-to-Z planning (protocol 04
+  plus Constitution section 4a), the plan tree, derived percentages, the six
+  node statuses, automatic and manual agent assignment, and a separate,
+  lightweight progress view on its own port. Verification of those is recorded
+  in the completion report rather than repeated here.
+
+  One requirement was NOT met, and the failure was observable in this repository
+  at the moment of review rather than inferred from reading code.
+
+observed_defect: >
+  At 02:25 on 2026-08-13, .ai/state/locks.yaml recorded three live locks held by
+  claude-code-session-next3, on T-030, T-033 and T-035. The filesystem agreed:
+  promedia/core/registry.py had been modified minutes earlier and
+  tests/test_account_locking.py was new and untracked. That session was running.
+
+  tasks.yaml recorded all three as `status: ready`.
+
+  The dashboard therefore reported "Nothing is claimed right now" under
+  "Being worked on now", and listed all three under "Coming next". Two of the
+  operator's stated requirements — what is being worked on, and what is coming
+  next — were both answered wrongly, at the same time, about the same tasks.
+
+root_cause: >
+  0.2.0 derived every status from tasks.yaml alone. That is the right source for
+  "is this done?" and the wrong source for "is anyone on this right now?".
+
+  `status: claimed` is written when an agent remembers to write it, and several
+  agents in this project's own history have not. A file lock is claimed BEFORE
+  the first edit, because Constitution rule 3 makes it mandatory and because an
+  agent that skips it collides with another agent — which has already happened
+  here (see DR-013's numbering_note). The lock is the earlier signal and the
+  enforced one, and the dashboard was not reading it.
+
+decision: >
+  .ai/state/locks.yaml becomes a third input to the plan model, alongside
+  plan.yaml (structure) and tasks.yaml (status). A live lock promotes a pending
+  or waiting_dependency leaf to In progress, and the holding agent is displayed.
+
+  Pin bumped 0.2.0 -> 0.3.0. This is framework authorship, performed the way
+  CLAUDE.md requires — a deliberate version bump with a changelog entry, not an
+  edit in place — and under a lock claimed BEFORE the work, which is the part
+  the 0.2.0 authoring session got wrong.
+
+alternatives_considered:
+  - option: "Leave it, and require agents to set `status: claimed` reliably."
+    rejected_because: >
+      Already the rule, already documented, and already broken three times in
+      this repository by three different sessions. A convention that has failed
+      every time it was tested is not a control. The lock is enforced by
+      necessity — an agent that does not claim one loses its edits — so it is
+      the signal that will still be true next time.
+  - option: Treat a lock as authoritative for every status.
+    rejected_because: >
+      A lock is evidence of intent to edit, not a finding about the work.
+      Letting it override `blocked` would take a NEEDS_HUMAN item off the
+      operator's screen; letting it override `complete` or `failed` would make
+      finished or broken work read as healthy. Promotion is therefore restricted
+      to pending and waiting_dependency, and any other combination is reported.
+  - option: Make lock/status disagreement a validation failure.
+    rejected_because: >
+      `aef.py validate` is protocol 04's hand-over gate. Failing it whenever
+      somebody holds a lock would mean a plan cannot be validated while anyone
+      is working on the project. Split into a separate non-fatal notice channel
+      instead: reported prominently, exit code unchanged.
+  - option: Infer live work from file modification times.
+    rejected_because: >
+      Guessing from the filesystem where a declared record already exists. The
+      lock states its owner, its paths, its task and its expiry; mtimes state
+      none of those and would produce false positives on every checkout.
+
+consequences:
+  - >
+    The dashboard now distinguishes the plan's INTENTION (assigned agent) from
+    the current REALITY (lock holder). On a single-agent project they coincide
+    and the lock chip never appears.
+  - >
+    Disagreement between the two state files is surfaced the moment it occurs,
+    rather than resolved silently. A silent resolution would have hidden exactly
+    the condition that produced this decision.
+  - >
+    An absent or unparseable lock TTL counts as LIVE. The failure is deliberately
+    biased toward over-reporting work in progress, because the opposite error
+    tells an agent a file is free while another agent is editing it.
+  - >
+    A framework upgrade is not automatic for other projects. 0.3.0 reads
+    locks.yaml if present and behaves exactly as 0.2.0 did if it is absent, so
+    the upgrade is additive and needs no state migration.
+
+verification:
+  - check: "aef/tools/run_tests.py"
+    status: PASSED
+    observed: "69 tests, OK (51 before; +18 from tools/tests/test_locks.py)"
+  - check: "Sabotage 1 — promotion disabled (`if True or ...` in _apply_lock)"
+    status: FAILED
+    observed: >
+      Intentional, to prove the new tests can fail. 4 failures + 1 error, all in
+      Promotion: the live-lock promotion, the removal from Coming next, the
+      group rollup, the waiting_dependency case, and held_by reporting.
+  - check: "Sabotage 2 — guard rails removed (promote regardless of status)"
+    status: FAILED
+    observed: >
+      3 failures, all in Limits: a lock resurrecting a complete task, hiding a
+      failure, and hiding a blocked task. This is the direction that would have
+      taken a NEEDS_HUMAN item off the operator's screen.
+  - check: "Sabotage 3 — notices folded into problems"
+    status: FAILED
+    observed: >
+      1 failure: test_a_lock_over_a_ready_task_is_a_notice_not_a_problem. Pins
+      the exit-code decision above.
+  - check: "model.py restored byte-identical after all three sabotages"
+    status: PASSED
+    observed: >
+      SHA-256 44887e0dbb2bbdc3255e3a2580824ee623c2839c63f0893d5a73a685fff24083
+      before and after; `grep -rn 'if True' aef/tools/aefkit/` finds nothing.
+  - check: "aef.py validate"
+    status: PASSED
+    observed: >
+      "plan OK — 31 leaves, 31 tasks, all accounted for", exit 0, with 4
+      coordination notices printed to stderr. Exit code unchanged from 0.2.0.
+  - check: "aef.py progress / tree — live work reported"
+    status: PASSED
+    observed: >
+      T-030, T-033 and T-035 now appear under "Being worked on now" with
+      "held by: claude-code-session-next3 until 2026-08-13T04:00:00+04:00", and
+      no longer appear under "Coming next". Counts moved from 25/1/5 to
+      25 complete / 3 in progress / 1 blocked / 2 pending. The percentage is
+      unchanged at 81%, which is correct — starting work is not finishing it.
+  - check: "Dashboard rendered in a browser at http://127.0.0.1:7423/progress"
+    status: PASSED
+    observed: >
+      Live coordination notices panel present with 4 entries; three rows under
+      "Being worked on now" each carrying a lock chip naming the holding
+      session; "Coming next" reduced to T-022 and T-018.
+  - check: "aef.py doctor, and the bundled YAML reader"
+    status: PASSED
+    observed: >
+      Tools and aef/VERSION both 0.3.0. Bundled reader agrees with PyYAML on
+      locks.yaml as well as plan.yaml and tasks.yaml, and
+      `--force-bundled progress` produces identical output. AEF ships without
+      PyYAML, so this path is not optional.
+  - check: "ProMedia's own test suite unaffected by THIS work"
+    status: PASSED
+    observed: >
+      Established by scope, not by a green run, because a green run was not
+      available. Every file changed here is under aef/, .ai/state/ or .claude/.
+      Nothing under promedia/ or tests/ was touched, and no module in either
+      imports aefkit — aef/tools is invoked as a script and is not on the
+      application's import path. `git diff --name-only` confirms the split.
+  - check: "Full ProMedia suite, run at 02:5x on 2026-08-13"
+    status: FAILED
+    observed: >
+      1 failed, 358 passed, 1 warning in 81.05s. The failure is
+      tests/test_surface_signals.py::test_contended_entity_is_409_on_the_generic_form_route.
+      NOT CAUSED BY THIS WORK, and not this session's to fix:
+      claude-code-session-next3 holds live locks on T-030/T-033/T-035 and is
+      editing those paths right now. An earlier run in the same window reported
+      3 failures and a later one reported 1, so the tree is changing between
+      measurements. That session's own lock note in locks.yaml states it is
+      rewriting test_ops_forms.py as part of T-035.
+
+      Recorded as FAILED rather than omitted. The baseline before this session
+      began was 322 passed; the count is now 359 collected because the other
+      session has added tests/test_account_locking.py and tests/test_hygiene.py.
+      A clean full-suite result for ProMedia is NOT_RUN until those three tasks
+      land, and that is the honest status.
+
+not_verified:
+  - >
+    Multi-project behaviour. Everything here was exercised against this
+    repository's own state files plus synthetic fixtures in the test suite. AEF
+    is meant to be copied into other projects, and no other project has run it.
+  - >
+    A lock whose expiry passes WHILE the dashboard page is open. The server
+    re-reads state on every request, so a refresh is correct, but nothing pushes
+    the change to an already-rendered page and there is no auto-refresh.
+
+open_items:
+  - >
+    The AEF-0.3.0 lock itself raises a coordination notice, because its task id
+    is framework authorship and appears in no project task file. That is a true
+    statement and is left visible rather than special-cased: work happening in
+    this repository that the project plan does not know about is worth seeing.
+  - >
+    Three tasks are recorded as being worked on by claude-code-session-next3 on
+    the strength of their locks. This session did not touch T-030, T-033 or
+    T-035, or any path they claim, per the operator's instruction to respect
+    those locks.

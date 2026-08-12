@@ -3,6 +3,53 @@
 All notable changes to AEF are recorded here.
 Versions follow semantic versioning. Projects pin a version; upgrades are deliberate.
 
+## [0.3.0] — 2026-08-13
+
+Make "being worked on now" true.
+
+0.2.0 derived every status from `tasks.yaml`. That answers "is this done?"
+correctly and "is anyone on this right now?" incorrectly, because `status:
+claimed` is written when an agent remembers to write it, whereas a file lock is
+claimed **before the first edit** — Constitution rule 3 makes it mandatory. The
+dashboard was reading the later, weaker signal.
+
+Observed in a live project rather than imagined: three tasks held by a running
+agent session, all reading `ready` in `tasks.yaml`, the dashboard reporting
+"Nothing is claimed right now", and all three listed under *Coming next* while
+that session had their files open.
+
+### Added
+- `.ai/state/locks.yaml` is now a **third input** to the plan model. A live lock
+  promotes a `pending` or `waiting_dependency` leaf to **In progress**, and the
+  holder is shown on the tree, the progress view and `aef.py progress`
+- `Lock` in `tools/aefkit/model.py`, with TTL evaluation. Only the active
+  `locks:` key is read; `history:` is the past and is ignored
+- **Coordination notices** — a second, non-fatal problem channel. A lock that
+  disagrees with a task status, a lock left on a finished task, two locks on one
+  task, a missing or unreadable TTL: each is reported, none is hidden, and none
+  fails the plan
+- `tools/tests/test_locks.py` — 18 tests. Proven able to fail by three
+  sabotages (promotion disabled; guard rails removed; notices made fatal)
+
+### Changed
+- `aef.py validate` reports notices but **exits 0** for them. Gating the
+  protocol 04 hand-over on a transient lock would mean a plan cannot be
+  validated while anyone is working on the project
+- `aef.py progress` prints `held by: <agent> until <expiry>` under live work
+- `install/BOOTSTRAP.md` §1 pinned the example checkout at `v0.1.0`, two
+  releases stale. A reader following it got a framework with no plan tooling at
+  all
+
+### Deliberately not done
+- A lock never overrides `complete`, `failed` or `blocked`. Those are findings
+  about the work and outrank a claim to be editing it; a lock over one of them
+  is reported as a leak instead. Burying a `blocked` task under "In progress"
+  would take a `NEEDS_HUMAN` item off the operator's screen
+- An absent or unparseable TTL counts as **live**, not expired. Failing the
+  other way would silently unlock a file somebody is editing
+- Still no write path from the dashboard. Status changes go through protocol 05
+  and the agent that did the work
+
 ## [0.2.0] — 2026-08-12
 
 Plan before execute, and make the plan visible.

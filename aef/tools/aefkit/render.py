@@ -196,6 +196,18 @@ summary .name { font-weight: 590; }
 .problems ul { margin: 0; padding: 11px 17px 15px 33px; font-size: 13.5px; color: var(--ink); }
 .problems li { margin: 4px 0; }
 
+/* ---- coordination notices: present, but not alarming ---- */
+.notices { border-color: color-mix(in srgb, var(--in_progress) 38%, var(--line)); }
+.notices > h2 { color: var(--in_progress); }
+.notices ul { margin: 0; padding: 11px 17px 15px 33px; font-size: 13.5px; color: var(--muted); }
+.notices li { margin: 4px 0; }
+
+/* ---- lock holder ---- */
+.chip.held {
+  background: var(--accent-soft); color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
 footer.foot { margin-top: 30px; padding-top: 15px; border-top: 1px solid var(--line); color: var(--faint); font-size: 12px; display: flex; gap: 14px; flex-wrap: wrap; }
 .hidden { display: none !important; }
 @media (max-width: 620px) {
@@ -304,7 +316,7 @@ def _shell(title: str, active: str, body: str, meta: dict[str, Any], script: str
 <div class="wrap">
 {body}
 <footer class="foot">
-  <span>Plan read from <code>.ai/state/plan.yaml</code> + <code>.ai/state/tasks.yaml</code></span>
+  <span>Plan read from <code>.ai/state/plan.yaml</code> + <code>.ai/state/tasks.yaml</code> + <code>.ai/state/locks.yaml</code></span>
   <span>{_e(reader)}</span>
   {f'<span>Planned {_e(planned)}</span>' if planned else ''}
 </footer>
@@ -353,6 +365,25 @@ def _problems(problems: list[str]) -> str:
     )
 
 
+def _notices(notices: list[str]) -> str:
+    """Coordination drift between locks.yaml and tasks.yaml.
+
+    Visually quieter than `problems` and deliberately so: a notice is a live
+    condition that resolves itself when the agent updates its status, not a
+    defect in the plan. Showing it in the same red as a structural failure would
+    train the reader to ignore both.
+    """
+    if not notices:
+        return ""
+    items = "".join(f"<li>{_e(notice)}</li>" for notice in notices)
+    return (
+        '<section class="panel notices">'
+        f'<h2>Live coordination notices<span class="count">{len(notices)}</span></h2>'
+        f"<ul>{items}</ul>"
+        "</section>"
+    )
+
+
 # ---------------------------------------------------------------------------
 # tree page
 # ---------------------------------------------------------------------------
@@ -368,6 +399,23 @@ def _agent_chip(node: dict[str, Any]) -> str:
              "inherited": "inherited from a parent node"}.get(source, source)
     mark = "&#9679;&#65038; " if source == "manual" else ""
     return f'<span class="chip agent" title="{_e(title)}">{mark}{_e(agent)}</span>'
+
+
+def _held_chip(node: dict[str, Any]) -> str:
+    """Who is holding this node's files right now, from the lock.
+
+    Separate from the agent chip because they answer different questions. The
+    agent chip is the plan's intention; this is the session with the files open.
+    On a single-agent project they agree and this chip never appears.
+    """
+    lock = node.get("lock")
+    if not lock or not lock.get("agent"):
+        return ""
+    until = f' until {lock["expires_at"]}' if lock.get("expires_at") else ""
+    return (
+        f'<span class="chip held" title="holds a lock on {_e(lock.get("path") or "these paths")}'
+        f'{_e(until)}">&#128274; {_e(lock["agent"])}</span>'
+    )
 
 
 def _node_html(node: dict[str, Any], depth: int = 0) -> str:
@@ -399,7 +447,7 @@ def _node_html(node: dict[str, Any], depth: int = 0) -> str:
             f'<div class="leafwrap" {attrs}>'
             f'<div class="leaf"><span class="tw">&#9656;</span>{dot}'
             f'<span class="name" title="{_e(node.get("title"))}">{_e(node.get("title"))}</span>{tid}'
-            f'<span class="spacer"></span>{"".join(bits)}{_agent_chip(node)}</div>'
+            f'<span class="spacer"></span>{"".join(bits)}{_held_chip(node)}{_agent_chip(node)}</div>'
             f"{note}</div>"
         )
 
@@ -440,6 +488,7 @@ def tree_page(data: dict[str, Any]) -> str:
   <p>{_e(progress["leaf_count"])} tasks across the plan &middot; {_e(progress["percent"])}% complete</p>
 </div>
 {_problems(data.get("problems") or [])}
+{_notices(data.get("notices") or [])}
 <div class="toolbar">
   <input type="search" id="q" placeholder="Filter by task, id or agent&hellip;" autocomplete="off">
   <button class="btn" id="expand" type="button">Expand all</button>
@@ -477,7 +526,7 @@ def _rows(items: list[dict[str, Any]], empty: str, show_reason: bool = False) ->
             f'<span class="name">{_e(item.get("title"))}</span>'
             + (f'<span class="tid">{_e(item.get("task_id"))}</span>' if item.get("task_id") else "")
             + (f'<span class="where">{_e(where)}</span>' if where else "")
-            + f'<span class="spacer"></span>{reason}{agent}</li>'
+            + f'<span class="spacer"></span>{reason}{_held_chip(item)}{agent}</li>'
         )
     return f'<ul class="rows">{"".join(out)}</ul>'
 
@@ -514,6 +563,7 @@ def progress_page(data: dict[str, Any]) -> str:
   {_legend(counts, labels)}
 </div>
 {_problems(data.get("problems") or [])}
+{_notices(data.get("notices") or [])}
 
 <section class="panel">
   <h2>Being worked on now<span class="count">{_e(len(data.get("current") or []))}</span></h2>

@@ -5,7 +5,22 @@ it is why there are two files rather than one:
 
     structure, weight, agent   ->  .ai/state/plan.yaml
     task status and evidence   ->  .ai/state/tasks.yaml
+    who is working RIGHT NOW   ->  .ai/state/locks.yaml
     everything else            ->  DERIVED HERE, never stored
+
+The third line is 0.3.0's correction. "Is this done?" is answered by tasks.yaml,
+but "is anyone on this right now?" is not: `status: claimed` is written when an
+agent remembers to write it, whereas a lock is claimed BEFORE the first edit
+because Constitution rule 3 makes it mandatory. Deriving live work from status
+alone therefore reports an in-flight task as untouched — observed in a real
+project, with three tasks held by a live session, all reading `ready`, and the
+dashboard announcing "Nothing is claimed right now".
+
+A lock is evidence of intent to edit, not of task state, so it never overrides
+`complete`, `failed` or `blocked`. It promotes `pending`/`waiting_dependency` to
+`in_progress`, and any disagreement between the two files is reported as a
+problem rather than smoothed over — a lock on a completed task is a leak, and
+hiding it would be the same mistake in the other direction.
 
 A grouping node's status and a project's percentage are computed on every read.
 Storing them would create a second place where "is this done?" is answered, and
@@ -20,6 +35,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Iterator
 
 from . import yamlio
@@ -29,6 +45,7 @@ __all__ = [
     "Node",
     "Progress",
     "PlanError",
+    "Lock",
     "STATUSES",
     "TASK_STATUS_MAP",
     "NODE_TYPES",
@@ -79,6 +96,89 @@ NODE_TYPES = ("project", "section", "feature", "task", "subtask")
 # "in progress" just because its siblings are moving.
 _ROLLUP_PRECEDENCE = ("failed", "in_progress", "blocked", "waiting_dependency", "pending")
 
+# A lock may only promote a leaf that has not started. These are the statuses it
+# is allowed to move; everything else is a fact about the work that outranks a
+# claim to be editing it.
+_LOCK_PROMOTABLE = ("pending", "waiting_dependency")
+
+# tasks.yaml statuses that already agree "someone is on this". A live lock on one
+# of these is consistent and reported without comment.
+_TASK_STATUSES_MEANING_ACTIVE = ("claimed", "in_review")
+
+
+@dataclass
+class Lock:
+    """One entry from `.ai/state/locks.yaml`, under the active `locks:` key.
+
+    `history:` is deliberately not read. A released lock describes the past, and
+    the dashboard reports the present.
+    """
+
+    task_id: str
+    agent: str | None = None
+    path: str | None = None
+    acquired_at: str | None = None
+    expires_at: str | None = None
+    model: str | None = None
+    # False only when expires_at parsed cleanly AND is in the past. An entry with
+    # no expiry, or one that does not parse, counts as live: a claim whose end is
+    # unstated has not ended, and treating it as expired would let a malformed
+    # timestamp silently unlock a file somebody is editing.
+    live: bool = True
+    expiry_problem: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "agent": self.agent,
+            "path": self.path,
+            "acquired_at": self.acquired_at,
+            "expires_at": self.expires_at,
+            "live": self.live,
+        }
+
+
+def _parse_locks(raw: dict[str, Any] | None, now: datetime | None = None) -> list[Lock]:
+    """Active locks only, each marked live or expired against `now`."""
+    if not isinstance(raw, dict):
+        return []
+    now = now or datetime.now(timezone.utc)
+    out: list[Lock] = []
+    for entry in raw.get("locks") or []:
+        if not isinstance(entry, dict) or not entry.get("task_id"):
+            continue
+        lock = Lock(
+            task_id=str(entry["task_id"]),
+            agent=_str_or_none(entry.get("agent")),
+            path=_one_line(entry.get("path")),
+            acquired_at=_str_or_none(entry.get("acquired_at")),
+            expires_at=_str_or_none(entry.get("expires_at")),
+            model=_str_or_none(entry.get("model")),
+        )
+        if lock.expires_at:
+            try:
+                expiry = datetime.fromisoformat(lock.expires_at)
+            except ValueError:
+                lock.expiry_problem = (
+                    f"lock on {lock.task_id} has an unreadable expires_at "
+                    f"({lock.expires_at!r}); treated as live"
+                )
+            else:
+                if expiry.tzinfo is None:
+                    expiry = expiry.replace(tzinfo=timezone.utc)
+                lock.live = expiry > now
+        else:
+            lock.expiry_problem = (
+                f"lock on {lock.task_id} states no expires_at; treated as live and "
+                "never reclaimable — give it a TTL"
+            )
+        out.append(lock)
+    return out
+
+
+def _str_or_none(value: Any) -> str | None:
+    return None if value is None else str(value)
+
 
 @dataclass
 class Node:
@@ -101,6 +201,11 @@ class Node:
     # Filled by Plan._resolve(); None until then.
     status: str = "pending"
     task: dict[str, Any] | None = None
+    # The live lock naming this leaf's task, if any. Set by Plan._resolve().
+    lock: "Lock | None" = None
+    # Where `status` came from: "task" (tasks.yaml), "lock" (promoted because an
+    # agent holds a live lock), "override" (a leaf with no task), or "rollup".
+    status_source: str = "task"
 
     @property
     def is_leaf(self) -> bool:
@@ -155,12 +260,28 @@ class Progress:
 
 class Plan:
     def __init__(self, root: Node, meta: dict[str, Any], tasks: dict[str, dict[str, Any]],
-                 problems: list[str], project_root: str):
+                 problems: list[str], project_root: str,
+                 locks: list[Lock] | None = None):
         self.root = root
         self.meta = meta
         self.tasks = tasks
+        # Structural. The plan and the task graph disagree, the percentage is
+        # computed over the wrong denominator, and `validate` exits non-zero.
         self.problems = problems
+        # Coordination. Two state files describing live work disagree. Worth
+        # showing the moment it happens, but it is a property of THIS MOMENT and
+        # resolves itself when the agent updates its status or releases its lock.
+        # Failing the protocol 04 hand-over gate on one would mean a plan could
+        # not be validated while anybody was working, which is backwards.
+        self.notices: list[str] = []
         self.project_root = project_root
+        self.locks = locks or []
+
+    @property
+    def live_locks(self) -> dict[str, Lock]:
+        """task id -> the live lock on it. Last writer wins on a duplicate, which
+        `validate()` reports separately rather than resolving silently."""
+        return {lock.task_id: lock for lock in self.locks if lock.live}
 
     # -- loading ----------------------------------------------------------
 
@@ -168,6 +289,7 @@ class Plan:
     def load(cls, project_root: str = ".", *, force_bundled: bool = False) -> "Plan":
         plan_path = os.path.join(project_root, ".ai", "state", "plan.yaml")
         tasks_path = os.path.join(project_root, ".ai", "state", "tasks.yaml")
+        locks_path = os.path.join(project_root, ".ai", "state", "locks.yaml")
 
         if not os.path.exists(plan_path):
             raise PlanError(
@@ -189,15 +311,22 @@ class Plan:
                 if isinstance(entry, dict) and entry.get("id"):
                     tasks[str(entry["id"])] = entry
 
+        # Locks are optional. A project with no locks.yaml is a project nobody is
+        # editing concurrently, which is a normal state and not a problem.
+        locks: list[Lock] = []
+        if os.path.exists(locks_path):
+            locks = _parse_locks(yamlio.load(locks_path, force_bundled=force_bundled))
+
         tree_raw = raw.get("tree")
         if not isinstance(tree_raw, dict):
             raise PlanError(f"{plan_path}: top-level `tree:` mapping is missing.")
 
         root = cls._build(tree_raw, parent=None, default_type="project")
-        plan = cls(root, raw.get("meta") or {}, tasks, [], os.path.abspath(project_root))
+        plan = cls(root, raw.get("meta") or {}, tasks, [], os.path.abspath(project_root), locks)
         plan._inherit_agents()
         plan._resolve()
         plan.problems = plan.validate()
+        plan.notices = plan.lock_notices()
         return plan
 
     @staticmethod
@@ -247,8 +376,11 @@ class Plan:
         re-rolls the groups so a section containing a waiting task says so.
         """
         by_node = {node.id: node for node in self.root.walk()}
+        held = self.live_locks
 
         for node in self.root.walk():
+            if node.task_id and node.task_id in held:
+                node.lock = held[node.task_id]
             if node.task_id and node.task_id in self.tasks:
                 node.task = self.tasks[node.task_id]
                 # Dependencies live in tasks.yaml, where the execution protocol
@@ -297,14 +429,30 @@ class Plan:
 
     def _leaf_status(self, node: Node) -> str:
         if node.task is not None:
-            return TASK_STATUS_MAP.get(str(node.task.get("status") or "ready"), "pending")
-        # A leaf with no linked task carries its own status. Subtasks finer than
-        # tasks.yaml tracks are why this exists. The value may be written in
-        # either vocabulary; display terms pass through unchanged.
-        raw = str(node.status_override or "ready")
-        if raw in STATUSES:
-            return raw
-        return TASK_STATUS_MAP.get(raw, "pending")
+            status = TASK_STATUS_MAP.get(str(node.task.get("status") or "ready"), "pending")
+            node.status_source = "task"
+        else:
+            # A leaf with no linked task carries its own status. Subtasks finer
+            # than tasks.yaml tracks are why this exists. The value may be
+            # written in either vocabulary; display terms pass through unchanged.
+            raw = str(node.status_override or "ready")
+            status = raw if raw in STATUSES else TASK_STATUS_MAP.get(raw, "pending")
+            node.status_source = "override"
+        return self._apply_lock(node, status)
+
+    @staticmethod
+    def _apply_lock(node: Node, status: str) -> str:
+        """A live lock means an agent is editing this leaf's files right now.
+
+        Promotion is narrow on purpose. `complete`, `failed` and `blocked` are
+        findings about the work and outrank a claim to be touching it — a lock
+        over one of those is a leak or a contradiction, and `validate()` says so
+        instead of letting the status quietly absorb it.
+        """
+        if node.lock is None or status not in _LOCK_PROMOTABLE:
+            return status
+        node.status_source = "lock"
+        return "in_progress"
 
     @staticmethod
     def _rollup(child_statuses: list[str]) -> str:
@@ -412,6 +560,53 @@ class Plan:
         problems.extend(self._cycles())
         return problems
 
+    def lock_notices(self) -> list[str]:
+        """Disagreements between locks.yaml and tasks.yaml.
+
+        Reported rather than resolved. A lock and a status that disagree mean the
+        coordination substrate is drifting, and the dashboard's job is to make
+        that visible at the moment it happens — not to pick a winner and present
+        the result as if the two had agreed all along.
+        """
+        problems: list[str] = []
+        seen: dict[str, str | None] = {}
+
+        for lock in self.locks:
+            if lock.expiry_problem:
+                problems.append(lock.expiry_problem)
+            if not lock.live:
+                continue
+
+            if lock.task_id in seen:
+                problems.append(
+                    f"task {lock.task_id} is locked twice, by {seen[lock.task_id]} and "
+                    f"{lock.agent}; C-19 allows exactly one writer per entity"
+                )
+            seen[lock.task_id] = lock.agent
+
+            task = self.tasks.get(lock.task_id)
+            if task is None:
+                problems.append(
+                    f"{lock.agent} holds a lock for {lock.task_id}, which is in no "
+                    "task file — the work has no acceptance criteria to be judged against"
+                )
+                continue
+
+            status = str(task.get("status") or "ready")
+            if status in ("complete", "abandoned"):
+                problems.append(
+                    f"{lock.agent} still holds a lock on {lock.task_id}, which is "
+                    f"'{status}' — a finished task's lock is a leak and blocks the "
+                    "next agent from those paths"
+                )
+            elif status not in _TASK_STATUSES_MEANING_ACTIVE:
+                problems.append(
+                    f"{lock.task_id} is being edited by {lock.agent} but tasks.yaml "
+                    f"still says '{status}'; shown as In progress on the strength of "
+                    "the lock. Set status: claimed when work starts"
+                )
+        return problems
+
     def _cycles(self) -> list[str]:
         by_id = {node.id: node for node in self.root.walk()}
         state: dict[str, int] = {}
@@ -455,7 +650,10 @@ class Plan:
                 "percent": progress.percent,
                 "counts": progress.as_dict()["counts"],
                 "leaf_count": progress.leaf_count,
+                "status_source": node.status_source,
             }
+            if node.lock is not None:
+                entry["lock"] = node.lock.as_dict()
             if node.note:
                 entry["note"] = node.note
             if node.task_id:
@@ -493,6 +691,7 @@ class Plan:
             "upcoming": [_brief(node) for node in self.upcoming()],
             "attention": [_brief(node) for node in self.attention()],
             "problems": self.problems,
+            "notices": self.notices,
         }
 
 
@@ -503,7 +702,7 @@ def _one_line(value: Any) -> str | None:
 
 
 def _brief(node: Node) -> dict[str, Any]:
-    return {
+    brief: dict[str, Any] = {
         "id": node.id,
         "title": node.title,
         "status": node.status,
@@ -512,4 +711,15 @@ def _brief(node: Node) -> dict[str, Any]:
         "task_id": node.task_id,
         "path": node.path()[1:-1],
         "reason": _one_line((node.task or {}).get("blocked_reason")) if node.task else None,
+        "status_source": node.status_source,
     }
+    if node.lock is not None:
+        brief["lock"] = node.lock.as_dict()
+    # Who is on it, in one string the views can print without knowing where the
+    # answer came from. claimed_by is tasks.yaml's answer; the lock is the live
+    # one and wins when both exist, because it is the one written before editing.
+    holder = node.lock.agent if node.lock is not None else None
+    if holder is None and node.task is not None:
+        holder = _str_or_none(node.task.get("claimed_by"))
+    brief["held_by"] = holder
+    return brief

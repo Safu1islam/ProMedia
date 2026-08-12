@@ -48,9 +48,15 @@ The plan is not shortened because the work is long. A hundred meaningful tasks i
 a hundred nodes. Gaps you cannot yet fill are named in `completeness.known_omissions`,
 not left silent — an unnamed gap reads as "nothing to do".
 
-Structure lives in the plan; status lives in the tasks; **every rollup and every
-percentage is derived on read and stored nowhere.** Two places to answer "is this
-done?" is two answers, and the second one is wrong.
+Structure lives in the plan; status lives in the tasks; who holds the files right
+now lives in `.ai/state/locks.yaml`; **every rollup and every percentage is
+derived on read and stored nowhere.** Two places to answer "is this done?" is two
+answers, and the second one is wrong.
+
+One fact, one file — but "is it done?" and "is anyone on it?" are two facts. You
+claim a lock before your first edit (rule 3 below); you set `status: claimed`
+when you remember to. The lock is therefore the truthful answer to the second
+question, and the dashboard reads it.
 
 Protocol: `protocols/04-planning.md`. Gate: `python aef/tools/aef.py validate`.
 

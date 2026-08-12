@@ -12,4 +12,4 @@ __all__ = ["yamlio", "model", "assign", "render", "server"]
 
 # Kept in step with aef/VERSION. The dashboard displays it so a stale vendored
 # copy is visible rather than silent.
-AEF_TOOLS_VERSION = "0.2.0"
+AEF_TOOLS_VERSION = "0.3.0"
