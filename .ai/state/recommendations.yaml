@@ -1,0 +1,28 @@
+# .ai/state/recommendations.yaml — proposals nobody has authorised yet.
+# Schema: aef/schemas/recommendation.schema.yaml
+#
+# MACHINE-MANAGED. Written by `aef.py recommend ...`.
+#
+# A rejected recommendation is kept, with its reason. That is the point of the
+# file: it stops the same idea being re-proposed every few sessions.
+
+recommendations:
+  - id: "R-001"
+    title: "AEF has no home for its own project state"
+    raised_by: "me-0413"
+    raised_by_agent: "architect"
+    during_task: "AEF-0.4.0"
+    raised_at: "2026-08-13T13:29:35+04:00"
+    recommendation: "Give AEF a first-class self-hosting mode so framework work is planned and tracked in AEF's own .ai/, not the host project's."
+    reason: "Framework authorship is currently tracked as pseudo-tasks (AEF-0.3.0, AEF-0.4.0) in the HOST project's locks.yaml. The host's own validator correctly reports them as locks for tasks that exist in no task file — observed twice in this repository."
+    expected_benefit: "Framework work gets the same plan, acceptance criteria and evidence AEF demands of every other project."
+    risk: "A second .ai/ inside aef/ would ship to every vendored copy as noise unless it is excluded from the distribution."
+    affected_components:
+      - "aef/"
+      - ".ai/state/locks.yaml"
+    severity: "important"
+    status: "deferred"
+    resolution:
+      decided_by: "operator"
+      decided_at: "2026-08-13T13:29:50+04:00"
+      reason: "Revisit when AEF is extracted to its own repository, which is the natural moment: the host-project workaround costs nothing until then."

@@ -1,0 +1,50 @@
+# .ai/state/sessions.yaml — who is here right now.
+# Schema: aef/schemas/session.schema.yaml
+#
+# MACHINE-MANAGED. Written by `aef.py session ...`; heartbeats rewrite it often.
+# Do not hand-edit: comments and ordering are not preserved across a write.
+#
+# `stale` is never stored here. It is derived from heartbeat age on read, because
+# a crashed process cannot record its own death.
+
+sessions:
+  - id: "me-0413"
+    agent: "architect"
+    vendor: "anthropic"
+    model: "claude-opus-5"
+    main_engineer: false
+    activity: "AEF 0.4.0: docs, migration, decision record"
+    status: "ended"
+    started_at: "2026-08-13T13:29:19+04:00"
+    heartbeat_at: "2026-08-13T13:55:59+04:00"
+    task: "AEF-0.4.0"
+    handoff:
+      ended_at: "2026-08-13T13:55:59+04:00"
+      outcome: "completed"
+      changed: "AEF 0.3.0 -> 0.4.0: sessions.yaml (liveness), recommendations.yaml (proposals), Main Engineer post, capability matching, aef.py brief, /team view."
+      remaining: "No activity feed; no pruning tool for ended sessions; capability branch unexercised on this project."
+      risks: "Concurrent fleet tested with one real second session only, not four vendors."
+      next: "Extract AEF to its own repository (R-001) before any release."
+      evidence:
+        - "run_tests.py 109 passed"
+        - "DR-015 verification block"
+      references:
+        - "DR-015"
+        - "R-001"
+  - id: "worker-a"
+    agent: "backend-agent"
+    main_engineer: false
+    task: "T-037"
+    activity: "Restore path"
+    status: "ended"
+    started_at: "2026-08-13T13:29:19+04:00"
+    heartbeat_at: "2026-08-13T13:38:13+04:00"
+    handoff:
+      ended_at: "2026-08-13T13:38:13+04:00"
+      outcome: "superseded"
+      changed: "Nothing. This session existed only to exercise concurrent-session handling during AEF 0.4.0 verification."
+      remaining: "None. T-037 was completed by claude-code-session-next3, not by this session."
+      risks: "It briefly displayed as live work on a real task, which is why it is ended rather than left: a verification fixture must not read as project activity."
+      next: "None."
+      references:
+        - "AEF-0.4.0"

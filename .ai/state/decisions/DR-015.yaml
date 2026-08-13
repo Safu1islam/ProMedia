@@ -1,0 +1,256 @@
+id: DR-015
+title: Adopt AEF 0.4.0 — multi-agent coordination substrate
+date: 2026-08-13
+status: accepted
+decided_by: operator
+recorded_by: claude-code-session-aef040
+decision_area: framework_version_and_multi_agent_coordination
+
+context: >
+  Operator mandate: evolve AEF from a governance framework that supervises one
+  agent at a time into an operating layer for a team of heterogeneous agents
+  working the same project across many sessions, models and vendors.
+
+  The mandate was long (56 sections). Its load-bearing requirement is one
+  sentence: a project must be workable by a changing fleet of agents for months
+  without losing its organisational memory when any agent disappears.
+
+what_already_existed: >
+  Most of the governance half. AEF 0.3.0 already had: a read-only versioned
+  framework layer, seven role contracts, routing as data, 45 quality dimensions,
+  the fabrication registry, six evidence statuses, derived-not-stored progress,
+  the plan tree, file locks, decision records, and a read-only dashboard. The
+  mandate asked for these to be preserved and extended rather than replaced, and
+  they were: no existing mechanism was removed or duplicated.
+
+the_gap: >
+  Everything AEF knew was PAST TENSE. It could say what had been done and what
+  was planned. It could not say who was here right now, what they were touching,
+  who was coordinating, or what an agent had found but was not authorised to fix.
+
+  0.3.0 had made a first approximation by deriving liveness from file locks. That
+  was the right direction and the wrong instrument, which this release corrects.
+
+decision: >
+  Add three capabilities, each with exactly one authoritative home, and change
+  nothing that already had one.
+
+    sessions.yaml         liveness  — which agent processes exist, heartbeat-fresh
+    recommendations.yaml  proposals — findings an agent may not act on
+    capabilities          matching  — on agents and on routing classes
+
+  Plus the Main Engineer as a durable POST rather than a role, `aef.py brief` for
+  token-efficient onboarding, and a /team dashboard view.
+
+  Pin bumped 0.3.0 -> 0.4.0, under a lock claimed BEFORE the work.
+
+key_decisions:
+
+  - id: K1
+    decision: "Liveness is a heartbeat, not a lock TTL."
+    reasoning: >
+      A lock answers "may I write this path" and is work-sized — 90 minutes by
+      default. A heartbeat answers "am I still running" and is minutes. 0.3.0
+      derived liveness from lock TTL, so a crashed agent looked busy for up to an
+      hour and a half. Both signals are real; one file cannot carry two TTLs
+      honestly. locks.yaml keeps ownership, sessions.yaml gains liveness, and
+      where both name a task the session wins because it is the fresher claim.
+
+  - id: K2
+    decision: "`stale` is derived and can never be written."
+    reasoning: >
+      A process that crashes cannot record its own death. A stored staleness flag
+      would be the one value guaranteed to be absent exactly when it mattered.
+
+  - id: K3
+    decision: "Main Engineer is a post held by a session, NOT an eighth role."
+    reasoning: >
+      The mandate asks for a formal Main Engineer owning coherence, the plan,
+      assignment and continuity. That is the orchestrator contract almost exactly.
+      What was missing was not a contract but CONTINUITY — the orchestrator was a
+      hat a session wore, so the coordinator died with the chat. Making it an
+      assignment recorded in state satisfies the mandate while preserving the
+      seven-role invariant that roles/README.md argues for at length. Single
+      holder enforced; a stale holder is replaceable (that is the handover path);
+      a vacancy is reported rather than silently inherited.
+
+  - id: K4
+    decision: "A lock never overrides complete/failed/blocked, and neither does a session."
+    reasoning: >
+      Inherited from 0.3.0 and extended. Those are findings about the work and
+      outrank a claim to be touching it. Burying a blocked task under In progress
+      would take a NEEDS_HUMAN item off the operator's screen.
+
+  - id: K5
+    decision: "Rejecting a recommendation REQUIRES a reason; accepting one REQUIRES a task or decision."
+    reasoning: >
+      Both enforced at the write, not reported later, because a rejection with no
+      reason is unrecoverable once the session that made it is gone. The rejected
+      item is kept forever — that is the whole point of the file. Acceptance that
+      produces neither work nor a recorded decision is agreement, and agreement
+      does nothing.
+
+  - id: K6
+    decision: "No separate conflict register."
+    reasoning: >
+      A disagreement between two agents is two recommendations naming the same
+      components and one decision resolving them, with the losing argument kept
+      and its reason recorded. Giving disagreement its own file would create a
+      second place to look for the same answer — the exact failure this project
+      has paid for three times (T-028, T-031, and 0.3.0's liveness seam).
+
+  - id: K7
+    decision: "No separate handoff store."
+    reasoning: >
+      A handoff is what a session leaves behind, so it is a field on the session
+      that produced it. A separate file would fragment "what happened to that
+      work" across two stores.
+
+  - id: K8
+    decision: "Capability matching REPORTS gaps rather than overriding routing."
+    reasoning: >
+      Where a routing class declares required capabilities and the mapped agent
+      does not declare them, the assignment still happens — a project mapped that
+      class to that agent deliberately — but the reason names what is missing.
+      Silently reassigning would make the routing table advisory, and the usual
+      cause of a gap is a catalogue entry nobody updated.
+
+  - id: K9
+    decision: "No new verification statuses for SIMULATED or UNVERIFIED."
+    reasoning: >
+      The mandate lists both. AEF already answers each without a new status:
+      simulated functionality is owned by fabrications.yaml, which BLOCKS
+      completion while anything a task depends on is still fake — strictly
+      stronger than a status label. UNVERIFIED is NOT_RUN. Adding either would
+      put two answers in the codebase for one question. Recorded as a deliberate
+      refusal rather than an omission.
+
+  - id: K10
+    decision: "Machine-managed files get a real emitter; human-read files do not."
+    reasoning: >
+      sessions.yaml and recommendations.yaml are re-serialised whole, because
+      heartbeats rewrite them constantly and no human comments them. plan.yaml,
+      tasks.yaml and locks.yaml keep surgical in-place editing, because a
+      round-trip through any dumper destroys comments, ordering and paragraphing
+      that people rely on. Strings are always quoted so no value can change type
+      by looking like one — `status: no` must not become False.
+
+verification:
+  - check: "aef/tools/run_tests.py"
+    status: PASSED
+    observed: "109 tests, OK (69 before; +33 tests/test_team.py, +7 tests/test_writer.py)"
+  - check: "Sabotage 1 — staleness detection disabled in Team._resolve"
+    status: FAILED
+    observed: >
+      Intentional. 5 failures: the stale-heartbeat case, the no-timestamp case,
+      Main Engineer replacement of a stale holder, the VACANT notice, and the
+      stale-session notice.
+  - check: "Sabotage 2 — rejection-reason guard and single-holder guard removed"
+    status: FAILED
+    observed: "Intentional. 2 failures: test_the_post_is_single_holder, test_rejection_requires_a_reason."
+  - check: "Sabotage 3 — string quoting removed from writer._scalar"
+    status: FAILED
+    observed: >
+      Intentional. 2 failures + 2 errors, including
+      test_strings_that_look_like_other_types_survive_as_strings and both
+      reader-agreement cases. This is the bug where `status: no` silently becomes
+      False on read.
+  - check: "All three modules restored byte-identical after sabotage"
+    status: PASSED
+    observed: >
+      SHA-256 prefixes team.py ee0b77aac4da388f, teamstore.py 6a1964ff528c7b0f,
+      writer.py 83ec2710b2fd78d6, matching pre-sabotage. `grep -rn "if False"
+      aef/tools/` finds nothing.
+  - check: "Migration — a 0.3.0-shaped project on 0.4.0 tooling"
+    status: PASSED
+    observed: >
+      Temp copy with plan.yaml and tasks.yaml only, no locks/sessions/
+      recommendations. `validate` exits 0 ("36 leaves, 36 tasks"), `progress`
+      renders, `team` reports "Main Engineer: VACANT / 0 live sessions", `doctor`
+      reports the three optional files as absent with a reason rather than
+      MISSING. No migration step was required, which is the release's claim.
+  - check: "Emitter round-trip through both readers on real state"
+    status: PASSED
+    observed: >
+      .ai/state/sessions.yaml written by the tool, then read by the bundled
+      reader and PyYAML: equal. Also pinned synthetically by
+      tests/test_writer.py. AEF ships without PyYAML, so agreement is a
+      correctness requirement.
+  - check: "End-to-end multi-session exercise against this repository"
+    status: PASSED
+    observed: >
+      Two sessions started; the second's claim on the Main Engineer post was
+      refused naming the live holder; a recommendation was recorded, rejected
+      without a reason (refused), accepted without a task (refused), then
+      deferred with a trigger (accepted). Session liveness promoted T-037 to In
+      progress in the plan tree and named the holder.
+  - check: "Dashboard /team rendered in a browser and reviewed as a human"
+    status: PASSED
+    observed: >
+      Four real defects found by looking rather than by asserting, all fixed:
+      the version badge read 0.3.0 (plan.yaml meta was stale); "1 of 2 live
+      sessions ARE working"; a `deferred` item sat under "Open recommendations"
+      while "Resolved" said "none resolved yet"; the footer did not name the two
+      new sources. Re-rendered and re-read after the fix.
+  - check: "Constitution still under its own 200-line cap"
+    status: PASSED
+    observed: "184 lines."
+  - check: "ProMedia application suite"
+    status: NOT_RUN
+    observed: >
+      Deliberately not run and not needed: no file under promedia/ or tests/ was
+      touched, and nothing in the application imports aefkit — aef/tools is
+      invoked as a script and is not on the application's import path. Claiming a
+      PASSED here would be claiming a check that was not executed.
+
+not_verified:
+  - >
+    A genuinely concurrent fleet. Every multi-agent scenario was exercised with
+    sessions this one process created, plus one real second session
+    (claude-code-session-next3) working ProMedia tasks in parallel. Four agents
+    from four vendors coordinating through these files has NOT been run.
+  - >
+    Long-horizon behaviour. sessions.yaml has a documented pruning policy for
+    ended sessions and no tooling that prunes. A months-long project will
+    accumulate them until someone trims the file by hand.
+  - >
+    Capability matching in anger. The pure-capability branch is unit-tested and
+    reachable, but every class in the shipped routing table also has an explicit
+    agent mapping, so on this project the branch never fires.
+
+deliberately_not_implemented:
+  - >
+    A task-board view (BACKLOG -> READY -> ASSIGNED -> ... -> DONE). The plan
+    tree plus the progress view already answer what the board would, and a third
+    projection of the same state is the duplication this architecture exists to
+    avoid. Reconsider if the tree stops scaling.
+  - >
+    A timestamped activity feed. Sessions carry started_at, heartbeat_at and an
+    end record, so the data exists; there is no view that orders it into events.
+    This is the clearest remaining gap against the mandate's section 13.
+  - >
+    Per-dimension progress bars (Planning / Architecture / Backend / ...). The
+    mandate's example shows named engineering dimensions; AEF derives progress
+    from plan SECTIONS, which a project names as it likes. Adding a second
+    taxonomy would need a mapping nobody maintains.
+  - >
+    Agent health, availability and current-project fields from the mandate's
+    section 10. Availability is derived from live sessions; the rest describe
+    infrastructure AEF cannot observe, and storing an unobservable value is how a
+    dashboard starts lying.
+
+open_items:
+  - >
+    NO GIT REMOTE EXISTS on this repository, so the mandate's section 54
+    (push to the AEF GitHub repository, create a release) could not be performed.
+    Reported rather than simulated.
+  - >
+    Even with a remote, pushing from here would publish ProMedia — a private
+    single-operator project — alongside the framework. AEF needs extraction to
+    its own repository before it can be released, which is the same conclusion
+    R-001 reaches from the other direction.
+  - >
+    R-001 (deferred): AEF has no home for its own project state. Demonstrated
+    live during this work — `aef.py team` reports "session me-0413 is working
+    AEF-0.4.0, which is in no task file", because framework authorship is tracked
+    as a pseudo-task in the host project.
