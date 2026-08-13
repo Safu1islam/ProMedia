@@ -4,6 +4,35 @@
 locks: []
 
 history:
+  - path: "promedia/core/backup.py, promedia/core/ops/backup.py, promedia/core/ops/__init__.py, tests/test_backup.py, tests/test_registry.py"
+    task_id: "T-036"
+    agent: "claude-code-session-next3"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-13T05:55:00+04:00"
+    released_at: "2026-08-13T06:40:00+04:00"
+    note: >
+      Export of the permanent set. Destination-independent: T-038 owns where the
+      artefact goes and is deliberately not a dependency of this.
+      tests/test_registry.py was added to the claim mid-task because the
+      operator-authority pin fired — export-permanent-set is a read-only
+      operation that nonetheless needs the human, and that pin is what forced the
+      reasoning to be written down rather than assumed.
+      backup.py was sabotaged ONCE (export every table, including locks and the
+      ledger) and restored, SHA-256
+      d7f29f8674fe38f50b1d31b64a607363a8b0d37ab992d0f379073ac6cb43e1f3.
+  - path: ".ai/state/tasks.yaml, .ai/state/plan.yaml"
+    task_id: "PLANNING-durability"
+    agent: "claude-code-session-next3"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-13T05:30:00+04:00"
+    released_at: "2026-08-13T05:55:00+04:00"
+    note: >
+      Planning pass for the off-site backup omission, which plan.yaml has carried
+      as a named known_omission since the 0.2.0 retrofit: "in scope per
+      project.md 5.4 but has no task ... it needs a planning pass, not a guess at
+      its shape." Added T-036..T-040 and section S-DURABILITY; no promedia/ path
+      was claimed or touched. Project percentage fell 97% -> 83% as a result,
+      which is the denominator becoming honest rather than a regression.
   - path: "promedia/core/credentials.py, promedia/core/dpapi.py, tests/test_dpapi.py, .ai/state/fabrications.yaml"
     task_id: "T-022"
     agent: "claude-code-session-next3"

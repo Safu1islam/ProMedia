@@ -101,4 +101,25 @@ def test_operator_only_operations_are_the_expected_set():
         "attest-declaration",
         "release-publish-claim",
         "publish-tick",
+        "export-permanent-set",
     }
+
+
+def test_the_backup_export_is_the_only_operator_only_read():
+    """Why one read-only operation needs the human, when no other does.
+
+    export-permanent-set mutates nothing, so by the ordinary rule it would be
+    agent authority like every other read. It is not, because it collects the
+    ENTIRE audit log and publication history into one portable file at a path
+    the caller chooses. 'An agent may read the audit log' and 'an agent may
+    write the whole of it anywhere' are different powers, and the authority flag
+    is the only thing between them.
+
+    Asserted as a rule rather than a name so that a second operator-only read
+    added later has to justify itself here.
+    """
+    ops = load_operations()
+    operator_reads = {
+        name for name, op in ops.items() if op.authority == "operator" and not op.mutates
+    }
+    assert operator_reads == {"export-permanent-set"}

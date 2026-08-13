@@ -753,6 +753,322 @@ tasks:
         another agent. This is an auth_or_permissions change, which routing.yaml
         puts at 3 reviewers; the shortfall is the standing one in OD-6.
 
+  # -------------------------------------------------------------------------
+  # Durability — off-site backup of the permanent set (project.md 5.4).
+  #
+  # Planned 2026-08-13, closing the known_omission plan.yaml has carried since
+  # the 0.2.0 retrofit: "in scope per project.md 5.4 but has no task ... it
+  # needs a planning pass, not a guess at its shape."
+  #
+  # THE SHAPE, now that it has been looked at rather than guessed:
+  #
+  # The permanent set is four things (5.4): rights evidence, provenance chains,
+  # published-post records, approval and audit log. All four live in SQLite, and
+  # masters are explicitly TRANSIENT, so the artefact is megabytes — which is
+  # what makes this cheap and is why 5.4 says it "removes what would otherwise
+  # be the largest cost line".
+  #
+  # Mapped to tables, which is the decision T-036 has to make and pin:
+  #   permanent : rights_declarations, evidence, rights_verdicts,
+  #               provenance_records, posts, approvals, publications,
+  #               accounts (identity + credential_ref, never a secret),
+  #               assets (identity of what evidence is ABOUT), schema_version
+  #   excluded  : storage_ledger and ingest_queue (facts about local disk,
+  #               recomputable), entity_locks (session state — restoring a lock
+  #               table would wedge every entity against a session that no
+  #               longer exists)
+  #
+  # Two properties this work must not break, both already load-bearing:
+  #   * DR-008 keeps credentials OUT of the database precisely so they are
+  #     absent from backup artefacts. An export that carried a secret off-site
+  #     would defeat the control the whole credential design exists to provide.
+  #   * F-8 makes provenance records self-contained and integrity-hashed, so a
+  #     restored record must still verify. That is what makes this a backup of
+  #     evidence rather than a copy of some rows.
+  #
+  # Sequenced so that everything destination-independent lands first: T-038 is
+  # the only node that needs an operator decision, and it is deliberately not a
+  # dependency of T-036 or T-037.
+  # -------------------------------------------------------------------------
+
+  - id: T-036
+    title: "Export the permanent set as a self-contained, verifiable artefact"
+    objective: >
+      Define the permanent set as an explicit table set and produce a single
+      export artefact that can be verified without the database it came from.
+      Destination-independent by design: what to back up is a different question
+      from where to put it, and answering them together is how the second answer
+      silently constrains the first.
+    change_class: new_project
+    mode: critical
+    owner_role: implementer
+    assigned_model_tier: standard
+    status: complete
+    claimed_by: "claude-code-session-next3"
+    depends_on: [T-010, T-013]
+    blocks: [T-037, T-038, T-039]
+    owned_paths: [promedia/core/backup.py, promedia/core/ops/backup.py, promedia/core/ops/__init__.py, tests/test_backup.py, tests/test_registry.py]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "The exported table set is declared in one place, and a table added to the schema is either classified or fails the build."
+        result: PASSED
+        evidence: >
+          PERMANENT_TABLES and TRANSIENT_TABLES in promedia/core/backup.py, and
+          classify_tables() refuses any table in neither. The criterion's real
+          subject is a table that does not exist yet, so
+          test_a_new_unclassified_table_is_refused CREATES one and asserts both
+          classify_tables and build() raise naming it — the alternative being a
+          future migration whose table falls out of every backup silently and is
+          discovered during a restore. The reverse direction (a declared table
+          absent from the schema) also raises.
+      - id: AC-2
+        statement: "No credential value, and no operator token, appears anywhere in an export artefact — asserted with a canary, not by inspection."
+        result: PASSED
+        evidence: >
+          test_no_credential_appears_anywhere_in_the_artefact connects an account
+          with a canary secret, runs a full slice, and asserts the canary is
+          absent from the SERIALISED artefact — bytes, not table selection, since
+          an artefact carrying a secret would look entirely normal.
+          test_the_operator_token_is_not_in_the_artefact covers the token, which
+          grants publish authority over every account and lives in the credential
+          store rather than the database. Both hold because DR-008 keeps secrets
+          out of the DB; this is the assertion that the property is still true
+          rather than still intended.
+      - id: AC-3
+        statement: "A sealed provenance record's integrity still verifies when read out of the artefact, with the source database absent."
+        result: PASSED
+        evidence: >
+          test_provenance_integrity_verifies_out_of_the_artefact recomputes
+          _integrity_hash over the payload taken from the serialised artefact and
+          compares it to the stored hash, touching no database — which is the
+          situation a restore actually happens in. F-8's guarantee survives the
+          round trip, so this is a backup of evidence rather than of rows.
+          test_the_evidence_chain_is_complete_in_the_artefact asserts all three
+          rights tables plus approvals, publications and audit_log are populated.
+      - id: AC-4
+        statement: "The artefact carries its own integrity hash and schema version, and a tampered artefact is detected."
+        result: PASSED
+        evidence: >
+          test_a_tampered_artefact_is_detected empties audit_log — the edit an
+          attacker would actually want — and asserts verification fails with
+          mismatched hashes. verify() takes the artefact rather than a path and
+          consults no database, so it works off-site, which is the only place it
+          matters (test_verification_needs_nothing_but_the_artefact).
+          test_two_exports_of_an_unchanged_database_are_identical pins
+          determinism, so "nothing changed" is detectable without a row diff.
+      - id: AC-5
+        statement: "entity_locks and the storage ledger are excluded, and the exclusion is pinned by a test that states why."
+        result: PASSED
+        evidence: >
+          test_locks_and_ledger_are_excluded_with_a_stated_reason asserts all
+          three are absent AND that each carries a substantive recorded reason,
+          so the exclusion cannot decay into an unexplained omission. Restoring
+          entity_locks would wedge every listed entity against sessions that no
+          longer exist; restoring storage_ledger would assert a footprint that
+          does not match the files present, and DR-006 makes the ledger the sole
+          source of truth for the F-7 ceiling.
+    verification:
+      - command: "python -m pytest -p no:cacheprovider tests/test_backup.py"
+        status: PASSED
+        observed: "17 passed"
+      - command: "python -m pytest -p no:cacheprovider"
+        status: PASSED
+        observed: "428 passed (401 before this task; +17 backup, +1 registry, +9 parity)"
+      - command: "python -m pytest -p no:cacheprovider tests/test_parity.py"
+        status: PASSED
+        observed: >
+          72 passed, up from 66 — the three new operations picked up
+          automatically (3 x 2 probes) with no edit to the parity gate.
+      - command: "python -m pytest -p no:cacheprovider tests/test_backup.py, with build() exporting permanent + transient tables"
+        status: FAILED
+        observed: >
+          Sabotage of the plausible 'improvement' — back everything up so nothing
+          is ever missing. Caught by
+          test_locks_and_ledger_are_excluded_with_a_stated_reason
+          ("assert 'entity_locks' not in ..."). Reverted; backup.py SHA-256
+          d7f29f8674fe38f50b1d31b64a607363a8b0d37ab992d0f379073ac6cb43e1f3.
+      - command: "python -m promedia backup-scope --json"
+        status: PASSED
+        observed: >
+          Real CLI against the operator's own database: 11 permanent tables,
+          excluded ['entity_locks','ingest_queue','storage_ledger'],
+          media_included false.
+    fabrications_introduced: []
+    findings_from_own_tests:
+      - >
+        test_export_is_read_only FAILED as first written, on an audit_log row.
+        The test was wrong, not the code: export-permanent-set is operator
+        authority, so invoke() audits it — and an operation that writes the whole
+        audit log to a path of the caller's choosing SHOULD leave a trace of
+        having been used. Renamed to
+        test_export_changes_nothing_except_recording_that_it_happened, which now
+        asserts the exception explicitly rather than hiding it.
+      - >
+        test_the_evidence_chain_is_complete_in_the_artefact FAILED because the
+        happy path never creates an `evidence` row — attest-declaration and
+        determine-rights alone do not. The fixture now adds real evidence, so the
+        artefact contains every permanent kind rather than only those a minimal
+        path happens to produce.
+    assumptions:
+      - >
+        `accounts` and `assets` are in the permanent set although neither is
+        named in project.md 5.4's four bullets. They carry the IDENTITY the named
+        records reference: without them a published-post record and its rights
+        evidence point at ids with nothing behind them. No media bytes are
+        involved — the asset row is not the asset.
+      - >
+        `credential_ref` (e.g. "x:handle") IS exported. It is a lookup key, not a
+        secret, and the value it refers to lives only in the DPAPI store (T-022).
+        Without it a restored account cannot be reconnected to its credential.
+    open_items:
+      - >
+        The artefact is plaintext JSON. That is correct while it stays on this
+        machine and contains no secret, but T-038 must decide encryption before
+        it goes to any third party — the permanent set is the audit log and the
+        entire publication history.
+      - >
+        Nothing has been RESTORED from an artefact yet. T-037 is the task, and
+        until it passes, this is an export whose format has only ever been
+        written, never read back into a database. AC-3 verifies integrity out of
+        the artefact, which is necessary but not the same as a restore.
+    decisions: [DR-006, DR-008]
+    required_dimensions: [correctness, data_integrity, secrets_handling, audit_trail, backup_recovery, testing, documentation]
+    independent_review:
+      status: NOT_RUN
+      note: "Constitution section 7 — implemented by this session, not reviewed by another agent."
+
+  - id: T-037
+    title: "Restore path — rebuild a working database from an export"
+    objective: >
+      A backup that has never been restored is a hypothesis. This is the task
+      that turns it into a fact, and it is deliberately separate from T-036: the
+      export is written by one piece of code and read by another, and a format
+      only its own writer can read is the classic way this fails.
+    change_class: data_model_change
+    mode: critical
+    owner_role: implementer
+    assigned_model_tier: standard
+    status: blocked
+    blocked_reason: "Depends on T-036's artefact format, which does not exist yet."
+    depends_on: [T-036]
+    blocks: [T-040]
+    owned_paths: [promedia/core/backup.py, promedia/core/ops/backup.py, tests/test_restore.py]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "An export restored into an empty database reproduces every permanent row, and provenance integrity verifies after the round trip."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "Restoring refuses a schema version it does not understand rather than importing partially."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-3
+        statement: "Restore does not resurrect media the retention policy deleted, and does not reintroduce entity locks."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-4
+        statement: "Restoring onto a non-empty database is refused, or is explicitly additive with a recorded reconciliation rule — never a silent merge."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, data_integrity, rollback, backup_recovery, error_handling, testing, documentation]
+
+  - id: T-038
+    title: "Off-site destination and transport"
+    objective: >
+      Where the artefact goes, and what protects it there. NEEDS AN OPERATOR
+      DECISION before it can be implemented, and it is isolated here so that
+      nothing else waits on that decision.
+      The choice is not a technical detail: "off-site" means the permanent set —
+      rights evidence, the audit log, publication history — leaves this machine.
+      C-31 caps spend at $100/month total, DR-009 recorded a confirmed
+      self-hosted-no-cloud posture for the scheduler, and whether that posture
+      extends to backup storage is the operator's call, not an inference.
+      Options to put to the operator: an external/removable drive (no third
+      party, manual rotation, no recurring cost); a consumer cloud drive already
+      paid for; or object storage priced per GB. At megabyte scale every option
+      is effectively free, so this is a trust and habit decision rather than a
+      cost one — which is exactly why it must not be guessed.
+    change_class: infrastructure
+    mode: critical
+    owner_role: implementer
+    assigned_model_tier: standard
+    status: blocked
+    blocked_reason: >
+      NEEDS_HUMAN — destination is an operator decision with a trust dimension
+      (the permanent set leaving the machine) and a possible third party. Also
+      depends on T-036's artefact.
+    depends_on: [T-036]
+    blocks: [T-039]
+    owned_paths: []
+    owned_paths_note: "Unknown until the destination is chosen; deliberately not guessed."
+    acceptance_criteria:
+      - id: AC-1
+        statement: "The artefact reaches the chosen off-site destination, and the transport records what was sent, when, and its hash."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "If the destination is a third party, the artefact is encrypted before it leaves the machine, and the key is not stored with it."
+        result: NOT_RUN
+        evidence: "not implemented — conditional on the destination decision"
+    required_dimensions: [correctness, security, secrets_handling, threat_model, cost, reliability, documentation]
+
+  - id: T-039
+    title: "Run the backup on a schedule, and make staleness visible"
+    objective: >
+      A backup nobody checks is a backup nobody has. The failure mode is silence
+      — the job stops and everything looks normal until a restore is needed.
+      Reuses the DR-009 tick rather than inventing a second scheduler: T-018
+      already established that Windows Task Scheduler calls the ordinary
+      registry surface, and a second mechanism would be a second thing to
+      supervise.
+    change_class: infrastructure
+    mode: standard
+    owner_role: implementer
+    assigned_model_tier: standard
+    status: blocked
+    blocked_reason: "Depends on a working destination (T-038)."
+    depends_on: [T-036, T-038, T-018]
+    blocks: []
+    owned_paths: [promedia/core/ops/backup.py, docs/HUMAN-ACTIONS.md]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "Backup age is reportable from both surfaces, and an overdue backup is surfaced rather than merely absent from a log."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "A failed backup escalates like a missed publish window does (C-27's pattern), instead of failing silently."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, reliability, observability, testing, documentation]
+
+  - id: T-040
+    title: "Restore drill — prove recovery against a destroyed database"
+    objective: >
+      The only evidence that a backup regime works. Delete the database, restore
+      from the off-site copy alone, and verify the permanent set is intact and
+      that provenance integrity still verifies. Recorded as its own task because
+      a drill folded into the restore task gets skipped when the restore task
+      goes green.
+    change_class: infrastructure
+    mode: critical
+    owner_role: verifier
+    assigned_model_tier: standard
+    status: blocked
+    blocked_reason: "Depends on a real destination and a real restore path."
+    depends_on: [T-037, T-038]
+    blocks: []
+    owned_paths: [tests/test_restore_drill.py, docs/HUMAN-ACTIONS.md]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "Starting from the off-site artefact alone, with the working database destroyed, the permanent set is recovered and provenance integrity verifies."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "The drill is repeatable without operator improvisation, and what it does NOT recover (transient media) is stated in its output."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, backup_recovery, rollback, documentation, testing]
+
 # ---------------------------------------------------------------------------
 # Independent review (protocol 06 stage 7). Reviewer role, separate agent and
 # separate context from the implementer, per Constitution section 7 and

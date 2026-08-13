@@ -43,9 +43,17 @@ meta:
       omitted.
     known_omissions:
       - >
-        Off-site backup of the permanent set is in scope per project.md 5.4 but
-        has no task. Recorded here rather than left to be noticed later; it
-        needs a planning pass, not a guess at its shape.
+        CLOSED 2026-08-13. Off-site backup of the permanent set was in scope per
+        project.md 5.4 with no task. The planning pass it asked for has now been
+        done and produced section S-DURABILITY (T-036..T-040), so the omission
+        is a plan rather than a sentence. Left visible rather than deleted: an
+        omission that vanishes when it is fixed teaches nothing about how long
+        it sat open.
+        Its shape, once looked at: the permanent set maps to ten SQLite tables
+        and is megabytes because masters are transient, so the work is not
+        storage but proof — that no credential rides along (DR-008), that
+        provenance integrity still verifies after a round trip (F-8), and that a
+        restore has actually been performed rather than assumed (T-040).
       - >
         The independent human-experience review (OD-5) is an operator action,
         not an agent task, so it is deliberately not a node. It remains open in
@@ -157,6 +165,47 @@ tree:
           type: task
           title: Storage ledger and admission control
           task: T-007
+
+    - id: S-DURABILITY
+      type: section
+      title: Durability and recovery
+      note: >
+        project.md 5.4 — the permanent set (rights evidence, provenance chains,
+        published-post records, approval and audit log) must survive disk loss.
+        Masters are transient, so the artefact is megabytes.
+
+        Planned 2026-08-13. This section is the answer to the known_omission the
+        plan has carried since the 0.2.0 retrofit; before this, "off-site backup
+        is in scope" existed only as a sentence saying no task existed.
+      children:
+        - id: N-036
+          agent: backend-agent
+          type: task
+          title: Export the permanent set as a verifiable artefact
+          task: T-036
+        - id: N-037
+          agent: backend-agent
+          type: task
+          title: Restore path — rebuild a database from an export
+          task: T-037
+        - id: N-038
+          agent: infra-agent
+          type: task
+          title: Off-site destination and transport
+          task: T-038
+          note: >
+            The only node here needing an operator decision. Isolated so the
+            other four do not wait on it.
+        - id: N-039
+          agent: infra-agent
+          type: task
+          title: Schedule the backup and make staleness visible
+          task: T-039
+        - id: N-040
+          agent: verifier
+          type: task
+          title: Restore drill against a destroyed database
+          task: T-040
 
     - id: S-PUBLISHING
       type: section

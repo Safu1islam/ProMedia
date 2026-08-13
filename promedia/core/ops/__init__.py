@@ -8,6 +8,7 @@ different set of operations than the other (F-1, S4).
 from . import (  # noqa: F401
     accounts,
     assets,
+    backup,
     posts,
     provenance,
     rights,
@@ -19,6 +20,7 @@ from . import (  # noqa: F401
 __all__ = [
     "accounts",
     "assets",
+    "backup",
     "posts",
     "provenance",
     "rights",
