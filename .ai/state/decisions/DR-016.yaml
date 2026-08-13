@@ -1,0 +1,170 @@
+id: DR-016
+title: Media production engine — ffmpeg behind a boundary, edits as a declarative EDL
+date: 2026-08-13
+status: accepted
+decision_area: media_processing_and_editing_architecture
+prompted_by: >
+  T-041. The operator authorised turning ProMedia from a rights-and-publishing
+  gate into a production workspace. Nothing in the system processed media, so
+  every part of this was an open technology choice.
+recorded_late: >
+  DISCLOSED: this record was written AFTER T-041 shipped, not before it.
+  Constitution section 8 and protocol 02 require the decision to precede the
+  build, and it did not — the implementing session went from plan to code
+  without producing a record, and wrote one only when asked to connect the work
+  to AEF. The choices below are what was actually made and why; recording them
+  late is a process failure, not a reconstruction of reasoning that did not
+  happen, and it is noted here rather than backdated.
+
+binding_constraints:
+  - "C-4: agent-callable operation cold start under 1s — anything imported at module scope is on that path"
+  - "C-13/F-7: 100 GB media ceiling, enforced by the storage ledger before bytes land"
+  - "F-1: one implementation, two surfaces; no capability may exist on only one"
+  - "F-4: editing is a production function. Transforming material NEVER makes unusable material usable"
+  - "F-2: agents may draft and render; only the operator publishes"
+  - "Hardware, measured: 4 cores, 7.7 GB RAM, Intel Iris Xe (1 GB, no CUDA)"
+  - "project.md out-of-scope: 'a general-purpose non-linear video editor — the system orchestrates editing operations, it is not Premiere'"
+
+problem_statement: >
+  Two questions, deliberately separated because answering them together is how
+  the second silently constrains the first:
+
+    1. WHAT PROCESSES MEDIA. A library or a subprocess, and which.
+    2. WHAT AN EDIT IS. A sequence of imperative operations applied to files, or
+       a document describing a result.
+
+  The second is the one that decides whether AI and humans can collaborate at
+  all, and it is the one a naive reading of "build a video editor" never asks.
+
+ruled_out:
+  - option: "MoviePy"
+    reason: >
+      The obvious Python answer, and the one habit reaches for. It wraps ffmpeg
+      anyway, so it adds a dependency without adding a capability; it is
+      notoriously slow because it moves frames through Python and NumPy rather
+      than leaving them in ffmpeg's filter graph; and on 7.7 GB of RAM,
+      materialising frames in Python is the specific thing this machine cannot
+      afford. It also constrains us to the subset of ffmpeg it chose to expose.
+  - option: "PyAV / direct libav bindings"
+    reason: >
+      Frame-level control we do not need, at the cost of implementing every
+      filter, transition and mix ourselves — the work ffmpeg's filter graph
+      already does correctly. Right choice for a codec tool, wrong one for an
+      orchestrator.
+  - option: "GStreamer"
+    reason: >
+      A better pipeline model than ffmpeg's on paper, and genuinely superior for
+      live streaming. But it is a heavy platform dependency on Windows, its
+      Python bindings need a GObject stack, and the operator's machine is a
+      single Windows laptop. Cost is entirely deployment, benefit is entirely
+      streaming, and this system does not stream.
+  - option: "A cloud rendering API"
+    reason: >
+      Sidesteps the hardware limits, and DR-009 already recorded a confirmed
+      self-hosted, no-cloud posture. It would also put unpublished media — and
+      therefore unresolved rights positions — on a third party's disk, which is
+      the exact class of exposure DR-008 works to avoid.
+  - option: "Imperative edit operations mutating files in place"
+    reason: >
+      The shape most people build first: trim(), then crop(), then caption(),
+      each writing a new file. Rejected on four counts, any one of which is
+      sufficient. Every step is a re-encode, so quality degrades and time
+      multiplies. There is no artefact representing 'the edit', so a human
+      cannot review what the agent intends before it happens — only after.
+      Undo means keeping every intermediate. And two actors editing the same
+      video have nothing to merge, which forecloses the collaboration this
+      platform exists to provide.
+
+decision: >
+  ffmpeg as a SUBPROCESS behind a single boundary module, driven by a
+  declarative EDL that compiles to one filter graph per render.
+
+  Three modules, one responsibility each:
+
+    core/media/ffmpeg.py   the boundary — probe, execute, platform quirks,
+                           structured errors. The only place that knows ffmpeg
+                           exists.
+    core/media/edl.py      the document — what an edit IS. Imports nothing from
+                           the boundary, so an edit can be created, validated
+                           and reviewed on a machine with no media tooling.
+    core/media/render.py   the compiler — EDL plus resolved sources to a command
+                           line. A pure function returning an inspectable plan,
+                           so the graph is testable without encoding anything.
+
+  ONE ffmpeg invocation per render, never a chain of intermediates: every
+  intermediate costs a re-encode, and quality lost that way is not recoverable.
+
+rationale: >
+  Subprocess over library is the load-bearing half. It keeps ffmpeg off the C-4
+  cold-start path entirely (nothing is imported; a binary is executed), it gives
+  the full filter vocabulary rather than a wrapper's subset, it isolates crashes
+  — and ffmpeg does crash here, see the segfault in consequences — and it means
+  a version upgrade is an install, not a dependency resolution.
+
+  The EDL is what makes the collaboration requirement structural instead of a
+  feature to be built later. The agent writes an EDL from an instruction; the
+  operator opens the same project and adjusts it; either can render. There is no
+  synchronisation problem because there is only one document. It also delivers
+  non-destructive editing, version history, and reproducible renders as
+  consequences of the shape rather than as separate work.
+
+  It is additionally the honest reading of the scope line. 'Orchestrates editing
+  operations, it is not Premiere' describes a system that composes a description
+  of an edit and executes it — which is exactly an EDL and a render pipeline,
+  and is NOT a timeline UI with scrubbing and drag handles.
+
+consequences:
+  - >
+    ffmpeg becomes a hard external dependency. Absent, every media operation
+    fails — reported as MEDIA_TOOL_MISSING naming the install command, never as
+    a media problem, because the media is fine and the machine is not equipped.
+  - >
+    The filter graph is a string-built artefact, which is the category where
+    errors are invisible until execution. Three platform findings are now
+    encoded in the boundary rather than left as folklore: drawtext SEGFAULTS
+    without an explicit fontfile on the Windows build; paths and text escape by
+    DIFFERENT rules; and caption text cannot be inlined at all, because an
+    apostrophe terminates ffmpeg's quoted section, a colon splits arguments, and
+    a percent triggers strftime expansion that escaping cannot prevent. Captions
+    are written to sidecar files so their content never enters the graph.
+  - >
+    Rendering is CPU-bound on this hardware and the filter chain does not use
+    the GPU. Quick Sync accelerates only the encode step; measured, its win is
+    compression efficiency (half the file size) rather than speed.
+  - >
+    A render writes bytes that the storage ledger does not yet know about. DR-006
+    makes the ledger the sole source of truth for the F-7 ceiling, so this is a
+    real gap of the same class as finding B4, and it is open — see T-043.
+  - >
+    True cross-dissolves between clips are not expressible. The concat-based
+    graph carries no absolute timeline offsets, which xfade requires, so the EDL
+    vocabulary's 'dissolve' currently renders as a fade from black. Registered as
+    fabrication F-003 rather than left as a surprise.
+
+fluency_bias_check: >
+  Two habits were available and both are wrong here. The first is reaching for
+  MoviePy because the project is in Python and MoviePy is the Python video
+  library — a choice made by language affinity rather than against constraints,
+  and one that fails specifically on this machine's memory. The second, subtler,
+  is building an editor as a set of verbs (trim, crop, caption) because that is
+  how editing is described in conversation. Verbs produce an imperative pipeline,
+  and an imperative pipeline has no artefact for a human to review before the
+  fact — which quietly makes the human a spectator of the agent's work rather
+  than a collaborator in it. The EDL was chosen because the collaboration
+  requirement is a data-model requirement, not a UI one.
+
+reversibility: moderate
+reversibility_note: >
+  The boundary is replaceable: swapping ffmpeg for another engine means
+  reimplementing core/media/ffmpeg.py and the compiler, with the EDL and every
+  caller untouched. The EDL itself is not cheaply reversible — it is the shape
+  of every stored project — but it is versioned, and a newer EDL version is
+  refused rather than misread.
+
+revisit_if:
+  - "A discrete GPU appears, at which point hardware filtering (not just encoding) changes the performance picture and local AI models become possible"
+  - "Renders routinely exceed the operator's patience, which means proxy workflows and segment caching stop being optional"
+  - "True cross-dissolves or overlapping timeline compositing become required, which the concat model cannot express and which needs a real timeline offset model"
+
+relates_to: [DR-002, DR-006, DR-008, DR-009]
+supersedes: []

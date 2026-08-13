@@ -48,3 +48,30 @@ sessions:
       next: "None."
       references:
         - "AEF-0.4.0"
+  - id: "next3"
+    agent: "backend-agent"
+    vendor: "anthropic"
+    model: "claude-opus-5"
+    main_engineer: false
+    task: "T-041"
+    activity: "Connecting the media production layer to AEF governance"
+    status: "ended"
+    started_at: "2026-08-13T15:51:20+04:00"
+    heartbeat_at: "2026-08-13T15:59:27+04:00"
+    handoff:
+      ended_at: "2026-08-13T15:59:27+04:00"
+      outcome: "completed"
+      changed: "T-041 media foundation (ffmpeg boundary, EDL, render pipeline) shipped and then CONNECTED to AEF: DR-016 written for the architecture, fabrication F-003 registered, T-042..T-049 planned as tasks and plan nodes, R-002 and R-003 raised. Also earlier this session: T-018, T-022, T-030, T-033, T-035, T-036, T-037."
+      remaining: "The engine reaches NEITHER surface (T-042) — no operation is registered, so the F-1 parity gate cannot see it. Renders bypass the storage ledger (T-043) and no rights check precedes a transformation (T-044). Those three close governance gaps T-041 opened and precede every further feature."
+      risks: "project.md still forbids what is being built (R-002, critical). Eight consecutive tasks from this one session are unreviewed (R-003); T-041 is the foundation four later phases inherit, so it is the one to review first. F-003 is an ACTIVE silent substitution: 'dissolve' renders a fade and nothing tells the caller."
+      next: "T-042. It is the only thing that turns the engine into a capability, and T-043/T-044/T-046/T-047/T-049 all depend on it."
+      evidence:
+        - "508 tests passing"
+        - "render gate measured: 2.18x realtime x264 medium"
+        - "DR-016 consequences block"
+      references:
+        - "T-041"
+        - "DR-016"
+        - "F-003"
+        - "R-002"
+        - "R-003"

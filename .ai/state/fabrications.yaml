@@ -90,6 +90,44 @@ fabrications:
       user-binding to machine-binding and make the cross-account case pass
       trivially.
 
+  - id: F-003
+    created_by_task: T-041
+    created_at: "2026-08-13"
+    kind: silent_substitution
+    location: promedia/core/media/render.py — _clip_chain
+    what_is_fake: >
+      The EDL vocabulary offers 'dissolve' as a transition, and it does not
+      render one. Both 'fade' and 'dissolve' compile to the same thing: a fade
+      from BLACK at the head of the clip. A true cross-dissolve blends the tail
+      of the outgoing clip into the head of the incoming one, which looks
+      materially different and is what the word means to anyone who edits video.
+    why: >
+      The graph concatenates clips, and concat carries no absolute timeline
+      offsets. ffmpeg's xfade filter needs them, so a real cross-dissolve
+      requires a different composition model than the one T-041 built.
+      Implementing that inside T-041 would have been a redesign of the graph on
+      the way past, rather than the foundation the task was scoped to deliver.
+    visible_to_user: true
+    visibility_note: >
+      REGISTERED BECAUSE IT WAS ALMOST NOT. The implementing session recorded
+      this as an "assumption" in the task, which was the wrong register:
+      Constitution section 6 covers anything where the system accepts one
+      instruction and does another without saying so. An operator or agent asks
+      for a dissolve, the render succeeds, and nothing anywhere reports that
+      they got a fade. A silent substitution that SUCCEEDS is more dangerous
+      than a failure, because nothing prompts anyone to look.
+    replacement_condition: >
+      An absolute-offset composition model that can express overlapping clips,
+      allowing xfade. Recorded in DR-016 revisit_if.
+    replacement_task: T-045
+    status: active
+    blocks_release: false
+    interim_mitigation: >
+      NONE YET — this is why it is registered rather than resolved. The cheapest
+      honest interim is for the render result to report the substitution, so a
+      caller asking for 'dissolve' is told it rendered a fade. That belongs with
+      T-042, which is where render results first reach a surface.
+
 notes:
   - >
     T-028's parity probes use a sentinel identifier

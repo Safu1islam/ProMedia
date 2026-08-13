@@ -864,14 +864,33 @@ tasks:
         experiment used testsrc (video only) and referenced [0:a], so every
         variant "failed" for a reason unrelated to escaping. Recorded because it
         briefly made a working escape look broken.
-    fabrications_introduced: []
+    fabrications_introduced: [F-003]
+    corrected_after_the_fact:
+      what: >
+        This task originally recorded `fabrications_introduced: []` and filed
+        the dissolve-renders-as-fade substitution under `assumptions`. Both were
+        wrong, and were corrected during the AEF connection pass.
+      why_it_matters: >
+        Constitution section 6 covers anything where the system accepts one
+        instruction and performs another without saying so. An operator asks for
+        a dissolve, the render SUCCEEDS, and nothing reports that they got a
+        fade — a silent substitution that succeeds is more dangerous than a
+        failure, because nothing prompts anyone to look. Filing it as an
+        assumption put it somewhere no release check reads.
+        It is now F-003, with T-045 as its replacement task.
+      also_missing: >
+        The task cited `decisions: [DR-002]` and no decision record of its own,
+        despite choosing ffmpeg over MoviePy/PyAV/GStreamer and choosing a
+        declarative EDL over an imperative pipeline. Constitution section 8 and
+        protocol 02 require a recorded decision with alternatives for exactly
+        that. Written as DR-016, and disclosed there as recorded LATE rather
+        than backdated.
     assumptions:
       - >
         Transitions are implemented as a fade from black at the head of a clip
         rather than a true cross-dissolve between clips. A real xfade needs
         absolute timeline offsets, which the concat-based graph does not carry.
-        Stated in the compiler rather than implied — the EDL vocabulary offers
-        'dissolve', and today it renders as a fade.
+        NOW REGISTERED AS FABRICATION F-003 — see corrected_after_the_fact.
       - >
         Quick Sync is the delivery default for SIZE, not speed. The filter chain
         runs on the CPU either way, so hardware encoding accelerates only the
@@ -887,11 +906,292 @@ tasks:
         checks the verdict or media availability before rendering. The EDL
         exposes asset_ids() precisely so that check can be added at the gate,
         and it must be before any render is publishable (F-3, F-4).
-    decisions: [DR-002]
+    decisions: [DR-002, DR-016]
     required_dimensions: [correctness, error_handling, testing, documentation, measured_baseline]
     independent_review:
       status: NOT_RUN
-      note: "Constitution section 7 — implemented by this session, not reviewed by another agent."
+      note: >
+        Constitution section 7 — implemented by this session, not reviewed by
+        another agent. Raised as recommendation R-003, which notes this is now
+        the eighth consecutive unreviewed task from one session and asks for
+        T-041 specifically to be reviewed first, since every later phase
+        inherits it.
+
+  - id: T-042
+    title: "Projects and operations — make the media engine reachable from both surfaces"
+    objective: >
+      T-041 built an engine and registered no capability, so today the render
+      pipeline is reachable from NEITHER the agent nor the UI, and the F-1
+      parity gate cannot see it. This is the task that turns a library into a
+      capability: persist projects and their EDL, and register the operations
+      that create, edit, render and review them.
+      Until this lands the production platform has no user of any kind.
+    change_class: api_change
+    mode: critical
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: ready
+    depends_on: [T-041]
+    blocks: [T-043, T-044, T-046, T-049]
+    owned_paths:
+      - promedia/core/projects.py
+      - promedia/core/ops/projects.py
+      - promedia/core/ops/__init__.py
+      - promedia/core/schema.sql
+      - promedia/config.py
+      - tests/test_projects.py
+    acceptance_criteria:
+      - id: AC-1
+        statement: "A project holds a versioned EDL; every edit creates a new version and the previous one remains readable."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "Create, edit, render and inspect are registered operations, and the parity gate covers them on both surfaces."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-3
+        statement: "Rendering takes a C-19 lock on the project, so an agent and the operator cannot render conflicting edits of the same project concurrently."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-4
+        statement: "A render result reports any substitution it made, including the F-003 dissolve-to-fade case, rather than reporting plain success."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-5
+        statement: "Render timeouts and quality defaults come from configuration, not literals (protocol 05)."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, api_contract_stability, security, error_handling, testing, documentation]
+
+  - id: T-043
+    title: "Renders count against the storage ledger"
+    objective: >
+      A render writes bytes to disk that the ledger knows nothing about. DR-006
+      makes the ledger the SOLE source of truth for the F-7 ceiling, so those
+      bytes count zero and the 100 GB limit is silently wrong by the size of
+      every render ever produced. This is the same class of defect as blocking
+      finding B4, which is why it is its own task and not a line in T-042.
+      Editing is the workload that produces the most bytes in this system, so
+      the gap grows fastest exactly where it matters most.
+    change_class: data_model_change
+    mode: critical
+    owner_role: implementer
+    assigned_model_tier: standard
+    status: blocked
+    blocked_reason: "Needs the render operation from T-042 to hook into."
+    depends_on: [T-042]
+    blocks: []
+    owned_paths: [promedia/core/projects.py, promedia/core/storage.py, tests/test_render_storage.py]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "A render reserves projected output size before encoding and commits actual size after, and a render that would breach the ceiling is refused before ffmpeg starts."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "A failed or timed-out render releases its reservation, leaking no quota."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-3
+        statement: "Deleting a render returns its bytes to the ledger."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, data_integrity, error_handling, testing]
+
+  - id: T-044
+    title: "Rights and media availability gate before render and publish"
+    objective: >
+      An EDL references asset ids and nothing checks them. Today a render can be
+      composed from BLOCKED footage, or from an asset whose media retention
+      deleted, and it will succeed.
+      F-4 is the constraint that makes this sharp: "transforming material never
+      makes unusable material usable". An editor is precisely a transformation
+      machine, so it is the most likely route by which unusable material reaches
+      a publication — the exact laundering path B3 closed for derivatives.
+      edl.asset_ids() exists so this check has one place to stand.
+    change_class: auth_or_permissions
+    mode: critical
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: blocked
+    blocked_reason: "Needs the render operation from T-042 to gate."
+    depends_on: [T-042]
+    blocks: []
+    owned_paths: [promedia/core/projects.py, promedia/core/rights.py, tests/test_render_rights.py]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "Rendering an EDL that references a BLOCKED or ESCALATE asset is refused, naming the offending asset."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "A rendered output inherits the most restrictive verdict of its sources, and cannot be published if any source is not PERMITTED."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-3
+        statement: "Rendering from an asset whose media is absent or deleted raises MediaUnavailable rather than producing a partial video."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-4
+        statement: "A render is registered as a derivative of its sources, so the existing ancestry machinery governs it."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, security, data_integrity, audit_trail, testing]
+
+  - id: T-045
+    title: "Timeline composition — true cross-dissolves (retires F-003)"
+    objective: >
+      The EDL offers 'dissolve' and renders a fade from black, because the
+      concat-based graph carries no absolute timeline offsets and xfade needs
+      them. Registered as fabrication F-003.
+      Needs an offset-based composition model rather than a filter swap, which
+      is why it is deferred rather than patched.
+    change_class: new_project
+    mode: standard
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: ready
+    depends_on: [T-041]
+    blocks: []
+    owned_paths: [promedia/core/media/render.py, promedia/core/media/edl.py, tests/test_transitions.py]
+    retires_fabrication: F-003
+    acceptance_criteria:
+      - id: AC-1
+        statement: "A dissolve blends the outgoing clip into the incoming one, and is visually distinguishable from a fade to black in the rendered output."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "Total duration accounts for transition overlap, rather than being the naive sum of clip lengths."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, testing, documentation]
+
+  - id: T-046
+    title: "Acquisition — import from URL and screen recordings, through the rights gate"
+    objective: >
+      Phase 3. yt-dlp is installed; nothing calls it. Downloading someone
+      else's video is the single most likely way unusable material enters this
+      system, so import is a rights event before it is a file operation: it
+      lands in the content-addressed store WITH a declaration, exactly as local
+      ingest does. There is deliberately no path that acquires media without one.
+    change_class: new_project
+    mode: critical
+    owner_role: implementer
+    assigned_model_tier: standard
+    status: blocked
+    blocked_reason: "Needs project persistence and the operation surface from T-042."
+    depends_on: [T-042]
+    blocks: []
+    owned_paths: [promedia/core/acquire.py, promedia/core/ops/acquire.py, tests/test_acquire.py]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "Importing from a URL is refused without a rights declaration, exactly as local ingest is."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "An import reserves storage before downloading and is refused if it would breach the ceiling."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-3
+        statement: "The source URL and acquisition time are recorded as evidence on the asset."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, security, data_integrity, error_handling, testing]
+
+  - id: T-047
+    title: "Transcription, subtitles and silence-based rough cut"
+    objective: >
+      Phase 3. The one AI workload that runs locally on this hardware
+      (faster-whisper on CPU, roughly 1-3x realtime), plus the deterministic
+      analysis that gets most of the way to "remove the unnecessary parts"
+      without any model at all: ffmpeg silencedetect and scene-change detection.
+    change_class: new_project
+    mode: standard
+    owner_role: implementer
+    assigned_model_tier: standard
+    status: blocked
+    blocked_reason: "Needs the operation surface from T-042."
+    depends_on: [T-042]
+    blocks: []
+    owned_paths: [promedia/core/media/analyse.py, promedia/core/ops/analyse.py, tests/test_analyse.py]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "Transcription produces timed segments that become an EDL subtitle track or burned-in captions."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "Silence detection produces a proposed EDL whose clips exclude the silent spans, for review rather than automatic application."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-3
+        statement: "With no transcription model installed, the operation reports exactly what is missing rather than skipping silently."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, error_handling, fabrication_replacement_plan, testing]
+
+  - id: T-048
+    title: "AI capability providers and the spend ledger"
+    objective: >
+      Phase 4, and the seam that lets paid APIs be added later without a
+      rewrite. Interfaces for transcription, text, speech, image and video
+      generation, each declaring availability and — when unavailable — exactly
+      what would be required. Mirrors the publisher pattern from DR-010, whose
+      stub reports UNKNOWN limits rather than plausible guesses.
+      NOTE: the agent IS the language model for agent-driven text generation
+      (operator, 2026-08-13), so a text provider is needed only for UI-triggered
+      generation with no agent in the loop.
+      NO PURCHASING OR PAYMENT CODE — operator instruction. The spend ledger
+      enforces the C-31 ceiling; nothing buys anything.
+    change_class: new_project
+    mode: critical
+    owner_role: architect
+    assigned_model_tier: frontier
+    status: ready
+    depends_on: [T-041]
+    blocks: []
+    owned_paths: [promedia/core/providers/**, promedia/core/ops/providers.py, tests/test_providers.py]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "Every AI capability has an interface declaring available(), requirements(), estimate() and run()."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "An unavailable capability returns a structured refusal naming the model or API that would satisfy it, and is registered as a fabrication gap."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-3
+        statement: "The spend ledger refuses an operation that would exceed the C-31 ceiling, and no code path performs a purchase."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, security, cost, error_handling, fabrication_replacement_plan, testing, documentation]
+
+  - id: T-049
+    title: "Editing UI — preview, EDL editing, render review"
+    objective: >
+      Phase 5, and the largest UI effort. A projection of the EDL rather than a
+      thing in itself: the operator adjusts the same document the agent writes.
+      Proxy-based preview, because 7.7 GB of RAM and integrated graphics rule
+      out full-resolution timeline playback.
+      Supersedes part of DR-004 (server-rendered, no JavaScript required), which
+      was chosen so the APPROVAL screen stays dependable — that reasoning still
+      holds for approval and must not be weakened by this.
+    change_class: ui_change
+    mode: critical
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: blocked
+    blocked_reason: "Needs projects, operations and rendering to exist as capabilities (T-042)."
+    depends_on: [T-042]
+    blocks: []
+    owned_paths: [promedia/web/**, tests/test_editor_ui.py]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "An operator can review a render, adjust the EDL and re-render without using the CLI."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "The approval path keeps working without JavaScript, so DR-004's guarantee survives this change."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, human_experience, accessibility, security, testing, documentation]
 
   # -------------------------------------------------------------------------
   # Durability — off-site backup of the permanent set (project.md 5.4).

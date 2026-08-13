@@ -181,15 +181,75 @@ tree:
       note: >
         The platform work, planned 2026-08-13 and authorised by the operator.
         Turns ProMedia from a rights-and-publishing gate into a production
-        workspace. Phase 1 only is planned as tasks so far; the remaining phases
-        are in the published plan and become nodes once the operator confirms
-        the order.
+        workspace. Architecture in DR-016.
+
+        Ordered so the governance gaps T-041 opened close before the platform
+        grows on top of them: the engine currently reaches NEITHER surface
+        (F-1), its renders bypass the storage ledger (F-7), and nothing checks
+        rights before a transformation (F-4). Those are N-042/043/044 and they
+        precede every feature.
       children:
-        - id: N-041
-          agent: backend-agent
-          type: task
-          title: Media foundation — ffmpeg boundary, EDL, render pipeline
-          task: T-041
+        - id: F-MEDIA-CORE
+          type: feature
+          title: Engine and its governance
+          children:
+            - id: N-041
+              agent: backend-agent
+              type: task
+              title: Media foundation — ffmpeg boundary, EDL, render pipeline
+              task: T-041
+            - id: N-042
+              agent: backend-agent
+              type: task
+              title: Projects and operations — reachable from both surfaces
+              task: T-042
+            - id: N-043
+              agent: backend-agent
+              type: task
+              title: Renders count against the storage ledger
+              task: T-043
+            - id: N-044
+              agent: security-agent
+              type: task
+              title: Rights and availability gate before render
+              task: T-044
+            - id: N-045
+              agent: backend-agent
+              type: task
+              title: Timeline composition — true cross-dissolves
+              task: T-045
+        - id: F-MEDIA-INPUT
+          type: feature
+          title: Acquisition and analysis
+          children:
+            - id: N-046
+              agent: backend-agent
+              type: task
+              title: Import from URL and screen recordings
+              task: T-046
+            - id: N-047
+              agent: backend-agent
+              type: task
+              title: Transcription, subtitles, silence-based rough cut
+              task: T-047
+        - id: F-MEDIA-AI
+          type: feature
+          title: AI capabilities
+          children:
+            - id: N-048
+              agent: architect
+              type: task
+              title: Provider seam and spend ledger
+              task: T-048
+        - id: F-MEDIA-UI
+          type: feature
+          title: Operator editing surface
+          children:
+            - id: N-049
+              agent: frontend-agent
+              type: task
+              title: Editing UI — preview, EDL editing, render review
+              task: T-049
 
     - id: S-DURABILITY
       type: section
