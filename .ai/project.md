@@ -351,7 +351,7 @@ ingest), or earlier if any specific trigger below fires.
 | A-9 | GDPR and UAE PDPL not applicable | Confirmed by operator. Revisit on audience targeting or third-party personal data processing |
 | A-10 | Cut order analytics → scheduling → never rights | Operator states a different order |
 | A-11 | Low-ops preferred despite unrestricted capability, because operator *time* is the binding constraint | Ops burden approaches 1 h/week |
-| A-15 | ffmpeg/ffprobe absent; media duration and codec metadata recorded as `null` with `probe_status: unavailable` rather than guessed | ffmpeg installed, or derivative generation enters scope |
+| A-15 | ~~ffmpeg/ffprobe absent; media duration and codec metadata recorded as `null` with `probe_status: unavailable` rather than guessed~~ **RETIRED 2026-08-13** — ffmpeg 9.0 installed by operator instruction (T-041). Both of its stated trigger conditions fired at once: ffmpeg is installed, and derivative generation entered scope. Probing now returns real duration, resolution, frame rate and codecs. The no-guessing rule it protected still stands and is unchanged: a field ffprobe does not report stays `null`. | — |
 | A-16 | Publish windows restricted to hours the machine is on (O-1 option C) | First missed window that mattered |
 | A-12 | Sustained < 1 op/sec | — |
 | A-13 | OAuth alerting at 72 h before expiry | First token expiry incident |

@@ -175,6 +175,22 @@ tree:
           title: Storage ledger and admission control
           task: T-007
 
+    - id: S-PRODUCTION
+      type: section
+      title: Media production
+      note: >
+        The platform work, planned 2026-08-13 and authorised by the operator.
+        Turns ProMedia from a rights-and-publishing gate into a production
+        workspace. Phase 1 only is planned as tasks so far; the remaining phases
+        are in the published plan and become nodes once the operator confirms
+        the order.
+      children:
+        - id: N-041
+          agent: backend-agent
+          type: task
+          title: Media foundation — ffmpeg boundary, EDL, render pipeline
+          task: T-041
+
     - id: S-DURABILITY
       type: section
       title: Durability and recovery

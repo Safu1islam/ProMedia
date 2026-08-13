@@ -4,6 +4,31 @@
 locks: []
 
 history:
+  - path: "promedia/core/media/**, tests/test_media.py, tests/test_edl.py, .ai/project.md"
+    task_id: "T-041"
+    agent: "claude-code-session-next3"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-13T09:00:00+04:00"
+    released_at: "2026-08-13T11:30:00+04:00"
+    note: >
+      Media production foundation — the ffmpeg boundary, the EDL document and
+      the render compiler. Phase 1 of the production plan.
+
+      SCOPE CAME IN NARROWER THAN CLAIMED, deliberately. The claim covered
+      ops/projects.py, ops/__init__.py, schema.sql and config.py for project
+      persistence; none was touched. Making the engine reachable as an operation
+      is its own task (T-042) and the escaping work took the time that would
+      have gone to it. Recorded rather than left as an unexplained gap between
+      claim and diff.
+
+      .ai/project.md was added to the claim for ONE line: retiring assumption
+      A-15 ("ffmpeg/ffprobe absent"), whose two stated trigger conditions both
+      fired — ffmpeg is now installed and derivative generation entered scope.
+
+      Software installed on the operator's machine under their explicit
+      instruction: ffmpeg 9.0 + ffprobe (winget Gyan.FFmpeg), yt-dlp
+      2026.07.04 (pip).
+
   - path: "aef/**, .ai/state/decisions/DR-015.yaml, .ai/state/plan.yaml"
     task_id: "AEF-0.4.0"
     agent: "claude-code-session-aef040"

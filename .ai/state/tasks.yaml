@@ -753,6 +753,146 @@ tasks:
         another agent. This is an auth_or_permissions change, which routing.yaml
         puts at 3 reviewers; the shortfall is the standing one in OD-6.
 
+  - id: T-041
+    title: "Media production foundation — ffmpeg boundary, EDL, render pipeline"
+    objective: >
+      Phase 1 of the production platform. Install the media toolchain, prove a
+      real render is fast enough on this hardware to build on, and lay the three
+      modules everything else will sit on: the ffmpeg boundary, the edit
+      decision list, and the compiler between them.
+    change_class: new_project
+    mode: critical
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: complete
+    claimed_by: "claude-code-session-next3"
+    depends_on: []
+    blocks: [T-042]
+    owned_paths:
+      - promedia/core/media/__init__.py
+      - promedia/core/media/ffmpeg.py
+      - promedia/core/media/edl.py
+      - promedia/core/media/render.py
+      - tests/test_media.py
+      - tests/test_edl.py
+    acceptance_criteria:
+      - id: AC-1
+        statement: "The media toolchain is installed and reachable the way ProMedia actually calls it."
+        result: PASSED
+        evidence: >
+          ffmpeg 9.0 and ffprobe 9.0 via winget (Gyan.FFmpeg), yt-dlp 2026.07.04
+          via pip. All three resolve on PATH from a subprocess, which is how
+          promedia invokes them. Probing the operator's own 108 MB screen
+          recording returns 139.2s, 1490x1022, 30fps, h264 + aac — this retires
+          assumption A-15, which had every duration recording as null.
+      - id: AC-2
+        statement: "A real render on real footage is measured before anything is built on top of it."
+        result: PASSED
+        evidence: >
+          The gate set in the plan, run first rather than last. 60s of
+          1490x1022 -> 1280x720 with a fade and a text overlay:
+          x264 medium 27.5s (2.18x realtime), x264 veryfast 14.4s (4.16x),
+          h264_qsv 16.0s (3.74x) at HALF the file size (5.4 MB vs 10.4 MB).
+          A 10-minute edited video therefore renders in roughly 4 minutes at
+          good quality. The plan is viable on this hardware; had this failed the
+          whole approach needed rescoping, which is why it ran before the code.
+      - id: AC-3
+        statement: "An EDL can be created, validated and versioned without ffmpeg present, and compiles to a filter graph as a pure function."
+        result: PASSED
+        evidence: >
+          tests/test_edl.py — 31 tests, none of which touch ffmpeg. The EDL
+          module imports nothing from the ffmpeg boundary, so an edit can be
+          drafted and reviewed on a machine with no media tooling. Compilation
+          returns an inspectable RenderPlan rather than running anything, so the
+          graph is asserted structurally rather than by "it produced a file".
+      - id: AC-4
+        statement: "A multi-clip edit with effects, transitions, speed changes, captions and audio renders to a playable file."
+        result: PASSED
+        evidence: >
+          tests/test_media.py — 18 tests against ffmpeg, generating their own
+          synthetic media so the suite depends on no checked-in binary. Plus a
+          real end-to-end run on the operator's screen recording: 3 segments
+          reordered, grayscale and saturate effects, 1.5x speed, fades,
+          landscape source to VERTICAL output, two timed captions, loudness
+          normalised — 6.3s. Duration arithmetic confirms the speed change is
+          real: 8 + 6/1.5 + 7 = 19.0s expected, 19.03s measured.
+      - id: AC-5
+        statement: "Captions survive the characters humans and models actually type."
+        result: PASSED
+        evidence: >
+          Parametrised over apostrophes, colons, percent signs, backslashes and
+          Windows paths, each rendered for real. See findings below — this is
+          the part that took the work.
+    verification:
+      - command: "python -m pytest -p no:cacheprovider tests/test_edl.py tests/test_media.py"
+        status: PASSED
+        observed: "49 passed"
+      - command: "python -m pytest -p no:cacheprovider"
+        status: PASSED
+        observed: "508 passed (459 before this task; +49)"
+      - command: "Real render, operator's own footage, 3-clip vertical edit with captions"
+        status: PASSED
+        observed: "6.3s; 720x1280; h264+aac; 19.03s output; delivered to the operator for review"
+    findings:
+      - >
+        drawtext SEGFAULTS on this ffmpeg build without an explicit fontfile.
+        The gyan.dev Windows build ships no fontconfig configuration, so there
+        is no default-font fallback — and a segfault produces no error text to
+        parse, which is the least debuggable failure available. font_argument()
+        now refuses to emit a drawtext without a font.
+      - >
+        PATHS AND TEXT ESCAPE BY DIFFERENT RULES, and conflating them cost a
+        debugging round. A Windows path escaped as text becomes
+        C\\:\\\\Windows\\\\Fonts — doubled backslashes the parser rejects. Paths
+        need forward slashes plus an escaped colon; text needs its backslashes
+        doubled. escape_path_for_filter() exists for that reason.
+      - >
+        INLINE CAPTION TEXT CANNOT BE MADE RELIABLE, and this is the most-tested
+        decision in the module. An apostrophe TERMINATES ffmpeg's quoted section
+        — a backslash does not escape it inside quotes, and close-escape-reopen
+        fails too; a colon splits filter arguments; a percent triggers strftime
+        expansion that escaping cannot prevent, because expansion happens after
+        unescaping. Measured: every caption containing BOTH a colon and an
+        apostrophe failed ("Q1: revenue +12% (it's up)"). Worse, the failure was
+        not reported against drawtext at all — the broken quote swallowed the
+        chain separator, so ffmpeg complained about a loudnorm option, sending
+        the investigation to the wrong filter entirely. Resolved by writing
+        caption text to a SIDECAR FILE (textfile=), so the content never enters
+        the graph. All six probe captions then passed.
+      - >
+        A probe of my own was wrong before the code was: an early escaping
+        experiment used testsrc (video only) and referenced [0:a], so every
+        variant "failed" for a reason unrelated to escaping. Recorded because it
+        briefly made a working escape look broken.
+    fabrications_introduced: []
+    assumptions:
+      - >
+        Transitions are implemented as a fade from black at the head of a clip
+        rather than a true cross-dissolve between clips. A real xfade needs
+        absolute timeline offsets, which the concat-based graph does not carry.
+        Stated in the compiler rather than implied — the EDL vocabulary offers
+        'dissolve', and today it renders as a fade.
+      - >
+        Quick Sync is the delivery default for SIZE, not speed. The filter chain
+        runs on the CPU either way, so hardware encoding accelerates only the
+        encode step; the measured win is compression efficiency.
+    open_items:
+      - >
+        NOT YET REACHABLE FROM EITHER SURFACE. This task built the engine, not
+        the capability: no operation is registered, so neither the agent nor the
+        UI can drive it, and the F-1 parity gate does not cover it. That is
+        T-042 (project persistence and operations) and it is the next thing.
+      - >
+        No rights integration yet. An edit references asset ids, but nothing
+        checks the verdict or media availability before rendering. The EDL
+        exposes asset_ids() precisely so that check can be added at the gate,
+        and it must be before any render is publishable (F-3, F-4).
+    decisions: [DR-002]
+    required_dimensions: [correctness, error_handling, testing, documentation, measured_baseline]
+    independent_review:
+      status: NOT_RUN
+      note: "Constitution section 7 — implemented by this session, not reviewed by another agent."
+
   # -------------------------------------------------------------------------
   # Durability — off-site backup of the permanent set (project.md 5.4).
   #
