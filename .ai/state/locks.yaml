@@ -1,7 +1,23 @@
 # .ai/state/locks.yaml — entity/path ownership.
 # Schema: aef/schemas/lock.schema.yaml
 
-locks: []
+locks:
+  - path: "promedia/web/app.py, promedia/web/templates/**, tests/test_editor_ui.py, .claude/launch.json"
+    task_id: "T-049"
+    agent: "claude-code-session-ui"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-13T14:00:00+04:00"
+    expires_at: "2026-08-13T18:00:00+04:00"
+    note: >
+      The media workspace UI. Raised directly by the operator on seeing the
+      running app: "I found app UI that's not what we was trying to do" —
+      correct, it is the v1 governance surface (a storage/rights dashboard plus
+      a TABLE of operations) and not a production workspace.
+      DR-004's no-JavaScript guarantee is kept, not superseded: a project view
+      and an HTML5 video player need no script, and the approval path it was
+      written to protect is untouched.
+      promedia/core/** is NOT claimed — this is a projection of capabilities
+      that already exist, adding no business logic to the adapter.
 
 history:
   - path: "promedia/core/projects.py, promedia/core/ops/projects.py, promedia/core/ops/__init__.py, promedia/core/schema.sql, promedia/config.py, promedia/core/media/render.py, promedia/core/backup.py, tests/test_projects.py, tests/test_locking.py, tests/test_ops_forms.py"
