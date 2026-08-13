@@ -3,6 +3,101 @@
 All notable changes to AEF are recorded here.
 Versions follow semantic versioning. Projects pin a version; upgrades are deliberate.
 
+## [0.4.0] — 2026-08-13
+
+From a governance framework for one agent to a coordination substrate for
+several. **Additive: every new file is optional and a 0.3.0 project runs
+unchanged.** See `docs/MIGRATION.md`.
+
+### Added
+
+**Liveness — `.ai/state/sessions.yaml`** (`schemas/session.schema.yaml`)
+- A session is one running agent process, with a heartbeat. `aef.py session
+  start | heartbeat | end | claim-main-engineer | list`
+- Separates two things 0.3.0 conflated. A **lock** answers "may I write this
+  path" and is work-sized (90 min). A **heartbeat** answers "am I still running"
+  and is minutes (`execution.heartbeat_stale_minutes`, default 15). Deriving
+  liveness from lock TTL meant a crashed agent looked busy for an hour and a half
+- `stale` is **derived, never stored** — a crashed process cannot record its own
+  death, so a stored staleness flag is the one value guaranteed to be absent when
+  it matters
+- A live session now promotes its task to In progress ahead of a lock, and names
+  the holder on the dashboard and in `aef.py progress`
+
+**The Main Engineer post** (`protocols/10-main-engineer.md`)
+- The orchestrator role held by exactly one live session, recorded in state.
+  **Not an eighth role** — the role set stays at seven
+- Single-holder, enforced. A live holder cannot be displaced; a **stale** one can,
+  which is the handover path: the coordinator's process dies and the project keeps
+  a coordinator
+- A vacancy is reported, never silently inherited
+- The post carries no memory. Everything it knows is in files
+
+**Recommendations — `.ai/state/recommendations.yaml`** (`schemas/recommendation.schema.yaml`)
+- `aef.py recommend add | list | accept | reject | defer | merge`
+- The channel for work an agent finds but was not assigned. Recording is **not
+  permission**: the finding survives, the scope does not widen
+- **Rejection requires a reason**, enforced. A rejected recommendation is kept, so
+  the next agent learns it was already considered instead of re-proposing it
+- **Acceptance requires a task or a decision**, enforced. Acceptance that produces
+  neither is agreement, and agreement does no work
+- Disagreement between agents uses this same channel. There is deliberately no
+  separate conflict register — a disagreement is a decision not yet made
+
+**Capability-based assignment**
+- `capabilities:` on every catalogue agent; `requires_capabilities:` on every
+  routing class
+- The routing table stays authoritative. Where the mapped agent does not declare
+  what the class demands, the **gap is reported rather than silently corrected**
+- Pure capability matching fills the case a heterogeneous fleet creates: a class
+  that declares what it needs but has no agent mapped to it
+- Vendor neutrality is structural. `vendor` and `model` are descriptive; nothing
+  in the matcher branches on them and no vendor appears in the defaults
+
+**Context economy — `aef.py brief`**
+- `--agent` for a joining session, `--task` for one contract. Levels 1–4 printed;
+  decisions, memory and evidence listed **by reference** so they cost an id
+- Exists to replace the pattern where each new session re-reads the repository to
+  reconstruct what the last one wrote down
+
+**Dashboard — `/team`**
+- Live sessions, stale sessions, the Main Engineer post, open and resolved
+  recommendations, live workload. Every value derived; nothing typed
+
+**`docs/ARCHITECTURE.md`** — what owns which fact, and why the seams fall there.
+
+**`aefkit/writer.py`** — a deterministic YAML emitter for the two
+machine-managed files. Round-trip through **both** readers is a correctness
+requirement, not a nicety: AEF ships without PyYAML
+
+### Changed
+- `aef.py doctor` reports the new state files and proves the bundled reader
+  agrees with PyYAML on them
+- `aef.py progress` names the holding session and its activity under live work
+- Constitution §4a extended, §4b added ("you are one of several"). Still under
+  the 200-line cap
+
+### Deliberately not done
+- **No new role.** The Main Engineer is the orchestrator with continuity
+- **No conflict file.** Competing proposals are two recommendations and one
+  decision
+- **No separate handoff store.** A handoff is what a session leaves behind, and
+  splitting it out would create a second place to look for the same answer
+- **No dashboard write path.** Still read-only, still localhost. Every mutation
+  is a CLI command, so no link can change state
+- **No agent auto-registration.** A session names an agent from the catalogue or
+  is refused; a typo must not mint a phantom teammate
+
+### Known gaps
+- Liveness is only as honest as the agent. A process that dies without ending its
+  session looks alive until its heartbeat goes stale — bounded and visible, but
+  detection it is not
+- AEF still has no home for its own project state; framework work is tracked as
+  pseudo-tasks in the host project. Recorded as a recommendation rather than
+  fixed, because the fix belongs with extracting AEF to its own repository
+- The team view has no auto-refresh. State is re-read per request, so a reload is
+  correct, but nothing pushes
+
 ## [0.3.0] — 2026-08-13
 
 Make "being worked on now" true.

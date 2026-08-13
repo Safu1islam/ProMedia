@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from . import yamlio
 
-__all__ = ["Catalogue", "Suggestion", "load_catalogue", "suggest", "set_agent", "AssignError"]
+__all__ = ["Catalogue", "Suggestion", "load_catalogue", "load_requirements",
+           "suggest", "set_agent", "AssignError"]
 
 
 class AssignError(Exception):
@@ -28,9 +29,13 @@ class AssignError(Exception):
 @dataclass
 class Suggestion:
     agent: str | None
-    basis: str          # change_class | owner_role | title_keyword | none
+    basis: str          # change_class | capability | owner_role | title_keyword | none
     reason: str
     confidence: str     # strong | moderate | weak | none
+    # Capabilities the change class demanded that the chosen agent does not
+    # declare. Populated whatever the basis was, because the gap is worth seeing
+    # even when an explicit routing rule made the choice.
+    missing_capabilities: list[str] = field(default_factory=list)
 
 
 class Catalogue:
@@ -50,6 +55,20 @@ class Catalogue:
 
     def known(self, agent: str) -> bool:
         return agent in self.agents
+
+    def capabilities_of(self, agent: str | None) -> set[str]:
+        """What this agent declares it can do. Absent means declares nothing,
+        which is different from declares everything — an agent with no
+        capabilities never wins a capability match."""
+        if not agent:
+            return set()
+        declared = (self.agents.get(agent) or {}).get("capabilities") or []
+        if not isinstance(declared, list):
+            return set()
+        return {str(c).strip().lower() for c in declared if str(c).strip()}
+
+    def ids(self) -> list[str]:
+        return sorted(self.agents)
 
 
 def load_catalogue(project_root: str = ".", *, force_bundled: bool = False) -> Catalogue:
@@ -83,7 +102,57 @@ def _deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def suggest(task: dict[str, Any] | None, title: str, catalogue: Catalogue) -> Suggestion:
+def load_requirements(project_root: str = ".", *, force_bundled: bool = False) -> dict[str, list[str]]:
+    """change_class -> the capabilities that class demands, from routing.yaml.
+
+    Same override path as everything else: a project may tighten or extend the
+    requirement list in .ai/config/overrides.yaml under `classes:`.
+    """
+    out: dict[str, list[str]] = {}
+    paths = [
+        os.path.join(project_root, "aef", "config", "routing.yaml"),
+        os.path.join(project_root, ".ai", "config", "overrides.yaml"),
+    ]
+    for path in paths:
+        if not os.path.exists(path):
+            continue
+        try:
+            data = yamlio.load(path, force_bundled=force_bundled) or {}
+        except Exception:  # noqa: BLE001 - a broken config must not stop assignment
+            continue
+        classes = data.get("classes")
+        if not isinstance(classes, dict):
+            continue
+        for name, entry in classes.items():
+            if isinstance(entry, dict) and isinstance(entry.get("requires_capabilities"), list):
+                out[str(name)] = [str(c).strip().lower()
+                                  for c in entry["requires_capabilities"] if str(c).strip()]
+    return out
+
+
+def _score(required: list[str], catalogue: Catalogue) -> list[tuple[float, str, list[str]]]:
+    """Every agent scored against a requirement list, best first.
+
+    Score is the fraction of required capabilities the agent declares. Ties break
+    on agent id so the result is deterministic — an assignment that changed
+    between runs on equal evidence would be impossible to review.
+    """
+    wanted = set(required)
+    scored: list[tuple[float, str, list[str]]] = []
+    for agent in catalogue.ids():
+        declared = catalogue.capabilities_of(agent)
+        if not declared:
+            continue
+        hit = wanted & declared
+        if not hit:
+            continue
+        scored.append((len(hit) / len(wanted), agent, sorted(wanted - declared)))
+    scored.sort(key=lambda row: (-row[0], row[1]))
+    return scored
+
+
+def suggest(task: dict[str, Any] | None, title: str, catalogue: Catalogue,
+            requirements: dict[str, list[str]] | None = None) -> Suggestion:
     """Pick the implementing agent for one unit of work.
 
     Evidence order is deliberate and is the same order routing.yaml already
@@ -93,14 +162,45 @@ def suggest(task: dict[str, Any] | None, title: str, catalogue: Catalogue) -> Su
     """
     task = task or {}
 
+    requirements = requirements or {}
     change_class = task.get("change_class")
+    required = requirements.get(str(change_class)) if change_class else None
+
     if change_class and change_class in catalogue.by_change_class:
         agent = catalogue.by_change_class[change_class]
-        return Suggestion(
-            agent, "change_class",
-            f"change_class '{change_class}' routes to {agent}",
-            "strong",
-        )
+        reason = f"change_class '{change_class}' routes to {agent}"
+        missing: list[str] = []
+        if required:
+            missing = sorted(set(required) - catalogue.capabilities_of(agent))
+            if missing:
+                # The routing table stays authoritative — a project mapped this
+                # class to this agent on purpose. But an agent that does not
+                # declare what the class demands is worth saying out loud, since
+                # the usual cause is a capability list nobody updated.
+                reason += (
+                    f", but {agent} does not declare: {', '.join(missing)}. "
+                    "Routing wins; the gap is reported, not silently corrected."
+                )
+            else:
+                reason += f" and covers all {len(required)} required capabilities"
+        return Suggestion(agent, "change_class", reason, "strong", missing)
+
+    # Capability match. Reached when a class declares what it needs but no
+    # explicit agent is mapped to it — the case a heterogeneous fleet creates
+    # every time a project adds an agent without rewriting the rule table.
+    if required:
+        scored = _score(required, catalogue)
+        if scored:
+            best, agent, missing = scored[0]
+            confidence = "strong" if not missing else "moderate"
+            covered = len(required) - len(missing)
+            reason = (
+                f"capability match: {agent} covers {covered}/{len(required)} of what "
+                f"'{change_class}' requires ({int(round(best * 100))}%)"
+            )
+            if missing:
+                reason += f"; missing {', '.join(missing)}"
+            return Suggestion(agent, "capability", reason, confidence, missing)
 
     owner_role = task.get("owner_role")
     if owner_role and owner_role in catalogue.by_owner_role:

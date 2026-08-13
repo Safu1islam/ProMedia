@@ -8,8 +8,8 @@ Read-only rule: this package lives under aef/ and is therefore not editable by a
 project. Projects configure it through .ai/config/overrides.yaml.
 """
 
-__all__ = ["yamlio", "model", "assign", "render", "server"]
+__all__ = ["yamlio", "writer", "model", "assign", "team", "teamstore", "render", "server"]
 
 # Kept in step with aef/VERSION. The dashboard displays it so a stale vendored
 # copy is visible rather than silent.
-AEF_TOOLS_VERSION = "0.3.0"
+AEF_TOOLS_VERSION = "0.4.0"

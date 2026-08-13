@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 
 from . import render
 from .model import Plan, PlanError
+from .team import Team
 
 __all__ = ["serve", "build_handler"]
 
@@ -63,13 +64,20 @@ def build_handler(project_root: str):
 
         def do_GET(self):  # noqa: N802
             path = urlparse(self.path).path.rstrip("/") or "/"
-            if path not in ("/", "/progress", "/api/plan.json"):
+            if path not in ("/", "/progress", "/team", "/api/plan.json"):
                 self._send(404, b"not found\n", "text/plain; charset=utf-8")
                 return
             with lock:
                 try:
                     plan = Plan.load(project_root)
                     data = plan.as_dict()
+                    # Team state is optional. A 0.3.0 project has none, and the
+                    # Team view then renders as an honest "nobody registered"
+                    # rather than failing the whole dashboard.
+                    team = Team.load(project_root)
+                    team_data = team.as_dict()
+                    team_data["notices"] = team.notices(plan.tasks)
+                    data["team"] = team_data
                 except (PlanError, OSError, ValueError) as exc:
                     if path == "/api/plan.json":
                         self._send(503, render.json_payload({"error": str(exc)}), "application/json; charset=utf-8")
@@ -81,6 +89,9 @@ def build_handler(project_root: str):
                 self._send(200, render.json_payload(data), "application/json; charset=utf-8")
             elif path == "/progress":
                 self._send(200, render.progress_page(data).encode("utf-8"), "text/html; charset=utf-8")
+            elif path == "/team":
+                self._send(200, render.team_page(data, data.get("team") or {}).encode("utf-8"),
+                           "text/html; charset=utf-8")
             else:
                 self._send(200, render.tree_page(data).encode("utf-8"), "text/html; charset=utf-8")
 
@@ -97,6 +108,7 @@ def serve(project_root: str = ".", host: str = "127.0.0.1", port: int = 7423) ->
     print(f"AEF dashboard  http://{host}:{actual}/")
     print(f"  project tree  http://{host}:{actual}/")
     print(f"  progress      http://{host}:{actual}/progress")
+    print(f"  team          http://{host}:{actual}/team")
     print("Ctrl-C to stop.")
     try:
         httpd.serve_forever()

@@ -309,6 +309,7 @@ def _shell(title: str, active: str, body: str, meta: dict[str, Any], script: str
     <nav class="nav">
       <a href="/" class="{'on' if active == 'tree' else ''}">Project tree</a>
       <a href="/progress" class="{'on' if active == 'progress' else ''}">Progress</a>
+      <a href="/team" class="{'on' if active == 'team' else ''}">Team</a>
       <a href="/api/plan.json">JSON</a>
     </nav>
   </div>
@@ -316,7 +317,7 @@ def _shell(title: str, active: str, body: str, meta: dict[str, Any], script: str
 <div class="wrap">
 {body}
 <footer class="foot">
-  <span>Plan read from <code>.ai/state/plan.yaml</code> + <code>.ai/state/tasks.yaml</code> + <code>.ai/state/locks.yaml</code></span>
+  <span>Derived on read from <code>plan.yaml</code> + <code>tasks.yaml</code> + <code>locks.yaml</code> + <code>sessions.yaml</code> + <code>recommendations.yaml</code></span>
   <span>{_e(reader)}</span>
   {f'<span>Planned {_e(planned)}</span>' if planned else ''}
 </footer>
@@ -586,6 +587,152 @@ def progress_page(data: dict[str, Any]) -> str:
 </section>
 """
     return _shell(f'{meta.get("project") or "Project"} — progress', "progress", body, meta)
+
+
+# ---------------------------------------------------------------------------
+# team page (0.4.0)
+# ---------------------------------------------------------------------------
+
+_SESSION_DOT = {"working": "in_progress", "idle": "pending", "blocked": "blocked",
+                "stale": "failed", "ended": "complete"}
+
+
+def _session_rows(sessions: list[dict[str, Any]], empty: str) -> str:
+    if not sessions:
+        return f'<p class="empty">{_e(empty)}</p>'
+    out = []
+    for session in sessions:
+        status = str(session.get("status") or "idle")
+        age = session.get("heartbeat_age_minutes")
+        beat = f"{age:g} min ago" if isinstance(age, (int, float)) else "no heartbeat"
+        bits = []
+        if session.get("main_engineer"):
+            bits.append('<span class="chip held">&#9733; Main Engineer</span>')
+        if session.get("task"):
+            bits.append(f'<span class="tid">{_e(session["task"])}</span>')
+        if session.get("model"):
+            bits.append(f'<span class="chip">{_e(session["model"])}</span>')
+        note = ""
+        if session.get("blocked_reason"):
+            note = f'<p class="note">{_e(session["blocked_reason"])}</p>'
+        elif session.get("activity"):
+            note = f'<p class="note">{_e(session["activity"])}</p>'
+        out.append(
+            "<li>"
+            f'<span class="dot {_SESSION_DOT.get(status, "pending")}" '
+            f'title="{_e(session.get("status_label") or status)}"></span>'
+            f'<span class="name">{_e(session.get("agent") or "unknown agent")}</span>'
+            f'<span class="where">{_e(session.get("id"))}</span>'
+            f'<span class="spacer"></span>'
+            f'<span class="where">{_e(beat)}</span>'
+            f'{"".join(bits)}'
+            f'<span class="chip agent">{_e(session.get("status_label") or status)}</span>'
+            f"{note}</li>"
+        )
+    return f'<ul class="rows">{"".join(out)}</ul>'
+
+
+def _recommendation_rows(items: list[dict[str, Any]], empty: str) -> str:
+    if not items:
+        return f'<p class="empty">{_e(empty)}</p>'
+    out = []
+    for item in items:
+        resolution = item.get("resolution") or {}
+        detail = []
+        if item.get("recommendation"):
+            detail.append(f'<p class="note">{_e(item["recommendation"])}</p>')
+        if item.get("reason"):
+            detail.append(f'<p class="note"><b>Why:</b> {_e(item["reason"])}</p>')
+        if resolution.get("reason"):
+            detail.append(
+                f'<p class="note"><b>{_e(str(item.get("status")).title())}:</b> '
+                f'{_e(" ".join(str(resolution["reason"]).split()))}</p>'
+            )
+        for key, label in (("became_task", "task"), ("became_decision", "decision"),
+                           ("merged_into", "merged into")):
+            if resolution.get(key):
+                detail.append(f'<p class="note">&rarr; {_e(label)} '
+                              f'<span class="tid">{_e(resolution[key])}</span></p>')
+        components = ", ".join(str(c) for c in (item.get("affected_components") or []))
+        out.append(
+            "<li>"
+            f'<span class="dot {"failed" if item.get("severity") == "critical" else "pending"}" '
+            f'title="{_e(item.get("severity"))}"></span>'
+            f'<span class="name">{_e(item.get("title"))}</span>'
+            f'<span class="tid">{_e(item.get("id"))}</span>'
+            + (f'<span class="where">{_e(components)}</span>' if components else "")
+            + f'<span class="spacer"></span>'
+            f'<span class="chip">{_e(item.get("severity"))}</span>'
+            f'<span class="chip agent">{_e(item.get("status"))}</span>'
+            f'{"".join(detail)}</li>'
+        )
+    return f'<ul class="rows">{"".join(out)}</ul>'
+
+
+def team_page(data: dict[str, Any], team: dict[str, Any]) -> str:
+    meta = data["meta"]
+    counts = team.get("counts") or {}
+    sessions = team.get("sessions") or []
+    live = [s for s in sessions if s.get("live")]
+    stale = [s for s in sessions if s.get("status") == "stale"]
+    me = team.get("main_engineer")
+
+    workload_rows = []
+    for name, stats in (team.get("workload") or {}).items():
+        tasks = ", ".join(stats.get("tasks") or []) or "no task claimed"
+        workload_rows.append(
+            "<li>"
+            f'<span class="who">{_e(name)}</span>'
+            f'<span class="bar"><i style="width:100%;background:var(--in_progress)"></i></span>'
+            f'<span class="n">{_e(stats.get("live", 0))} live</span>'
+            f'<p class="note">{_e(tasks)}</p></li>'
+        )
+
+    body = f"""
+<div class="headline">
+  <h1>Team</h1>
+  <div class="bigpct"><b>{_e(counts.get("working", 0))}</b><span>of
+    {_e(counts.get("live", 0))} live session{"" if counts.get("live", 0) == 1 else "s"}
+    {"is" if counts.get("working", 0) == 1 else "are"} working</span></div>
+  <p>Main Engineer:
+    {'<b>' + _e(me.get("id")) + '</b> &middot; ' + _e(me.get("agent") or "") if me
+     else '<b>VACANT</b> &mdash; no live session holds the coordination post'}
+    &middot; heartbeat goes stale after {_e(team.get("stale_minutes"))} min</p>
+</div>
+{_problems(data.get("problems") or [])}
+{_notices((data.get("notices") or []) + (team.get("notices") or []))}
+
+<section class="panel">
+  <h2>Live sessions<span class="count">{_e(len(live))}</span></h2>
+  {_session_rows(live, "No agent session is registered. Start one with "
+                       "`aef.py session start`.")}
+</section>
+
+{'<section class="panel"><h2>Stale<span class="count">' + str(len(stale)) +
+ '</span></h2>' + _session_rows(stale, "") +
+ '</section>' if stale else ''}
+
+<section class="panel">
+  <h2>Awaiting a decision<span class="count">{_e(counts.get("open_recommendations", 0))}</span></h2>
+  {_recommendation_rows(team.get("recommendations") or [],
+                        "Nothing proposed. Agents record findings here rather than "
+                        "acting on them or losing them.")}
+</section>
+
+<section class="panel">
+  <h2>Accepted, rejected and merged<span class="count">kept on purpose</span></h2>
+  {_recommendation_rows(team.get("resolved_recommendations") or [],
+                        "None yet. A rejected proposal is kept here with its reason, "
+                        "so the next agent does not re-propose it.")}
+</section>
+
+<section class="panel">
+  <h2>Live workload<span class="count">by agent</span></h2>
+  {f'<ul class="agents">{"".join(workload_rows)}</ul>' if workload_rows
+   else '<p class="empty">No agent holds a live session.</p>'}
+</section>
+"""
+    return _shell(f'{meta.get("project") or "Project"} — team', "team", body, meta)
 
 
 def json_payload(data: dict[str, Any]) -> bytes:

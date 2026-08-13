@@ -203,6 +203,10 @@ class Node:
     task: dict[str, Any] | None = None
     # The live lock naming this leaf's task, if any. Set by Plan._resolve().
     lock: "Lock | None" = None
+    # The live SESSION working this leaf's task, if any (0.4.0). A session is the
+    # stronger signal — heartbeat-fresh rather than TTL-fresh — so where both
+    # exist this one names the holder.
+    session: Any = None
     # Where `status` came from: "task" (tasks.yaml), "lock" (promoted because an
     # agent holds a live lock), "override" (a leaf with no task), or "rollup".
     status_source: str = "task"
@@ -276,6 +280,8 @@ class Plan:
         self.notices: list[str] = []
         self.project_root = project_root
         self.locks = locks or []
+        # task id -> the live Session working it (0.4.0). Populated by load().
+        self.live_tasks: dict[str, Any] = {}
 
     @property
     def live_locks(self) -> dict[str, Lock]:
@@ -317,12 +323,26 @@ class Plan:
         if os.path.exists(locks_path):
             locks = _parse_locks(yamlio.load(locks_path, force_bundled=force_bundled))
 
+        # 0.4.0: sessions are the stronger liveness signal, because a heartbeat
+        # is minutes and a lock TTL is work-sized. Imported lazily so `model`
+        # keeps working in a 0.3.0 tree that has no team state at all.
+        live_tasks: dict[str, Any] = {}
+        try:
+            from .team import Team
+
+            for session in Team.load(project_root, force_bundled=force_bundled).live():
+                if session.task:
+                    live_tasks.setdefault(session.task, session)
+        except Exception:  # noqa: BLE001 - team state is optional; never fatal here
+            live_tasks = {}
+
         tree_raw = raw.get("tree")
         if not isinstance(tree_raw, dict):
             raise PlanError(f"{plan_path}: top-level `tree:` mapping is missing.")
 
         root = cls._build(tree_raw, parent=None, default_type="project")
         plan = cls(root, raw.get("meta") or {}, tasks, [], os.path.abspath(project_root), locks)
+        plan.live_tasks = live_tasks
         plan._inherit_agents()
         plan._resolve()
         plan.problems = plan.validate()
@@ -381,6 +401,8 @@ class Plan:
         for node in self.root.walk():
             if node.task_id and node.task_id in held:
                 node.lock = held[node.task_id]
+            if node.task_id and node.task_id in self.live_tasks:
+                node.session = self.live_tasks[node.task_id]
             if node.task_id and node.task_id in self.tasks:
                 node.task = self.tasks[node.task_id]
                 # Dependencies live in tasks.yaml, where the execution protocol
@@ -449,10 +471,15 @@ class Plan:
         over one of those is a leak or a contradiction, and `validate()` says so
         instead of letting the status quietly absorb it.
         """
-        if node.lock is None or status not in _LOCK_PROMOTABLE:
+        if status not in _LOCK_PROMOTABLE:
             return status
-        node.status_source = "lock"
-        return "in_progress"
+        if node.session is not None:
+            node.status_source = "session"
+            return "in_progress"
+        if node.lock is not None:
+            node.status_source = "lock"
+            return "in_progress"
+        return status
 
     @staticmethod
     def _rollup(child_statuses: list[str]) -> str:
@@ -718,7 +745,12 @@ def _brief(node: Node) -> dict[str, Any]:
     # Who is on it, in one string the views can print without knowing where the
     # answer came from. claimed_by is tasks.yaml's answer; the lock is the live
     # one and wins when both exist, because it is the one written before editing.
-    holder = node.lock.agent if node.lock is not None else None
+    if node.session is not None:
+        brief["session"] = {"id": node.session.id, "agent": node.session.agent,
+                            "activity": node.session.activity}
+    holder = node.session.agent if node.session is not None else None
+    if holder is None and node.lock is not None:
+        holder = node.lock.agent
     if holder is None and node.task is not None:
         holder = _str_or_none(node.task.get("claimed_by"))
     brief["held_by"] = holder

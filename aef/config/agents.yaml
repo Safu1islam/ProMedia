@@ -25,39 +25,46 @@ agents:
 
   planner:
     role: analyst
+    capabilities: [requirements, acceptance_criteria, planning, decomposition, estimation]
     tier: frontier
     does: Intake, requirements, acceptance criteria, and the A-to-Z plan itself.
 
   architect:
     role: architect
+    capabilities: [architecture, technology_selection, interface_design, data_modeling, tradeoff_analysis]
     tier: frontier
     does: Technology selection, structure, interface contracts, decision records.
 
   implementer:
     role: implementer
+    capabilities: [general_implementation, refactoring, debugging]
     tier: standard
     does: General implementation. The fallback when no specialism applies.
 
   frontend-agent:
     role: implementer
+    capabilities: [ui, layout, styling, client_state, accessibility, responsive_design, browser_testing]
     tier: standard
     specialism: [ui, layout, styling, client state, accessibility]
     does: User-facing surfaces.
 
   backend-agent:
     role: implementer
+    capabilities: [api, data_modeling, migration, query_optimisation, service_logic, error_handling]
     tier: standard
     specialism: [api, handler, schema, migration, query, service]
     does: Operations, data model, and server-side logic.
 
   infra-agent:
     role: implementer
+    capabilities: [deployment, pipeline, containerisation, environment_config, dependency_management, rollback]
     tier: standard
     specialism: [deploy, pipeline, container, environment, dependency]
     does: Build, deployment, and dependency changes.
 
   security-agent:
     role: implementer
+    capabilities: [security_analysis, threat_modeling, auth, secrets_handling, access_control, code_review]
     tier: frontier
     specialism: [auth, session, token, access control, secrets, payment]
     does: >
@@ -67,16 +74,19 @@ agents:
 
   reviewer-agent:
     role: reviewer
+    capabilities: [code_review, architecture_review, security_analysis, maintainability_review]
     tier: standard
     does: Independent code, security and architecture review. Never reviews its own work.
 
   test-agent:
     role: verifier
+    capabilities: [test_design, test_execution, coverage_analysis, regression_protection, falsification]
     tier: standard
     does: Executes checks and reports honest status. Writes tests that can fail.
 
   qa-agent:
     role: human-experience-reviewer
+    capabilities: [human_experience, persona_testing, usability_review, accessibility, workflow_validation]
     tier: standard
     does: Uses the product as each persona. Independent of whoever built it.
 

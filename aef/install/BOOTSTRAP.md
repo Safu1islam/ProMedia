@@ -25,6 +25,8 @@ cannot run steps 5 or 6 of this file at all.
     plan.yaml                the project plan as a tree; written by Planning
     tasks.yaml
     locks.yaml
+    sessions.yaml            0.4.0. OPTIONAL, machine-written. Who is here now
+    recommendations.yaml     0.4.0. OPTIONAL, machine-written. Proposals
     fabrications.yaml
     discovery.md             brownfield only
     decisions/
@@ -64,6 +66,26 @@ python aef/tools/aef.py dashboard    # look at what you planned
 
 Nothing here needs installing. Stdlib Python only; PyYAML is used if present and
 is not required.
+
+## 5a. Nominate a coordinator (0.4.0)
+
+Only if more than one agent will ever work this project. A solo project can skip
+this entirely — the files stay absent and nothing degrades.
+
+```
+python aef/tools/aef.py session start --id <session-id> --agent architect --main-engineer
+python aef/tools/aef.py session list
+```
+
+One live session holds the post and coordinates; it is the orchestrator role with
+continuity across sessions, not an eighth role. `protocols/10-main-engineer.md`.
+
+Every joining agent then starts its own session and gets its bearings from state
+rather than from a conversation:
+
+```
+python aef/tools/aef.py brief --agent <agent-id>
+```
 
 ## 6. Verify installation
 
