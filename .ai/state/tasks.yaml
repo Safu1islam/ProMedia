@@ -1302,30 +1302,179 @@ tasks:
     objective: >
       Phase 5, and the largest UI effort. A projection of the EDL rather than a
       thing in itself: the operator adjusts the same document the agent writes.
-      Proxy-based preview, because 7.7 GB of RAM and integrated graphics rule
-      out full-resolution timeline playback.
-      Supersedes part of DR-004 (server-rendered, no JavaScript required), which
-      was chosen so the APPROVAL screen stays dependable — that reasoning still
-      holds for approval and must not be weakened by this.
+
+      >>> READ .ai/design/frontend-brief.md BEFORE STARTING. <<<
+      It is the binding design brief for this task and its children: the five
+      rules that may not be broken and why, what already exists, the information
+      architecture, the build order, and how the human and the agent share the
+      same objects. It was written by the session that built the engine
+      (T-041/T-042) for an agent with no memory of that work.
+
+      DR-004 (server-rendered, no JavaScript required) is NOT superseded by this
+      task. It was chosen so the approval path stays dependable, and everything
+      in the brief works without script — a project view and an HTML5 video
+      element need none. If you believe a feature requires JavaScript, raise a
+      recommendation rather than adding it.
     change_class: ui_change
     mode: critical
     owner_role: implementer
     assigned_model_tier: frontier
-    status: blocked
-    blocked_reason: "Needs projects, operations and rendering to exist as capabilities (T-042)."
+    status: in_progress
+    claimed_by: "claude-code-session-ui"
     depends_on: [T-042]
-    blocks: []
+    blocks: [T-050, T-051, T-052]
     owned_paths: [promedia/web/**, tests/test_editor_ui.py]
+    design_brief: .ai/design/frontend-brief.md
     acceptance_criteria:
       - id: AC-1
         statement: "An operator can review a render, adjust the EDL and re-render without using the CLI."
+        result: PASSED
+        evidence: >
+          /projects, /projects/{id} and /renders/{id}/file shipped 2026-08-13.
+          The project screen plays the rendered output inline, shows format,
+          clip, caption and audio counts, exposes the edit for change, and
+          re-renders with a quality selector. Verified against the running
+          server: video element present with controls, source resolves to
+          /renders/{id}/file, that route returns HTTP 200 video/mp4 with a valid
+          MP4 header, and the EDL textarea and render form are both present.
+          A real project was created from the operator's own screen recording —
+          3 clips reordered, effects, speed change, vertical output, 2 captions.
+      - id: AC-2
+        statement: "The approval path keeps working without JavaScript, so DR-004's guarantee survives this change."
+        result: PASSED
+        evidence: >
+          Zero <script> tags on the new pages, asserted against the served HTML
+          rather than the templates. The approval route was not touched. Full
+          suite 561 passed, unchanged, including the parity gate at 90 cases.
+      - id: AC-3
+        statement: "The remaining frontend work is decomposed into tasks with a written brief, rather than left as one under-planned node."
+        result: PASSED
+        evidence: >
+          .ai/design/frontend-brief.md, plus T-050/T-051/T-052 below. This
+          criterion exists because the first slice of this task was built from
+          no plan — the same omission shape the durability section had, and it
+          is recorded rather than quietly corrected.
+    findings:
+      - >
+        THIS TASK WAS UNDER-PLANNED AND I BUILT FROM IT ANYWAY. One node with
+        two acceptance criteria covered "the largest UI effort" in the project.
+        The first slice was therefore built without an information architecture,
+        which is how the operator ended up looking at a governance dashboard and
+        saying "that's not what we was trying to do". The brief and the child
+        tasks exist so the next agent does not start where I did.
+    open_items:
+      - >
+        No way to get media in from the browser AT ALL — the most glaring hole,
+        and the reason an operator cannot use their own workspace without the
+        CLI. T-050.
+      - >
+        The edit is a JSON textarea. Honest and functional, not usable daily.
+        T-051.
+      - >
+        The dashboard is still the v1 storage/rights panel and does not mention
+        projects. T-052.
+    required_dimensions: [correctness, human_experience, accessibility, security, testing, documentation]
+    independent_review:
+      status: NOT_RUN
+      note: "Constitution section 7. Raised in R-003 with the rest."
+
+  - id: T-050
+    title: "Media library — get footage in from the browser"
+    objective: >
+      The most glaring hole in the workspace: there is currently NO way to add
+      media from the UI. An operator cannot put footage into their own project
+      without the CLI.
+      Upload, import from URL (yt-dlp is installed), thumbnails, and an asset
+      detail view showing rights, evidence and provenance.
+      NON-NEGOTIABLE: the rights declaration is collected AT THE POINT OF
+      IMPORT. `ingest` refuses without one and that refusal is the whole rights
+      model — there must be no path that acquires media without a declaration.
+      See .ai/design/frontend-brief.md section 5.
+    change_class: ui_change
+    mode: critical
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: ready
+    depends_on: [T-049]
+    blocks: []
+    owned_paths: [promedia/web/**, tests/test_media_ui.py]
+    design_brief: .ai/design/frontend-brief.md
+    acceptance_criteria:
+      - id: AC-1
+        statement: "An operator can add a media file from the browser and it is refused without a rights declaration."
         result: NOT_RUN
         evidence: "not implemented"
       - id: AC-2
-        statement: "The approval path keeps working without JavaScript, so DR-004's guarantee survives this change."
+        statement: "An asset page shows its rights verdict, evidence, provenance state and whether its media is still present."
         result: NOT_RUN
         evidence: "not implemented"
-    required_dimensions: [correctness, human_experience, accessibility, security, testing, documentation]
+      - id: AC-3
+        statement: "Upload works with JavaScript disabled."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, human_experience, security, data_integrity, testing]
+
+  - id: T-051
+    title: "Per-clip editing on the project screen"
+    objective: >
+      The edit is currently a raw JSON textarea — honest, functional, and not
+      something anyone would use daily. Clip rows with trim in/out, effect,
+      transition, speed, reorder and delete. Forms and POSTs, no script.
+      Every change goes through set-edl and creates a NEW VERSION; never mutate
+      in place. Keep the JSON view as an escape hatch and because it is the
+      fastest way to read what an agent changed.
+    change_class: ui_change
+    mode: standard
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: ready
+    depends_on: [T-049]
+    blocks: []
+    owned_paths: [promedia/web/**, tests/test_editor_ui.py]
+    design_brief: .ai/design/frontend-brief.md
+    acceptance_criteria:
+      - id: AC-1
+        statement: "An operator can trim, reorder, change the effect on, and delete a clip without editing JSON."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "Every edit creates a new version with the operator recorded as its author, and the previous version stays readable."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-3
+        statement: "A transition that does not render as named is marked as such in the picker, before it is chosen."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, human_experience, accessibility, testing]
+
+  - id: T-052
+    title: "Dashboard rework — lead with what needs the human"
+    objective: >
+      The dashboard is still the v1 storage-and-rights panel and does not
+      mention projects at all. It should answer "what needs me now": pending
+      approvals, recent renders, anything a fabrication or substitution
+      affected, storage pressure. The v1 panels move down or into /settings.
+      Also covers /posts, /publications and /settings, which are mostly
+      assembling data that already exists behind operations.
+    change_class: ui_change
+    mode: standard
+    owner_role: implementer
+    assigned_model_tier: standard
+    status: ready
+    depends_on: [T-049]
+    blocks: []
+    owned_paths: [promedia/web/**, tests/test_editor_ui.py]
+    design_brief: .ai/design/frontend-brief.md
+    acceptance_criteria:
+      - id: AC-1
+        statement: "The dashboard leads with pending approvals and recent renders, and links to projects."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "A simulated publication is visibly marked as simulated wherever it appears."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, human_experience, accessibility, testing]
 
   # -------------------------------------------------------------------------
   # Durability — off-site backup of the permanent set (project.md 5.4).

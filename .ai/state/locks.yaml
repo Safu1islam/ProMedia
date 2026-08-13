@@ -1,13 +1,15 @@
 # .ai/state/locks.yaml — entity/path ownership.
 # Schema: aef/schemas/lock.schema.yaml
 
-locks:
+locks: []
+
+history:
   - path: "promedia/web/app.py, promedia/web/templates/**, tests/test_editor_ui.py, .claude/launch.json"
     task_id: "T-049"
     agent: "claude-code-session-ui"
     model: "claude-opus-5"
     acquired_at: "2026-08-13T14:00:00+04:00"
-    expires_at: "2026-08-13T18:00:00+04:00"
+    released_at: "2026-08-13T16:30:00+04:00"
     note: >
       The media workspace UI. Raised directly by the operator on seeing the
       running app: "I found app UI that's not what we was trying to do" —
@@ -19,7 +21,12 @@ locks:
       promedia/core/** is NOT claimed — this is a projection of capabilities
       that already exist, adding no business logic to the adapter.
 
-history:
+      DELIVERED A SLICE, NOT THE TASK. /projects, /projects/{id} and the render
+      file route shipped; T-049 stays in_progress with T-050/T-051/T-052 split
+      out beneath it. .ai/design/frontend-brief.md written as the binding brief
+      for whoever takes them, because this task was under-planned and I built
+      from it anyway.
+
   - path: "promedia/core/projects.py, promedia/core/ops/projects.py, promedia/core/ops/__init__.py, promedia/core/schema.sql, promedia/config.py, promedia/core/media/render.py, promedia/core/backup.py, tests/test_projects.py, tests/test_locking.py, tests/test_ops_forms.py"
     task_id: "T-042"
     agent: "claude-code-session-next3b"

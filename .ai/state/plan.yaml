@@ -244,12 +244,32 @@ tree:
         - id: F-MEDIA-UI
           type: feature
           title: Operator editing surface
+          note: >
+            Design brief: .ai/design/frontend-brief.md — binding for every node
+            here. Written after the first slice of N-049 was built from no
+            information architecture, which is how the operator came to look at
+            a governance dashboard and say it was not what they wanted.
           children:
             - id: N-049
               agent: frontend-agent
               type: task
-              title: Editing UI — preview, EDL editing, render review
+              title: Project workspace — preview, edit, render review
               task: T-049
+            - id: N-050
+              agent: frontend-agent
+              type: task
+              title: Media library — get footage in from the browser
+              task: T-050
+            - id: N-051
+              agent: frontend-agent
+              type: task
+              title: Per-clip editing
+              task: T-051
+            - id: N-052
+              agent: frontend-agent
+              type: task
+              title: Dashboard rework, posts, publications, settings
+              task: T-052
 
     - id: S-DURABILITY
       type: section

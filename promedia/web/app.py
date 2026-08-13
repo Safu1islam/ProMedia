@@ -407,6 +407,135 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
             },
         )
 
+    def _error_page(request: Request, exc: ProMediaError) -> Any:
+        """A refusal as a page, with the status the class already dictates.
+
+        Routes through the same ERROR_STATUS map every other surface uses
+        (DR-012), so a rights refusal is 403 here exactly as it is on the API.
+        """
+        return TEMPLATES.TemplateResponse(
+            request=request,
+            name="error.html",
+            context={"error": exc.to_dict(), "principal": principal_of(request)},
+            status_code=status_for(exc),
+        )
+
+    # --- media workspace (T-049) ---------------------------------------------
+    #
+    # Raised by the operator on seeing the running app: the v1 surface is a
+    # storage dashboard plus a TABLE of operations, which is an approval surface
+    # and not a place to make anything. These routes are a projection of the
+    # capabilities T-042 registered — no business logic lives here, so the CLI
+    # and this UI cannot drift (F-1, DR-002).
+    #
+    # No JavaScript, deliberately. DR-004 chose that so the APPROVAL path stays
+    # dependable, and a project view plus an HTML5 <video> element needs none,
+    # so that guarantee survives this change rather than being superseded.
+
+    @app.get("/projects", response_class=HTMLResponse)
+    def projects_index(request: Request) -> Any:
+        ctx = context(request)
+        try:
+            listing = invoke(ctx, "list-projects", {})
+            capabilities = invoke(ctx, "media-capabilities", {})
+        finally:
+            ctx.conn.close()
+        return TEMPLATES.TemplateResponse(
+            request=request,
+            name="projects.html",
+            context={"projects": listing["projects"], "capabilities": capabilities},
+        )
+
+    @app.post("/projects")
+    def projects_create(request: Request, title: str = Form(...)) -> Any:
+        ctx = context(request)
+        try:
+            created = invoke(ctx, "create-project", {"title": title})
+        except ProMediaError as exc:
+            return _error_page(request, exc)
+        finally:
+            ctx.conn.close()
+        # Post/redirect/get: a refresh after creating must not create a second.
+        return RedirectResponse(url=f"/projects/{created['project_id']}", status_code=303)
+
+    @app.get("/projects/{project_id}", response_class=HTMLResponse)
+    def project_detail(request: Request, project_id: str) -> Any:
+        ctx = context(request)
+        try:
+            project = invoke(ctx, "project", {"project_id": project_id})
+            history = invoke(ctx, "project-versions", {"project_id": project_id})
+            outputs = invoke(ctx, "renders", {"project_id": project_id})
+            assets = invoke(ctx, "list-assets", {})
+            capabilities = invoke(ctx, "media-capabilities", {})
+        except ProMediaError as exc:
+            return _error_page(request, exc)
+        finally:
+            ctx.conn.close()
+        return TEMPLATES.TemplateResponse(
+            request=request,
+            name="project.html",
+            context={
+                "project": project,
+                "edl_json": json.dumps(project["edl"], indent=2),
+                "versions": history["versions"],
+                "renders": outputs["renders"],
+                "assets": assets["assets"],
+                "capabilities": capabilities,
+            },
+        )
+
+    @app.post("/projects/{project_id}/edl")
+    def project_set_edl(request: Request, project_id: str, edl: str = Form(...),
+                        note: str = Form("")) -> Any:
+        ctx = context(request)
+        try:
+            invoke(ctx, "set-edl", {"project_id": project_id, "edl": edl, "note": note})
+        except ProMediaError as exc:
+            return _error_page(request, exc)
+        finally:
+            ctx.conn.close()
+        return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
+
+    @app.post("/projects/{project_id}/render")
+    def project_render(request: Request, project_id: str, quality: str = Form("")) -> Any:
+        ctx = context(request)
+        try:
+            invoke(ctx, "render-project",
+                   {"project_id": project_id, "quality": quality or None})
+        except ProMediaError as exc:
+            return _error_page(request, exc)
+        finally:
+            ctx.conn.close()
+        return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
+
+    @app.get("/renders/{render_id}/file")
+    def render_file(request: Request, render_id: str) -> Any:
+        """Serve a rendered video for playback in the browser.
+
+        The path comes from the RENDERS TABLE, never from the URL — the caller
+        supplies an id and the database supplies the path. A route that took a
+        path would be a directory traversal into the operator's filesystem, and
+        this one serves media on a surface that also holds publish authority.
+        """
+        from fastapi.responses import FileResponse
+
+        ctx = context(request)
+        try:
+            found = [
+                r for r in invoke(ctx, "renders", {})["renders"] if r["id"] == render_id
+            ]
+        finally:
+            ctx.conn.close()
+        if not found:
+            return _error_page(request, NotFound(f"no render {render_id}", render_id=render_id))
+        path = Path(found[0]["output_path"])
+        if not path.is_file():
+            return _error_page(
+                request,
+                NotFound("this render's file is no longer on disk", render_id=render_id),
+            )
+        return FileResponse(path, media_type="video/mp4", filename=path.name)
+
     @app.get("/posts/{post_id}", response_class=HTMLResponse)
     def post_detail(request: Request, post_id: str) -> Any:
         try:

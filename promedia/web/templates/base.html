@@ -45,11 +45,23 @@
   dl.kv dt { color:var(--muted); font-size:.85rem; }
   dl.kv dd { margin:0; }
   .wrap { overflow-x:auto; }
+  /* Media workspace (T-049). Added to the existing system rather than beside
+     it, so the workspace and the approval surface stay one interface. */
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));
+          gap:.75rem; margin-bottom:1rem; }
+  .grid .panel { margin-bottom:0; }
+  .big { font-size:1.6rem; font-weight:600; margin:.2rem 0 0; line-height:1.1; }
+  .row { display:flex; gap:.6rem; align-items:center; flex-wrap:wrap; margin:1rem 0; }
+  select { font:inherit; padding:.45rem .55rem; border:1px solid var(--line);
+           border-radius:6px; background:var(--bg); color:inherit; }
+  video { display:block; width:100%; max-width:44rem; background:#000; border-radius:8px; }
+  tr.current td { background:var(--panel); }
 </style>
 </head>
 <body>
 <nav>
   <a href="/">Dashboard</a>
+  <a href="/projects">Projects</a>
   <a href="/ops">Capabilities</a>
 </nav>
 {% block body %}{% endblock %}
