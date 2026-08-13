@@ -36,7 +36,17 @@ CREATE TABLE IF NOT EXISTS assets (
     duration_seconds  REAL,
     probe_status      TEXT NOT NULL CHECK (probe_status IN ('ok', 'unavailable', 'failed')),
     derived_from      TEXT REFERENCES assets (id) ON DELETE SET NULL,
-    state             TEXT NOT NULL CHECK (state IN ('stored', 'deleted')),
+    -- 'stored'  : the bytes are on this machine.
+    -- 'deleted' : retention destroyed them. FINAL — re-ingest is refused
+    --             (T-029), and publishing to a new platform is out of scope by
+    --             policy, not by oversight.
+    -- 'absent'  : the RECORD was restored from a backup but the media was not,
+    --             because masters are transient and are deliberately not in the
+    --             artefact (project.md 5.4, T-036). Re-ingesting the same bytes
+    --             is ALLOWED and returns the asset to 'stored' — this is the
+    --             difference that makes a restore a recovery rather than an
+    --             irreversible loss of capability (T-037).
+    state             TEXT NOT NULL CHECK (state IN ('stored', 'deleted', 'absent')),
     ingested_at       TEXT NOT NULL,
     object_path       TEXT
 );

@@ -323,7 +323,22 @@ def _seed_full_slice(ctx, media_file):
         "post_id": post["post_id"],
         "provenance_id": sealed["provenance_id"],
         "source_path": str(media_file),
+        # A REAL artefact, so restore-permanent-set's probe is a call that would
+        # genuinely do something. A path to nothing would make the GET fail on
+        # NotFound and the test would prove only that bad input does nothing —
+        # which is the exact weakness sabotage 1 exposed in this file's first
+        # version. (The restore would still refuse this non-empty database, but
+        # the refusal happens after the artefact is read and verified, so a GET
+        # that executes is visible in the audit log either way.)
+        "source": str(_seeded_artefact(ctx, media_file)),
     }
+
+
+def _seeded_artefact(ctx, media_file):
+    """Write a genuine backup artefact next to the media file."""
+    path = media_file.parent / "probe-artefact.json"
+    invoke(ctx, "export-permanent-set", {"destination": str(path)})
+    return path
 
 
 def _valid_query_for(op, seeded):

@@ -11,8 +11,15 @@ from promedia.errors import EntityLocked
 
 
 def test_fresh_database_applies_schema(conn):
-    """AC-1."""
-    assert db.schema_version(conn) == 1
+    """AC-1.
+
+    The literal version is pinned rather than compared to db.SCHEMA_VERSION,
+    which would be the tautology T-028 removed from the parity gate — a value
+    checked against itself cannot fail. Bumping it here is meant to be a
+    deliberate edit accompanying a deliberate migration. Was 1 until T-037
+    widened assets.state to admit 'absent'.
+    """
+    assert db.schema_version(conn) == 2
     tables = {
         r["name"]
         for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")

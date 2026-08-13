@@ -94,6 +94,42 @@ def verify_backup(ctx: Context, source: str) -> dict[str, Any]:
 
 
 @register(
+    "restore-permanent-set",
+    "Rebuild rights, provenance, publication and audit records from a backup artefact.",
+    params=(Param("source", "str", help="Path to an artefact written by export-permanent-set."),),
+    authority="operator",
+    mutates=True,
+    danger=(
+        "Writes the entire permanent record into this database. Only possible on an"
+        " empty one, and it does NOT restore media."
+    ),
+)
+def restore_permanent_set(ctx: Context, source: str) -> dict[str, Any]:
+    """Operator authority: this reconstitutes the whole rights and audit history.
+
+    No entity lock is taken. The operation is only permitted against an empty
+    database, so there is no existing entity for another agent to be holding,
+    and a lock over 'every entity at once' is not a thing C-19 expresses.
+    """
+    from .. import db as db_layer
+
+    path = Path(source).expanduser()
+    if not path.is_file():
+        raise NotFound(f"no backup artefact at '{source}'", source=str(path))
+    try:
+        artefact = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise ValidationError(
+            f"'{source}' is not readable as a backup artefact: {exc}", parameter="source"
+        ) from exc
+
+    result = backup.restore(
+        ctx.conn, artefact, build_schema_version=db_layer.SCHEMA_VERSION
+    )
+    return {**result, "source": str(path)}
+
+
+@register(
     "backup-scope",
     "Report which tables are backed up, which are excluded, and why.",
 )

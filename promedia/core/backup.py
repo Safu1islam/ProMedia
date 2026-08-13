@@ -37,7 +37,7 @@ import sqlite3
 from typing import Any
 
 from ..errors import ProMediaError, ValidationError
-from .db import canonical_json, iso
+from .db import canonical_json, iso, transaction
 
 ARTEFACT_VERSION = 1
 
@@ -195,3 +195,146 @@ def verify(artefact: dict[str, Any]) -> dict[str, Any]:
 
 def dumps(artefact: dict[str, Any]) -> str:
     return json.dumps(artefact, indent=2, sort_keys=True, default=str)
+
+
+# --- restore (T-037) ---------------------------------------------------------
+#
+# The half that makes the export a backup rather than a file. Written as a
+# separate reader deliberately: a format only its own writer can parse is the
+# classic way a backup regime turns out not to be one.
+
+
+# Excluded from the emptiness check, and NOT for symmetry with the export.
+#
+#   schema_version — every database has one; requiring it absent would mean
+#     nothing could ever be restored into a database that exists.
+#   audit_log — every ATTEMPT to restore is audited, including one that is
+#     refused. Counting it as "non-empty" made the operation un-retryable: a
+#     restore that failed integrity would write a denial entry, and the next
+#     attempt would be refused for a non-empty database caused entirely by the
+#     first. Found by test_an_agent_cannot_restore, which asserted no rows were
+#     written after a refusal and was right to.
+_EMPTINESS_EXEMPT = {"schema_version", "audit_log"}
+
+
+def _is_empty(conn: sqlite3.Connection) -> bool:
+    """No substantive permanent rows. See _EMPTINESS_EXEMPT for what is ignored."""
+    for table in PERMANENT_TABLES:
+        if table in _EMPTINESS_EXEMPT:
+            continue
+        if conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone():  # noqa: S608 - fixed set
+            return False
+    return True
+
+
+def restore(
+    conn: sqlite3.Connection, artefact: dict[str, Any], *, build_schema_version: int
+) -> dict[str, Any]:
+    """Rebuild the permanent set from an artefact, into an empty database.
+
+    Three refusals, each protecting something specific:
+
+    * **A tampered artefact** is refused before a single row is written. Half a
+      restore is worse than none, because it looks like a whole one.
+    * **An artefact from a newer schema** is refused rather than imported
+      partially. An older build cannot know what a later column means, and
+      guessing would corrupt records that are, by definition, irreplaceable.
+    * **A non-empty database** is refused. A merge would have to answer "which
+      version of this row wins", and there is no answer that is right in
+      general — the audit log would silently gain or lose entries depending on
+      it. Refusing sends the operator to an empty database, where the outcome
+      is knowable.
+
+    Media is NOT restored, because it was never in the artefact. Assets that
+    were 'stored' come back as 'absent': the record is here, the bytes are not,
+    and re-ingesting them is permitted (unlike 'deleted', which retention made
+    final). That distinction is the whole reason this needed a schema change.
+    """
+    verified = verify(artefact)
+    if not verified["integrity_verified"]:
+        raise ProMediaError(
+            "backup artefact failed integrity verification; refusing to restore "
+            "from it rather than write a partial or altered permanent record",
+            expected_hash=verified["expected_hash"],
+            actual_hash=verified["actual_hash"],
+        )
+
+    artefact_version = artefact.get("artefact_version")
+    if artefact_version != ARTEFACT_VERSION:
+        raise ProMediaError(
+            f"artefact format version {artefact_version} is not version "
+            f"{ARTEFACT_VERSION}, which this build writes and reads",
+            artefact_version=artefact_version,
+            supported=ARTEFACT_VERSION,
+        )
+
+    source_schema = artefact.get("schema_version")
+    if source_schema is not None and int(source_schema) > build_schema_version:
+        raise ProMediaError(
+            f"artefact was written from schema version {source_schema}, newer "
+            f"than this build understands ({build_schema_version}); upgrade "
+            "ProMedia before restoring rather than importing it partially",
+            artefact_schema_version=int(source_schema),
+            build_schema_version=build_schema_version,
+        )
+
+    if not _is_empty(conn):
+        raise ProMediaError(
+            "refusing to restore into a database that already holds permanent "
+            "records; restore into an empty database, because merging two "
+            "histories has no generally correct answer and would silently "
+            "change the audit log",
+            remedy="move the existing database aside, then restore",
+        )
+
+    payload = artefact["payload"]
+    restored: dict[str, int] = {}
+    absent_assets = 0
+
+    # foreign_keys stays ON: PERMANENT_TABLES is ordered so referenced rows land
+    # before the rows referencing them, and if that order is ever wrong this
+    # should fail loudly rather than build a database with dangling references.
+    with transaction(conn):
+        for table in PERMANENT_TABLES:
+            rows = payload.get(table) or []
+            if table == "schema_version":
+                # Not copied. The database's own version is a fact about THIS
+                # database and its migrations, not about the artefact.
+                continue
+            for row in rows:
+                row = dict(row)
+                if table == "audit_log":
+                    # Drop the surrogate id and let SQLite re-sequence. The
+                    # local log already holds entries for the restore attempt
+                    # itself, and copying explicit AUTOINCREMENT ids on top of
+                    # them collides on the primary key. Nothing is lost: the id
+                    # carries no meaning, and order is preserved by `at` and by
+                    # insertion sequence.
+                    row.pop("id", None)
+                if table == "assets" and row.get("state") == "stored":
+                    # The bytes are not in the artefact and never were.
+                    row["state"] = "absent"
+                    row["object_path"] = None
+                    absent_assets += 1
+                columns = ", ".join(row)
+                placeholders = ", ".join("?" for _ in row)
+                conn.execute(
+                    f"INSERT INTO {table} ({columns}) VALUES ({placeholders})",  # noqa: S608
+                    tuple(row.values()),
+                )
+            restored[table] = len(rows)
+
+    return {
+        "ok": True,
+        "restored": restored,
+        "assets_marked_absent": absent_assets,
+        "created_at": artefact.get("created_at"),
+        "integrity_verified": True,
+        "media_restored": False,
+        "note": (
+            f"{absent_assets} asset(s) restored as 'absent': the rights, provenance "
+            "and publication record is back, the media is not. Re-ingesting the "
+            "original file returns an absent asset to 'stored'. Assets that "
+            "retention had deleted stay 'deleted' and are NOT re-ingestable."
+        ),
+    }

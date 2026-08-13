@@ -194,6 +194,52 @@ def ingest_file(
                     " deliberately no operation that restores deleted media"
                 ),
             )
+        if existing is not None and existing["state"] == "absent":
+            # T-037. The asset's RECORD came back from a backup but its media
+            # did not, because masters are transient and are deliberately not in
+            # the artefact. Supplying the original bytes is the recovery path,
+            # and it is the reason 'absent' had to be a different state from
+            # 'deleted' rather than a reuse of it:
+            #
+            #   deleted -> retention destroyed this on purpose. Final. Refused
+            #              above, and publishing it to a new platform is out of
+            #              scope by policy.
+            #   absent  -> nothing was destroyed on purpose; a disk was lost and
+            #              the record outlived the bytes. Refusing here would
+            #              turn a successful recovery into a permanent loss of
+            #              capability, which is the opposite of what a backup is
+            #              for.
+            #
+            # The same asset id is kept. The rights position, the sealed
+            # provenance and the publication history all reference it, and
+            # minting a new id would strand them — C-20's continuity applies to
+            # the asset's identity, not just to its verdict.
+            target = object_path_for(ctx.config.object_root, content_hash)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, target)
+            storage.commit(
+                ctx.conn, reservation_id, asset_id=existing["id"], actual_bytes=master_bytes
+            )
+            with transaction(ctx.conn):
+                ctx.conn.execute(
+                    "UPDATE assets SET state = 'stored', object_path = ?"
+                    " WHERE id = ? AND state = 'absent'",
+                    (str(target), existing["id"]),
+                )
+            return {
+                "ok": True,
+                "asset_id": existing["id"],
+                "content_hash": content_hash,
+                "asset_state": "stored",
+                "duplicate": False,
+                "restored": True,
+                "note": (
+                    "media restored for an asset whose record was recovered from"
+                    " a backup; its rights verdict and sealed provenance are"
+                    " unchanged and still govern"
+                ),
+            }
+
         if existing is not None:
             storage.release(ctx.conn, reservation_id)
             return {

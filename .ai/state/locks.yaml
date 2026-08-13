@@ -1,9 +1,47 @@
 # .ai/state/locks.yaml — entity/path ownership.
 # Schema: aef/schemas/lock.schema.yaml
 
-locks: []
+locks:
+  - path: "aef/**, .ai/state/decisions/DR-015.yaml"
+    task_id: "AEF-0.4.0"
+    agent: "claude-code-session-aef040"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-13T03:40:00+04:00"
+    expires_at: "2026-08-13T09:40:00+04:00"
+    note: >
+      Framework authorship, not project work: AEF 0.3.0 -> 0.4.0. Operator
+      mandate: evolve AEF from a single-agent governance framework into a
+      multi-agent engineering team OS — live coordination state, a Main Engineer
+      with continuity across sessions, capability-based agent routing, a
+      recommendation channel, and token-efficient context briefing.
+
+      Claimed BEFORE the work, as in 0.3.0. promedia/** and tests/** are NOT
+      claimed and will not be touched: this changes the framework layer only.
+      No project task is in flight (locks empty, tree clean at ebb08de). []
 
 history:
+  - path: "promedia/core/schema.sql, promedia/core/db.py, promedia/core/backup.py, promedia/core/ops/backup.py, promedia/core/ingest.py, tests/test_restore.py, tests/test_migration.py, tests/test_db.py, tests/test_registry.py, tests/test_ops_forms.py"
+    task_id: "T-037"
+    agent: "claude-code-session-next3"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-13T07:00:00+04:00"
+    released_at: "2026-08-13T08:20:00+04:00"
+    note: >
+      Restore path, carrying the schema migration the design finding predicted:
+      assets.state gains 'absent' (record restored, media not here, re-ingest
+      ALLOWED), which SQLite cannot do with ALTER on a CHECK constraint.
+      ingest.py claimed because 'absent' needs a recovery path — re-ingesting an
+      absent asset must restore it, which is exactly what 'deleted' must keep
+      refusing (T-029).
+      Three test files added to the claim mid-task, each because a PIN FIRED:
+      test_db.py (schema_version 1), test_registry.py (operator-authority set),
+      test_ops_forms.py (refuses a new mutating operation with no probe value
+      that would genuinely succeed). Not scope growth — the suite working.
+      backup.py sabotaged ONCE (restored assets keep state 'stored', i.e. the
+      phantom asset) and restored, SHA-256
+      0fcd97ab3766ad9be10ca3a6a57dfa0eb52d606ad43317e1f5da49bd3a72b41f.
+      aef/** was NOT touched: another session holds it for AEF 0.4.0.
+
   - path: "promedia/core/backup.py, promedia/core/ops/backup.py, promedia/core/ops/__init__.py, tests/test_backup.py, tests/test_registry.py"
     task_id: "T-036"
     agent: "claude-code-session-next3"

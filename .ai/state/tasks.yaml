@@ -948,9 +948,143 @@ tasks:
     mode: critical
     owner_role: implementer
     assigned_model_tier: standard
-    status: ready
+    status: complete
+    claimed_by: "claude-code-session-next3"
     depends_on: [T-036]
     blocks: [T-040]
+    owned_paths:
+      - promedia/core/schema.sql
+      - promedia/core/db.py
+      - promedia/core/backup.py
+      - promedia/core/ops/backup.py
+      - promedia/core/ingest.py
+      - tests/test_restore.py
+      - tests/test_migration.py
+      - tests/test_db.py
+      - tests/test_registry.py
+      - tests/test_ops_forms.py
+    owned_paths_note: >
+      Three test files were added to the claim mid-task, each because a pin
+      fired rather than because scope grew: test_db.py pinned schema_version 1,
+      test_registry.py pins the operator-authority set, and test_ops_forms.py
+      refuses a new mutating operation that has no probe value which would
+      actually succeed. All three firing is the suite doing its job.
+    verification:
+      - command: "python -m pytest -p no:cacheprovider tests/test_restore.py tests/test_migration.py"
+        status: PASSED
+        observed: "27 passed (18 restore + 9 migration)"
+      - command: "python -m pytest -p no:cacheprovider"
+        status: PASSED
+        observed: "459 passed (428 before this task)"
+      - command: "python -m pytest -p no:cacheprovider tests/test_restore.py, with restore keeping assets exactly as exported"
+        status: FAILED
+        observed: >
+          Sabotage of the defect this whole schema change exists to prevent — a
+          restored asset claiming 'stored' with no bytes on disk. 3 failures:
+          test_a_restored_asset_is_absent_not_stored,
+          test_publishing_a_restored_asset_is_refused (the phantom walked
+          through the media gate), and
+          test_re_ingesting_the_original_file_restores_an_absent_asset (the
+          recovery path silently became a no-op duplicate). Reverted; backup.py
+          SHA-256 0fcd97ab3766ad9be10ca3a6a57dfa0eb52d606ad43317e1f5da49bd3a72b41f.
+      - command: "python -m promedia backup-scope --json; fresh database schema version"
+        status: PASSED
+        observed: "Real CLI answers; a fresh database reports schema_version 2."
+    acceptance_criteria_results:
+      - id: AC-1
+        result: PASSED
+        evidence: >
+          test_every_permanent_row_survives_the_round_trip compares row counts
+          per table across two separate databases;
+          test_provenance_integrity_verifies_after_the_round_trip runs
+          verify-provenance in the TARGET system and gets integrity_verified
+          true, which is F-8 holding end to end rather than only inside the
+          artefact. test_the_rights_position_is_intact_after_restore and
+          test_the_audit_log_survives cover the other two permanent kinds.
+      - id: AC-2
+        result: PASSED
+        evidence: >
+          test_an_artefact_from_a_newer_schema_is_refused rewrites the schema
+          version, re-hashes so integrity still passes, and asserts refusal plus
+          an empty database — the refusal is not incidental to a hash failure.
+          Artefact format version is checked separately from schema version.
+      - id: AC-3
+        result: PASSED
+        evidence: >
+          test_a_retention_deleted_asset_stays_deleted is the important one:
+          'absent' must not launder 'deleted', or a backup becomes a side door
+          around retention policy. test_entity_locks_are_not_reintroduced holds
+          a lock in the source and asserts none in the target.
+          test_a_restored_asset_is_absent_not_stored asserts object_path is NULL
+          — a path on this machine would be a lie.
+      - id: AC-4
+        result: PASSED
+        evidence: >
+          test_restoring_into_a_non_empty_database_is_refused. Refusal rather
+          than merge, because "which version of this row wins" has no generally
+          correct answer and the audit log would silently gain or lose entries
+          depending on it.
+    findings_from_own_tests:
+      - >
+        A TRAP, nearly shipped, found by test_an_agent_cannot_restore. Every
+        restore ATTEMPT is audited, refusals included. The emptiness check
+        counted audit_log, so a first attempt that failed integrity wrote a
+        denial entry — and every later attempt was then refused for a non-empty
+        database caused entirely by the first. The operator's recovery path
+        would have closed behind them at the worst possible moment. audit_log
+        and schema_version are now exempt from the check
+        (_EMPTINESS_EXEMPT), and test_a_restore_can_be_retried_after_a_failed_attempt
+        pins it.
+      - >
+        audit_log ids are AUTOINCREMENT surrogates, and the target already holds
+        entries from the restore attempt itself, so copying explicit ids
+        collided on the primary key. They are re-sequenced on insert; nothing
+        meaningful lives in the id, and order is preserved by `at`.
+      - >
+        storage.commit() was called with a positional third argument that does
+        not exist in its signature. Caught immediately by the recovery test —
+        worth recording because it is the kind of error that would have shipped
+        had the recovery path been left untested on the reasoning that it is a
+        rare branch.
+    assumptions:
+      - >
+        Re-ingesting an absent asset keeps the SAME asset id. One of the two
+        questions this task's design finding left open. Decided this way because
+        the sealed provenance, the rights verdicts and the publication history
+        all reference that id; minting a new one would strand them and make the
+        recovery a fresh start rather than a continuation, which is the opposite
+        of what a backup is for.
+      - >
+        The restored verdict continues to govern — the second open question.
+        C-20 says the same asset, evidence and ruleset version must always
+        produce the identical verdict, and media existence is explicitly not
+        evidence (rights.media_state). So recovery of the bytes does not
+        re-open the rights position, and does not need to.
+      - >
+        schema_version rows are NOT copied from the artefact. The database's
+        version is a fact about THIS database and the migrations applied to it,
+        not about the artefact; the artefact's version is used only to refuse a
+        restore from a newer build.
+    open_items:
+      - >
+        The migration is tested against a synthetic version-1 database built by
+        tests/test_migration.py, not against the operator's real one. It cannot
+        be: the real database is already at version 2 the moment the
+        application opens it. The fixture reproduces the v1 assets table
+        verbatim and asserts it genuinely rejects 'absent' before migrating, so
+        the shape is right — but "ran against the operator's actual data" is
+        NOT_RUN and is only reachable from a copy of that database.
+      - >
+        Nothing has been restored from an OFF-SITE artefact, because there is no
+        off-site copy (OD-7). T-040's drill is the task that would prove the
+        whole regime, and it stays blocked behind the destination decision.
+    decisions: [DR-003, DR-006, DR-008]
+    independent_review:
+      status: NOT_RUN
+      note: >
+        Constitution section 7 — implemented by this session, not reviewed by
+        another agent. This is a data_model_change in critical mode, which
+        routing.yaml puts at 3 reviewers plus a migration-safety dimension.
     design_finding_before_implementation:
       found: 2026-08-13
       found_by: "T-036 implementer, reading the restore path before starting it"

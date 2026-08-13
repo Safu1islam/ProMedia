@@ -102,6 +102,7 @@ def test_operator_only_operations_are_the_expected_set():
         "release-publish-claim",
         "publish-tick",
         "export-permanent-set",
+        "restore-permanent-set",
     }
 
 
