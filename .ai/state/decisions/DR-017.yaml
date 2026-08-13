@@ -1,0 +1,159 @@
+id: DR-017
+title: Rich client for the "Pro Media v2" production UI — Vue 3 + Vite over the existing operation JSON API
+date: 2026-08-14
+status: accepted
+decision_area: frontend_framework_and_delivery
+
+prompted_by: >
+  The operator supplied a Claude Design mockup (Pro Media v2.dc.html) specifying
+  a full multi-room production UI: live dual-monitor preview, a drag/scrub
+  timeline, Edit/Color/Audio/Captions rooms, an agent diff-review workspace,
+  and a social composer/queue/insights suite. Asked directly whether to (a)
+  restyle the existing server-rendered pages, (b) rebuild as designed, or (c)
+  something narrower, the operator chose (b), full rebuild, after being shown
+  the conflict with DR-004 and project.md section 4. Separately confirmed:
+  the mockup's "presence"/"team" UI represents AI AGENTS, not additional
+  human users — F-9 (single operator, permanently) is UNCHANGED and this
+  decision does not touch it.
+
+binding_constraints:
+  - "F-1: one implementation per capability, both surfaces thin clients of it"
+  - "F-2: agents may draft/edit/render; only the operator approves/publishes/spends"
+  - "F-9 (unchanged): single human operator, no multi-tenancy — confirmed still true"
+  - "C-1: UI interaction p95 < 300ms, on localhost"
+  - "project.md section 8: operator TIME, not capability, is the binding constraint"
+  - "Node 24.14.1 / npm 11.11.0 already present in the toolchain (project.md section 6)"
+  - "No discrete GPU (Iris Xe, no CUDA) — real-time full-resolution 4K scrubbing is not viable"
+  - "DR-002: the operation registry is the single source of truth; no business logic in an adapter"
+
+what_this_supersedes: >
+  DR-004 chose server-rendered Jinja2 with NO JavaScript REQUIRED, specifically
+  for the approval/publish path, and named its own revisit trigger: "the UI
+  needs live-updating views or in-place media editing." That trigger has now
+  fired, by explicit operator instruction. DR-004 is not invalidated for the
+  reasoning behind it (an authority surface should degrade gracefully) — it is
+  extended: the existing server-rendered pages (/, /projects, /projects/{id},
+  /media, /posts, /posts/{id}, /publications, /settings, /ops) are KEPT,
+  unchanged, as a working no-JS fallback and the emergency-access path if the
+  rich client ever breaks. The new client is additive, per the same two-layer
+  principle the frontend brief already established for /ops vs crafted
+  screens: a richer layer never becomes the ONLY way to do something.
+
+problem_statement: >
+  Two questions: what renders the rich client, and how does it reach data.
+  The second is answered structurally already — DR-002's operation registry
+  is exposed as JSON at /api/op/{name} and /api/ops for exactly this reason
+  (F-1: any surface is a thin client). The rich UI adds NO new backend
+  surface and NO new business logic; it is a third projection of the same
+  registry the CLI and the Jinja2 pages already use. The open question is
+  only the client-side rendering technology.
+
+ruled_out:
+  - option: "Keep it server-rendered (htmx / Turbo-style progressive enhancement)"
+    reason: >
+      Cannot express what was actually asked for: a scrubbable timeline with a
+      moving playhead, live drag-reorder of clips, hover-triggered menus, and
+      an agent workspace with live progress. These are continuous, client-held
+      interaction state — the exact case DR-004 named as its own revisit
+      trigger. Forcing it through partial-page swaps would produce a worse
+      copy of the mockup, not a faithful one.
+  - option: "A second engine matching real-time GPU-accelerated 4K scrubbing"
+    reason: >
+      Not a framework choice but a hardware one, and this machine does not
+      have the hardware: Iris Xe with no CUDA (DR-016). Any client framework
+      running against a proxy-based preview (see consequences) makes this
+      moot — the limitation is in what media is served, not what renders it.
+
+candidates:
+  - option: "React 18 + Vite + TypeScript"
+    advantages:
+      - "Largest ecosystem; most third-party examples an operator troubleshooting alone will find"
+      - "TypeScript integration is mature and well-documented"
+    disadvantages:
+      - >
+        REAL disadvantage, not habit-driven: the mockup's own template syntax
+        ({{ x.label }} interpolation, sc-if / sc-for directives reading as
+        v-if / v-for) is a mustache-and-directive DSL, not JSX. Porting it to
+        JSX means restructuring every conditional and loop into a JS
+        expression (ternaries, .map(), && guards) — a translation step where
+        visual-fidelity bugs (the whole point of "pixel-perfect") are most
+        likely to be introduced. This is also the option fluency bias reaches
+        for first — flagged explicitly below, not smuggled in as the default.
+      - "Hooks' dependency-array rules are a known solo-maintainer footgun (stale closures, effect loops)"
+  - option: "Vue 3 + Vite + TypeScript"
+    advantages:
+      - >
+        Its template syntax is near-identical to the mockup's own DSL:
+        {{ expr }} interpolation, v-if/v-for map directly onto sc-if/sc-for,
+        and inline :style bindings mirror the mockup's inline style objects.
+        Lower translation risk for a pixel-perfect port, not a preference.
+      - "Single-file components keep template/script/style together — fewer files to hold in your head as sole maintainer (project.md section 8)"
+      - "No hooks-style dependency-array class of bug; reactivity is more direct to reason about"
+    disadvantages:
+      - "Smaller ecosystem than React for pre-built widgets — mitigated here because a timeline/scopes/waveform UI has no good off-the-shelf widget in ANY framework and is being hand-built regardless"
+      - "Somewhat smaller pool of solo-maintainer troubleshooting content than React, though large in absolute terms"
+  - option: "Svelte 5 + SvelteKit"
+    advantages:
+      - "Smallest shipped runtime (compiles away); best raw performance headroom"
+      - "Terse, close to plain HTML/CSS, which also matches the mockup reasonably well"
+    disadvantages:
+      - "Newest, smallest ecosystem and troubleshooting corpus of the three — worst 'operator fit' (project.md section 8) for a solo maintainer who will debug this alone at 11pm"
+      - "Runes (Svelte 5's reactivity primitives) are the least battle-tested API surface of any candidate here"
+  - option: "Build vs buy: an existing open-source NLE web UI (e.g. embed/fork one)"
+    advantages: ["Would skip building a timeline/scopes UI from scratch"]
+    disadvantages:
+      - >
+        None reachable are architected as a thin client over an external
+        operation registry with F-2's authority split — every one owns its
+        own project format, storage model and (often) its own render engine,
+        which collides directly with DR-002/DR-016. Adapting one would cost
+        more than building against this project's own EDL and registry, and
+        would reintroduce exactly the 'two implementations of one capability'
+        defect F-1 forbids.
+
+decision: "Vue 3 + Vite + TypeScript, served as a static bundle from the existing FastAPI app, calling only /api/op/{name} and /api/ops"
+rationale: >
+  The deciding factor is translation fidelity, not preference: the mockup's
+  own DSL is structurally closer to Vue's template syntax than to JSX, and
+  "pixel-perfect" implementation is explicitly the ask (README.md in the
+  handoff bundle). Vue's lower per-component ceremony also fits project.md
+  section 8's standing instruction that operator TIME is the binding
+  constraint, not capability. No new backend surface is introduced: every
+  screen is a projection of an existing or newly-registered operation,
+  exactly as the Jinja2 pages are (frontend-brief.md rule 2) — this decision
+  changes what renders the projection, not what is allowed to decide
+  anything. Authority (F-2), locking (C-19) and rights gating (F-3) are
+  enforced identically because they still live in promedia/core/registry.py;
+  the client can request an action but the server can still refuse it.
+
+fluency_bias_check: >
+  React is genuinely the option most coding agents — including this one —
+  would reach for first, purely from training-data frequency, and that is
+  named explicitly rather than let it decide silently. Weighed against the
+  actual translation task in front of this project (mustache/directive DSL
+  to component template), React is the worse fit, not the neutral default.
+
+operator_fit: >
+  A build step (npm run build) and a dependency lockfile are new recurring
+  facts of life this project did not have before (DR-004 avoided them
+  deliberately). This is disclosed as a real, ongoing cost — not hidden by
+  the excitement of the new UI — and it is accepted here only because the
+  operator chose the full-rebuild option after that tradeoff was stated
+  plainly.
+
+reversibility: moderate
+reversibility_note: >
+  The registry and every operation are untouched; only the presentation
+  layer changes. Swapping Vue for another client framework later means
+  rewriting promedia/web/frontend/** only — no core or ops module is coupled
+  to this choice. The mockup's visual language (tokens, layout) is framework
+  agnostic and survives a future swap.
+
+revisit_if:
+  - "A second human operator is ever actually introduced (would also reopen F-9, a full re-intake, not just this record)"
+  - "The operator finds the build step itself becomes the ops burden project.md section 8 warns against"
+  - "A discrete GPU becomes available, changing what real-time preview can honestly promise"
+
+relates_to: [DR-002, DR-004, DR-016]
+supersedes: []
+extends: [DR-004]

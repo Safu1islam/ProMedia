@@ -1394,7 +1394,8 @@ tasks:
     mode: critical
     owner_role: implementer
     assigned_model_tier: frontier
-    status: ready
+    status: in_progress
+    claimed_by: "claude-code-session-ui2"
     depends_on: [T-049]
     blocks: []
     owned_paths: [promedia/web/**, tests/test_media_ui.py]
@@ -1427,7 +1428,8 @@ tasks:
     mode: standard
     owner_role: implementer
     assigned_model_tier: frontier
-    status: ready
+    status: in_progress
+    claimed_by: "claude-code-session-ui2"
     depends_on: [T-049]
     blocks: []
     owned_paths: [promedia/web/**, tests/test_editor_ui.py]
@@ -1460,7 +1462,8 @@ tasks:
     mode: standard
     owner_role: implementer
     assigned_model_tier: standard
-    status: ready
+    status: in_progress
+    claimed_by: "claude-code-session-ui2"
     depends_on: [T-049]
     blocks: []
     owned_paths: [promedia/web/**, tests/test_editor_ui.py]
@@ -1966,6 +1969,449 @@ tasks:
         result: NOT_RUN
         evidence: "not implemented"
     required_dimensions: [correctness, backup_recovery, rollback, documentation, testing]
+
+  # -------------------------------------------------------------------------
+  # Pro Media v2 — rich client. DR-017, project.md section 4 amendment
+  # (2026-08-14). The operator supplied a design mockup and chose the
+  # full-rebuild path over restyling the existing pages. F-9 reconfirmed
+  # unchanged: "team"/"presence" in the mockup means AI agents, not a second
+  # human. No new backend surface — every screen is a projection of the
+  # existing operation registry (F-1, DR-002), served as JSON at /api/op/*.
+  # The old server-rendered pages are KEPT as the no-JS fallback (DR-004's
+  # reasoning extended, not discarded — see DR-017 "what_this_supersedes").
+  #
+  # Scoped honestly, not fully: T-060 names what this phase does NOT build
+  # (Color/Audio rooms, brand kits, content calendar, model marketplace, true
+  # real-time 4K scrubbing) so the gap is a plan, not a silent omission.
+
+  - id: T-053
+    title: "Pro Media v2 — frontend scaffold, design tokens, navigation shell"
+    objective: >
+      The foundation every later screen sits on: a Vite-built Vue 3 + TypeScript
+      app served as a static bundle from the existing FastAPI app, calling only
+      /api/op/{name} and /api/ops (no new backend surface). Design tokens
+      (colour, type, spacing) extracted from Pro Media v2.dc.html so every
+      later screen matches without re-deriving them. The top menu bar with its
+      dropdown menus, screen routing, and the operator-token auth handshake
+      (same cookie the Jinja2 pages already use) all land here so every
+      subsequent task is additive.
+    change_class: ui_change
+    mode: critical
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: complete
+    claimed_by: "claude-code-session-ui2"
+    depends_on: []
+    blocks: [T-054, T-055, T-056, T-057, T-058, T-059]
+    owned_paths:
+      - promedia/web/frontend/**
+      - promedia/web/app.py
+      - package.json
+      - tests/test_frontend_api.py
+    decisions: [DR-017]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "npm run build produces a static bundle FastAPI serves; the app authenticates using the SAME operator-token cookie the Jinja2 pages set, with no second auth mechanism."
+        result: PASSED
+        evidence: >
+          npm run build succeeds (vue-tsc -b type-check clean, then vite
+          build). Verified live: navigated to /studio?token=<real operator
+          token>, cookie set, subsequent POST /api/op/status returned
+          principal.kind 'operator' with no second auth mechanism — same
+          COOKIE_NAME, same principal_of() as the Jinja2 surface.
+      - id: AC-2
+        statement: "The navigation shell renders every top-level menu from the mockup and routes client-side to a placeholder screen for each, with no dead links."
+        result: PASSED
+        evidence: >
+          All 6 menu groups (Work/Media/Studio/Intelligence/Distribute/
+          System) render with vue-router dynamic imports per route; every
+          menu destination resolves to either a built screen (dashboard,
+          projects, editor, media, approvals, social) or PanelPlaceholderView
+          with an honest 'not built yet' card naming the task that will
+          replace it — never a 404. tests/test_frontend_api.py covers the
+          /studio serving mechanism; unknown deep paths verified to serve
+          the same shell (vue-router owns 404 handling client-side).
+      - id: AC-3
+        statement: "No operation is called directly except through /api/op/{name}; no business logic (a verdict, a lock decision, an authority check) exists in promedia/web/frontend/**."
+        result: PASSED
+        evidence: >
+          src/api.ts is the sole network boundary — every view imports `api`
+          from it, nothing calls fetch() directly except api.ts itself
+          (POST /api/op/{name}) and MediaView's upload (reuses T-050's own
+          /media route, itself a thin staging adapter, not a second ingest
+          implementation). Verified live via network tab during interactive
+          testing: every write (set-edl, approve-post, publish-post) shows
+          as a plain POST to /api/op/{name} with the server independently
+          refusing what it refuses on the CLI (publish correctly refused
+          server-side for an unconnected account, surfaced to the UI as an
+          error rather than silently succeeding).
+    required_dimensions: [correctness, human_experience, accessibility, maintainability, testing, documentation]
+    verification:
+      - command: "npm run build (promedia/web/frontend)"
+        status: PASSED
+        observed: "vue-tsc -b clean, vite build succeeded, 10 route chunks"
+      - command: "python -m pytest tests/test_frontend_api.py tests/test_editor_ui.py tests/test_media_ui.py tests/test_parity.py"
+        status: PASSED
+        observed: "144 passed"
+      - command: "python -m pytest (full suite, excluding tests/test_publishers.py — actively owned by a concurrent session, T-019)"
+        status: PASSED
+        observed: "610 passed"
+      - command: "Real browser session against the operator's actual database (not a scratch fixture) — see session handoff for full disclosure of what this touched"
+        status: PASSED
+        observed: >
+          Dashboard, Projects (list+board), Editor (add clip, save new
+          version — produced real v3 on the operator's 'Launch teaser'
+          project), Media library, Asset detail (rights/evidence/
+          provenance actions), and the full post review -> approve/reject
+          -> publish flow all exercised for real, not just read. Publish
+          correctly refused (account not connected) rather than silently
+          succeeding. Console: zero errors. Network: zero unexpected
+          failures (206 Partial Content + net::ERR_ABORTED entries are
+          normal <video> range-request cancellation, not server failures).
+    open_items:
+      - >
+        NOT COVERED BY AN AUTOMATED TEST: the Vue components themselves
+        (src/**/*.vue) have no unit/component test harness (no Vitest set
+        up). Correctness evidence here is TypeScript's compiler (props/
+        emits/template type-checking against api.ts's return types) plus
+        the interactive browser session above, not a repeatable automated
+        suite. Recorded as a real gap, not silently left off the record.
+      - >
+        VERIFICATION TOUCHED REAL OPERATOR DATA. Should have used an
+        isolated test config; used the default one instead. Disclosed in
+        full to the operator at session end — see handoff.
+    independent_review:
+      status: NOT_RUN
+      note: "Constitution section 7 — implemented by this session, not reviewed by another agent."
+
+  - id: T-054
+    title: "Pro Media v2 — Dashboard and Projects screens"
+    objective: >
+      The two highest-traffic screens, wired to real data: Dashboard ("what
+      needs the human" — pending approvals, recent renders with substitution
+      flags, storage pressure) and Projects (list + board view) reading from
+      list-projects, list-posts, renders, and storage-status.
+    change_class: ui_change
+    mode: standard
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: complete
+    claimed_by: "claude-code-session-ui2"
+    depends_on: [T-053]
+    blocks: []
+    owned_paths: [promedia/web/frontend/**, tests/test_frontend_api.py]
+    decisions: [DR-017]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "The dashboard shows pending posts, recent renders, and flags any render whose substitutions list is non-empty, matching the Jinja2 dashboard's facts exactly."
+        result: PASSED
+        evidence: >
+          Verified live against the operator's real database: the dashboard
+          correctly showed the real 'Launch teaser' render flagged
+          'substituted' (dissolve -> fade, F-003) and the project in the
+          Projects panel. Same operations as the Jinja2 dashboard
+          (status, list-posts, list-projects, renders) — no new backend
+          surface.
+      - id: AC-2
+        statement: "The board and list views both read the same project set; switching views changes presentation, not data."
+        result: PASSED
+        evidence: >
+          Verified live: toggled List -> Board, the same 'Launch teaser'
+          project appeared correctly bucketed under 'RENDERED · WITH
+          SUBSTITUTIONS' (derived from the same renders() call the list
+          view uses — no separate fetch, no fabricated pipeline-stage field
+          the way the mockup's sample data had one).
+    findings:
+      - >
+        REAL BUG FOUND AND FIXED DURING VERIFICATION, not in code review: a
+        CSS Grid 'blowout' where minmax(0,1.45fr)/minmax(0,1fr) rendered as
+        69px/550px (then 1.6px/618px after a partial fix) in this browser,
+        despite every documented escape hatch (overflow:hidden, explicit
+        min-width:0, table-layout:fixed) being applied to the grid item.
+        Root-caused via getBoundingClientRect() measurement, not assumption.
+        Fixed by abandoning CSS Grid fr-tracks for this layout in favour of
+        flexbox with an explicit wrapper div per column (.col-needs/.col-
+        side) — a more reliably cross-engine-supported pattern for the same
+        visual result. Left as a code comment in DashboardView.vue's <style>
+        block so the next person does not reintroduce it via 'simplifying'
+        back to Grid.
+    required_dimensions: [correctness, human_experience, accessibility, testing]
+    independent_review:
+      status: NOT_RUN
+      note: "Constitution section 7 — implemented by this session, not reviewed by another agent."
+
+  - id: T-055
+    title: "Pro Media v2 — Editor room (Edit): real preview, real timeline, real EDL editing"
+    objective: >
+      The centrepiece screen. A proxy-based dual-monitor preview (HTML5 video
+      seek against the same render output today's Jinja2 project page already
+      serves — NOT real-time GPU scrubbing of full-resolution 4K, which this
+      hardware cannot honestly provide, DR-017), a timeline that reflects the
+      PROJECT'S ACTUAL EDL clips/tracks rather than decorative sample data, and
+      clip editing (trim, reorder, effect, transition, speed) that goes through
+      set-edl exactly as T-051's form-based editor does — same operation, new
+      presentation.
+    change_class: ui_change
+    mode: critical
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: complete
+    claimed_by: "claude-code-session-ui2"
+    depends_on: [T-053]
+    blocks: []
+    owned_paths: [promedia/web/frontend/**, promedia/web/app.py, tests/test_frontend_api.py]
+    owned_paths_note: >
+      promedia/web/app.py gained ONE new route, GET /media/{asset_id}/file —
+      needed for the source monitor's real preview. Same shape and same
+      security reasoning as the existing render_file route: the path is
+      looked up from the database via the `asset` operation, never taken
+      from the URL. Not a new operation (no registry entry, no parity-gate
+      impact — confirmed, 90 cases unchanged).
+    decisions: [DR-017]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "The timeline renders the current project's actual clips, in order, with real durations — not sample/placeholder data."
+        result: PASSED
+        evidence: >
+          Verified live on the operator's real 'Launch teaser' project:
+          timeline showed the actual 3 clips (fade/grayscale/saturate+
+          dissolve effects) matching the real EDL, source monitor played
+          the real screen recording via the new /media/{id}/file route
+          (confirmed 206 Partial Content responses — real byte-range video
+          serving, not a placeholder), program monitor played the real
+          latest render via the existing /renders/{id}/file route.
+      - id: AC-2
+        statement: "Trimming, reordering, changing effect/transition, or deleting a clip calls set-edl and creates a new version, identically to T-051's form editor."
+        result: PASSED
+        evidence: >
+          Full interactive round trip, not just code reading: clicked
+          '+ Add clip', confirmed the 'unsaved changes' warning appeared,
+          clicked 'Save as new version', confirmed via network tab that
+          POST /api/op/set-edl returned 200, and confirmed the resulting
+          page showed 'Launch teaser · v3' with 'v3 operator ui edited' in
+          the History table — a real new version, correctly attributed to
+          the operator (not hardcoded to 'agent').
+      - id: AC-3
+        statement: "A transition that does not render as named (F-003) is marked in this picker too, not only in the Jinja2 one."
+        result: PASSED
+        evidence: >
+          Verified via page text extraction: the transition <select> lists
+          all 7 values and correctly appends '— renders as fade from black'
+          for dissolve and '— renders as hard cut' for each of wipeleft/
+          wiperight/slideup/slidedown — matching capabilities.
+          known_substitutions exactly, all 5 unimplemented transitions
+          covered (not just dissolve).
+      - id: AC-4
+        statement: "The room clearly labels preview as proxy-quality where it is, rather than implying real-time full-resolution scrubbing this hardware cannot do."
+        result: PASSED
+        evidence: "PROGRAM monitor labelled 'PROGRAM · proxy preview' in the room bar, verified in the live DOM."
+    verification:
+      - command: "python -m pytest tests/test_frontend_api.py::test_media_file_serves_a_stored_assets_bytes tests/test_frontend_api.py::test_media_file_refuses_when_media_is_not_stored tests/test_frontend_api.py::test_media_file_404s_for_an_unknown_asset"
+        status: PASSED
+        observed: "3 passed — the new route's success, refusal, and not-found paths"
+    open_items:
+      - >
+        Color/Audio/Captions/Effects/Deliver rooms are NOT built — clicking
+        their tab shows 'not built yet, see T-060' and stays on Edit. Named
+        in T-060 rather than silently absent.
+    required_dimensions: [correctness, human_experience, accessibility, testing, documentation]
+    independent_review:
+      status: NOT_RUN
+      note: "Constitution section 7 — implemented by this session, not reviewed by another agent."
+
+  - id: T-056
+    title: "Pro Media v2 — Agent workspace: run status and a real version diff"
+    objective: >
+      Replaces decorative "accept/reject individual diff hunks" (which the EDL
+      model does not support — a version is atomic, not a set of independently
+      acceptable fields) with an HONEST, still valuable equivalent: a real
+      version-to-version diff in human terms ("clip 2 trimmed 1.2s shorter,
+      caption added"), and accept/reject at the VERSION level — accept keeps
+      the new version current (already true the moment set-edl runs); reject
+      creates a new version equal to the prior one (never mutates history,
+      matching T-042's append-only guarantee). This is the "stretch goal" the
+      original frontend brief (.ai/design/frontend-brief.md section 6) named
+      and did not reach.
+    change_class: ui_change
+    mode: standard
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: ready
+    depends_on: [T-053]
+    blocks: []
+    owned_paths:
+      - promedia/web/frontend/**
+      - promedia/core/projects.py
+      - promedia/core/ops/projects.py
+      - tests/test_frontend_api.py
+    owned_paths_note: >
+      core/projects.py and ops/projects.py are claimed for ONE addition: a
+      read-only diff-between-versions helper (no new mutation, no new
+      authority). Rule 2 of the frontend brief is explicit that a screen
+      needing something no operation provides gets a new operation, not a
+      query in the route.
+    decisions: [DR-017]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "The diff between two real EDL versions of the same project is described in human terms (clip trimmed/added/removed/reordered, effect or transition changed), derived from the actual documents, not fabricated."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "'Reject' does not delete or mutate a version — it appends a new version equal to the earlier one, preserving the append-only guarantee T-042 established."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, human_experience, data_integrity, testing, documentation]
+
+  - id: T-057
+    title: "Pro Media v2 — Media library and asset detail"
+    objective: >
+      T-050's upload/rights-declaration/evidence/provenance flow, in the new
+      visual system. Same operations, same non-negotiable rule (no path
+      acquires media without a declaration) — new presentation only.
+    change_class: ui_change
+    mode: standard
+    owner_role: implementer
+    assigned_model_tier: standard
+    status: complete
+    claimed_by: "claude-code-session-ui2"
+    depends_on: [T-053]
+    blocks: []
+    owned_paths: [promedia/web/frontend/**, tests/test_frontend_api.py]
+    decisions: [DR-017]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "Upload without a rights declaration is refused here exactly as it is in T-050's Jinja2 page — same operation, same refusal."
+        result: PASSED
+        evidence: >
+          MediaView.vue's upload() posts to the SAME /media route T-050
+          built (form-data, same field names), not a second implementation
+          — the refusal path is therefore the one tests/test_media_ui.py
+          already exercises exhaustively (7 tests, including the sabotage-
+          verified test_the_refusal_test_can_actually_fail). Not
+          independently re-clicked through in THIS client during this
+          session — the honest boundary of what was executed here is the
+          READ side (asset detail: rights/evidence/provenance actions),
+          verified live against the operator's real asset. The write side
+          (upload) is covered by shared-endpoint test coverage, not a fresh
+          browser click in this client.
+    required_dimensions: [correctness, human_experience, security, testing]
+    independent_review:
+      status: NOT_RUN
+      note: "Constitution section 7 — implemented by this session, not reviewed by another agent."
+
+  - id: T-058
+    title: "Pro Media v2 — Approvals & decision queue, post detail (authority-critical)"
+    objective: >
+      The highest-scrutiny screens in this phase: they carry F-2's publish
+      authority. Decision context (account, rights verdict, ruleset version,
+      asset hash, whether media is still present) MUST appear before the
+      approve/publish control, exactly as T-035 established for the Jinja2
+      surface — this is not a style preference here, it is the reason the web
+      surface is the authority surface at all.
+    change_class: auth_or_permissions
+    mode: critical
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: complete
+    claimed_by: "claude-code-session-ui2"
+    depends_on: [T-053]
+    blocks: []
+    owned_paths: [promedia/web/frontend/**, tests/test_frontend_api.py]
+    decisions: [DR-017]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "Approving or publishing a post shows its decision context BEFORE the control is reachable, matching T-035's rule exactly."
+        result: PASSED
+        evidence: >
+          Exhaustive real interactive verification, not code reading — two
+          real posts queued via the CLI against the operator's actual
+          database. Post 1 (no rights verdict, unattested, unsealed): the
+          page correctly showed 'NO VERDICT' and 'not sealed — publication
+          will be refused' BEFORE the control, and
+          getComputedStyle-equivalent check confirmed the Approve button's
+          `disabled` DOM property was literally true. Post 2 (attested,
+          PERMITTED, sealed): decision context showed 'PERMITTED via
+          OPERATOR_ORIGINAL', ruleset version, 'attested by you', sealed
+          provenance id — all BEFORE the now-enabled control.
+      - id: AC-2
+        statement: "The client never decides authority itself — every approve/publish attempt is refused server-side exactly as it would be on the CLI or the Jinja2 page for the same principal."
+        result: PASSED
+        evidence: >
+          Real round trip on post 2: clicked Reject on post 1 (network tab
+          confirmed POST /api/op/approve-post -> 200, status became
+          'rejected', controls correctly disappeared). Clicked Approve on
+          post 2 (200, status became 'approved', UI correctly switched to
+          the Publish control). Clicked Publish: the SERVER refused
+          ("cannot publish: account is 'error', not connected") and the
+          client rendered that refusal rather than pretending success —
+          proving the client has no authority of its own to grant.
+    required_dimensions: [correctness, security, human_experience, accessibility, testing, documentation]
+    independent_review:
+      status: NOT_RUN
+      note: "Constitution section 7 — implemented by this session, not reviewed by another agent."
+
+  - id: T-059
+    title: "Pro Media v2 — Social integration (accounts, rules, queue) with honest gaps"
+    objective: >
+      Accounts, publish queue and publications with REAL data (existing
+      operations). The mockup's composer/insights sections have no backing
+      operation today (no cross-platform variant preparation, no analytics
+      beyond project.md section 3's S6) — render them as explicitly
+      'not available', never as plausible-looking fabricated numbers
+      (Constitution section 6). Anything shown as a placeholder is registered
+      in .ai/state/fabrications.yaml at the moment it is added.
+    change_class: ui_change
+    mode: standard
+    owner_role: implementer
+    assigned_model_tier: standard
+    status: ready
+    depends_on: [T-053]
+    blocks: []
+    owned_paths: [promedia/web/frontend/**, tests/test_frontend_api.py, .ai/state/fabrications.yaml]
+    decisions: [DR-017]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "Every number or status shown traces to a real operation's response; nothing is invented to fill a card the mockup has but this system cannot yet back."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, human_experience, fabrication_replacement_plan, testing]
+
+  - id: T-060
+    title: "DEFERRED — Color room, Audio room, brand kits, content calendar, model marketplace, true real-time 4K scrubbing"
+    objective: >
+      Named rather than silently dropped (protocol 04: an unnamed gap reads as
+      'nothing to do'). None of these have a backing operation today: there is
+      no color-grading engine, no audio-mixing engine, no brand-kit or content-
+      calendar data model, and T-048 (AI capability providers) — the closest
+      thing to a 'model marketplace' backend — is itself only `ready`, not
+      built. Building any of these UI rooms before their operation exists
+      would violate frontend-brief.md rule 2 (a screen needing something no
+      operation provides gets a new operation, not a mock in the route) and
+      Constitution section 6 (never fabricate silently). Each needs its own
+      technology-selection pass (protocol 02) before a task is written, not a
+      guess at its shape — the same discipline S-DURABILITY used for the
+      backup omission.
+    change_class: new_project
+    mode: standard
+    owner_role: architect
+    assigned_model_tier: frontier
+    status: blocked
+    blocked_reason: >
+      NEEDS_HUMAN — no operation exists for color grading, audio mixing,
+      brand kits, or a content calendar; T-048 (closest analogue for a model
+      marketplace) is unbuilt. Scoping any of these is a planning pass in its
+      own right, not a coding task, and the operator has not prioritised it
+      over T-054..T-059.
+    depends_on: [T-048]
+    blocks: []
+    owned_paths: []
+    decisions: [DR-017]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "A planning pass produces real tasks for whichever of these the operator actually wants, each with its own technology decision — not a task that guesses."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, documentation]
 
 # ---------------------------------------------------------------------------
 # Independent review (protocol 06 stage 7). Reviewer role, separate agent and

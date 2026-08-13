@@ -16,16 +16,18 @@ Two deliberate properties:
 from __future__ import annotations
 
 import json
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from ..config import Config, load as load_config
-from ..errors import NotFound, ProMediaError
+from ..errors import NotFound, ProMediaError, ValidationError
 from ..core import db
 from ..core.credentials import CredentialStore
 from ..core.principal import Principal, agent as agent_principal, resolve
@@ -310,6 +312,140 @@ def _reject_foreign_origin(request: Request, cfg: Config) -> JSONResponse | None
     )
 
 
+# --- media library (T-050) ----------------------------------------------------
+#
+# The most glaring hole the frontend brief named: no way to get a file in from
+# the browser at all. ``ingest`` (T-008) already IS the rights gate — it takes
+# a source_path on this machine and refuses without a declaration, exactly what
+# the CLI and the generic /ops form already call. A browser upload arrives as a
+# stream, not a path, so the one thing this adapter adds is bridging the two:
+# stage the bytes to a temporary file, then hand ``ingest`` a path exactly as
+# it already expects. No rights or storage decision is made here — that stays
+# entirely inside ``ingest`` (rule 2).
+
+
+def _stage_upload(upload: UploadFile) -> Path:
+    """Write a browser upload to a temp file ``ingest`` can read as a path.
+
+    Streamed in chunks rather than read into memory at once: masters run to
+    the C-12 ballpark of ~1.5 GB, and this machine has 7.7 GB of RAM total
+    (DR-016) — the same reason ``ingest.hash_file`` chunks its own read.
+
+    Staged under a fresh directory named for the ORIGINAL filename, not a
+    generated one: ``ingest_file`` records ``src.name`` as the asset's
+    ``original_filename``, so a random temp name would replace the filename
+    the operator actually recognises everywhere the library shows it. A
+    directory of its own, rather than the system temp root directly, is what
+    lets the name be exactly the upload's own name (sanitised to strip any
+    path component a hostile client might send) without colliding with a
+    second upload of a same-named file arriving at the same moment.
+    """
+    original_name = Path(upload.filename or "").name.strip() or "upload"
+    staging_dir = Path(tempfile.mkdtemp(prefix="promedia-upload-"))
+    destination = staging_dir / original_name
+    with destination.open("wb") as out:
+        shutil.copyfileobj(upload.file, out, length=1024 * 1024)
+    return destination
+
+
+def _declaration_from_form(form: dict[str, Any]) -> dict[str, Any]:
+    """Build the declaration ``ingest`` expects out of the upload form fields.
+
+    Marshalling form fields into the shape an operation parameter expects is
+    what every route in this module already does (e.g. ``project_render``'s
+    ``quality`` field); it is not the rights decision rule 2 keeps out of the
+    adapter — ``ingest_layer._validate_declaration`` still runs inside
+    ``ingest`` and still refuses a missing or invalid authorship.
+    """
+    declaration: dict[str, Any] = {
+        "authorship": (form.get("authorship") or "").strip(),
+        "third_party_material": [
+            line.strip()
+            for line in (form.get("third_party_material") or "").splitlines()
+            if line.strip()
+        ],
+    }
+    for field in (
+        "source_url", "licence_grantor", "licence_scope",
+        "licence_evidence_ref", "public_domain_source",
+    ):
+        value = (form.get(field) or "").strip()
+        if value:
+            declaration[field] = value
+    return declaration
+
+
+# --- per-clip editing (T-051) --------------------------------------------------
+#
+# The edit stays one document (DR-016) — this only changes how the document is
+# authored. Structured fields are marshalled into the same ``clips`` list the
+# JSON textarea already sends to ``set-edl``, which is where EDL.validate()
+# actually enforces every rule (ranges, known effects/transitions). Nothing
+# here decides what is valid; it decides which of the submitted rows survive
+# into that call.
+
+_CLIP_FIELDS = (
+    ("start", float, 0.0), ("end", float, None), ("speed", float, 1.0),
+    ("transition_duration", float, 0.5), ("volume", float, 1.0),
+)
+
+
+def _clip_row(form: dict[str, Any], index: str) -> dict[str, Any] | None:
+    """One clip out of the form, or None if it was removed or left blank.
+
+    Returns a dict carrying a private ``_position`` key the caller sorts on
+    and strips — kept out of the EDL's own Clip shape so a stray field cannot
+    reach ``set-edl`` and fail its own validation with a confusing message.
+    """
+    asset_id = (form.get(f"clip-{index}-asset_id") or "").strip()
+    if not asset_id or form.get(f"clip-{index}-remove"):
+        return None
+    row: dict[str, Any] = {"asset_id": asset_id}
+    for name, caster, default in _CLIP_FIELDS:
+        raw = form.get(f"clip-{index}-{name}")
+        if raw is None or str(raw).strip() == "":
+            row[name] = default
+            continue
+        try:
+            row[name] = caster(raw)
+        except (TypeError, ValueError):
+            raise ValidationError(
+                f"clip {index}: '{name}' must be a number", parameter=f"clip-{index}-{name}"
+            )
+    row["effect"] = form.get(f"clip-{index}-effect") or "none"
+    row["transition_in"] = form.get(f"clip-{index}-transition_in") or "cut"
+    row["mute"] = bool(form.get(f"clip-{index}-mute"))
+    raw_position = form.get(f"clip-{index}-position")
+    try:
+        row["_position"] = float(raw_position) if raw_position not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        raise ValidationError(f"clip {index}: 'position' must be a number",
+                              parameter=f"clip-{index}-position")
+    return row
+
+
+def _clips_from_form(form: dict[str, Any], existing_count: int) -> list[dict[str, Any]]:
+    """Every surviving clip, in the order their position fields ask for.
+
+    A stable sort, so two clips left at the same position keep their relative
+    order — which for the untouched majority of a large edit is the original
+    order, not an arbitrary one.
+    """
+    rows = [_clip_row(form, str(i)) for i in range(existing_count)]
+    rows.append(_clip_row(form, "new"))
+    surviving = [r for r in rows if r is not None]
+    surviving.sort(key=lambda r: r["_position"])
+    for r in surviving:
+        r.pop("_position")
+    if not surviving:
+        raise ValidationError(
+            "an edit needs at least one clip; nothing was submitted or every"
+            " clip was removed",
+            parameter="clips",
+        )
+    return surviving
+
+
 def create_app(config: Config | None = None, *, store: CredentialStore | None = None) -> FastAPI:
     cfg = config or load_config()
     credential_store = store or CredentialStore()
@@ -387,25 +523,98 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
             )
             return response
 
+        # T-052. The v1 dashboard was a storage/rights panel that never
+        # mentioned a project — an approval surface with no way into the
+        # workspace. This leads with "what needs the human" instead: posts
+        # awaiting a decision, and recent renders (flagging any that did not
+        # do everything as asked, Constitution section 6). Storage, the rights
+        # ruleset, every asset and every account move to /settings, where they
+        # are a reference rather than the first thing on screen.
         ctx = context(request)
         try:
             status = invoke(ctx, "status", {})
             posts = invoke(ctx, "list-posts", {})
-            assets = invoke(ctx, "list-assets", {})
-            accounts = invoke(ctx, "list-accounts", {})
+            projects = invoke(ctx, "list-projects", {})
+            outputs = invoke(ctx, "renders", {})
         finally:
             ctx.conn.close()
+
+        pending_posts = [
+            p for p in posts["posts"] if p["status"] in ("queued", "approved", "publishing")
+        ]
         return TEMPLATES.TemplateResponse(
             request=request,
             name="index.html",
             context={
                 "status": status,
-                "posts": posts["posts"],
-                "assets": assets["assets"],
-                "accounts": accounts["accounts"],
-                "operations": sorted(_operations().values(), key=lambda o: o.name),
+                "pending_posts": pending_posts,
+                "projects": projects["projects"][:5],
+                "project_count": projects["count"],
+                "recent_renders": outputs["renders"][:6],
             },
         )
+
+    @app.get("/posts", response_class=HTMLResponse)
+    def posts_index(request: Request) -> Any:
+        status_filter = request.query_params.get("status") or None
+        ctx = context(request)
+        try:
+            listing = invoke(ctx, "list-posts", {"status": status_filter} if status_filter else {})
+        finally:
+            ctx.conn.close()
+        return TEMPLATES.TemplateResponse(
+            request=request,
+            name="posts.html",
+            context={"posts": listing["posts"], "status_filter": status_filter or ""},
+        )
+
+    @app.get("/publications", response_class=HTMLResponse)
+    def publications_index(request: Request) -> Any:
+        ctx = context(request)
+        try:
+            pubs = invoke(ctx, "publications", {})
+        finally:
+            ctx.conn.close()
+        return TEMPLATES.TemplateResponse(
+            request=request,
+            name="publications.html",
+            context={"publications": pubs["publications"]},
+        )
+
+    @app.get("/settings", response_class=HTMLResponse)
+    def settings_index(request: Request) -> Any:
+        ctx = context(request)
+        try:
+            status = invoke(ctx, "status", {})
+            accounts = invoke(ctx, "list-accounts", {})
+            capabilities = invoke(ctx, "media-capabilities", {})
+            scope = invoke(ctx, "backup-scope", {})
+        finally:
+            ctx.conn.close()
+        return TEMPLATES.TemplateResponse(
+            request=request,
+            name="settings.html",
+            context={
+                "status": status,
+                "accounts": accounts["accounts"],
+                "capabilities": capabilities,
+                "backup_scope": scope,
+                "principal": principal_of(request),
+            },
+        )
+
+    @app.post("/settings/accounts")
+    def settings_connect_account(request: Request, platform: str = Form(...),
+                                 handle: str = Form(...), secret: str = Form("")) -> Any:
+        try:
+            outcome = guarded(request, "connect-account", {
+                "platform": platform, "handle": handle, "secret": secret or None,
+            })
+            if isinstance(outcome, JSONResponse):
+                return outcome
+        except ProMediaError as exc:
+            return _error_page(request, exc)
+        return RedirectResponse(url="/settings", status_code=303)
 
     def _error_page(request: Request, exc: ProMediaError) -> Any:
         """A refusal as a page, with the status the class already dictates.
@@ -431,6 +640,15 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
     # No JavaScript, deliberately. DR-004 chose that so the APPROVAL path stays
     # dependable, and a project view plus an HTML5 <video> element needs none,
     # so that guarantee survives this change rather than being superseded.
+    #
+    # FINDING, fixed in passing (T-050/051/052): the three mutating routes below
+    # called invoke() directly instead of guarded(), so they carried none of
+    # T-025's cross-origin refusal. That matters more here than it looks: every
+    # operation these routes call is agent-authority (create-project, set-edl,
+    # render-project), so none of them needed the operator's SameSite=strict
+    # cookie to run at all — an evil page could have auto-submitted a form to
+    # overwrite a project's EDL with no authentication whatsoever. Routed
+    # through guarded() now, matching every /posts/{id} route.
 
     @app.get("/projects", response_class=HTMLResponse)
     def projects_index(request: Request) -> Any:
@@ -448,13 +666,12 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
 
     @app.post("/projects")
     def projects_create(request: Request, title: str = Form(...)) -> Any:
-        ctx = context(request)
         try:
-            created = invoke(ctx, "create-project", {"title": title})
+            created = guarded(request, "create-project", {"title": title})
+            if isinstance(created, JSONResponse):  # cross-origin refusal (T-025)
+                return created
         except ProMediaError as exc:
             return _error_page(request, exc)
-        finally:
-            ctx.conn.close()
         # Post/redirect/get: a refresh after creating must not create a second.
         return RedirectResponse(url=f"/projects/{created['project_id']}", status_code=303)
 
@@ -487,8 +704,34 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
     @app.post("/projects/{project_id}/edl")
     def project_set_edl(request: Request, project_id: str, edl: str = Form(...),
                         note: str = Form("")) -> Any:
+        try:
+            outcome = guarded(request, "set-edl", {"project_id": project_id, "edl": edl, "note": note})
+            if isinstance(outcome, JSONResponse):
+                return outcome
+        except ProMediaError as exc:
+            return _error_page(request, exc)
+        return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
+
+    @app.post("/projects/{project_id}/clips")
+    async def project_edit_clips(request: Request, project_id: str) -> Any:
+        """Structured clip editing (T-051) — the same set-edl call, a form instead
+        of a JSON textarea. Reads the current document first so aspect, text and
+        audio survive untouched; only ``clips`` is replaced, from the form.
+        """
+        denied = _reject_foreign_origin(request, cfg)
+        if denied is not None:
+            return denied
+        form_data = {k: v for k, v in (await request.form()).items()}
         ctx = context(request)
         try:
+            current = invoke(ctx, "project", {"project_id": project_id})
+        except ProMediaError as exc:
+            ctx.conn.close()
+            return _error_page(request, exc)
+        try:
+            edl = dict(current["edl"])
+            edl["clips"] = _clips_from_form(form_data, existing_count=len(current["edl"]["clips"]))
+            note = (form_data.get("note") or "edited clips via the clip editor").strip()
             invoke(ctx, "set-edl", {"project_id": project_id, "edl": edl, "note": note})
         except ProMediaError as exc:
             return _error_page(request, exc)
@@ -498,14 +741,13 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
 
     @app.post("/projects/{project_id}/render")
     def project_render(request: Request, project_id: str, quality: str = Form("")) -> Any:
-        ctx = context(request)
         try:
-            invoke(ctx, "render-project",
-                   {"project_id": project_id, "quality": quality or None})
+            outcome = guarded(request, "render-project",
+                              {"project_id": project_id, "quality": quality or None})
+            if isinstance(outcome, JSONResponse):
+                return outcome
         except ProMediaError as exc:
             return _error_page(request, exc)
-        finally:
-            ctx.conn.close()
         return RedirectResponse(url=f"/projects/{project_id}", status_code=303)
 
     @app.get("/renders/{render_id}/file")
@@ -535,6 +777,190 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
                 NotFound("this render's file is no longer on disk", render_id=render_id),
             )
         return FileResponse(path, media_type="video/mp4", filename=path.name)
+
+    # --- media library (T-050) -------------------------------------------------
+
+    @app.get("/media", response_class=HTMLResponse)
+    def media_index(request: Request) -> Any:
+        ctx = context(request)
+        try:
+            listing = invoke(ctx, "list-assets", {})
+            queue = invoke(ctx, "ingest-queue", {})
+            storage = invoke(ctx, "storage-status", {})
+        finally:
+            ctx.conn.close()
+
+        q = (request.query_params.get("q") or "").strip().lower()
+        verdict_filter = request.query_params.get("verdict") or ""
+        state_filter = request.query_params.get("state") or ""
+        assets = listing["assets"]
+        if q:
+            assets = [a for a in assets if q in (a["original_filename"] or "").lower()]
+        if verdict_filter:
+            if verdict_filter == "none":
+                assets = [a for a in assets if not a["latest_verdict"]]
+            else:
+                assets = [a for a in assets if a["latest_verdict"] == verdict_filter]
+        if state_filter:
+            assets = [a for a in assets if a["state"] == state_filter]
+
+        return TEMPLATES.TemplateResponse(
+            request=request,
+            name="media.html",
+            context={
+                "assets": assets,
+                "queued": queue["queued"],
+                "storage": storage,
+                "filters": {
+                    "q": request.query_params.get("q", ""),
+                    "verdict": verdict_filter,
+                    "state": state_filter,
+                },
+            },
+        )
+
+    @app.post("/media")
+    async def media_upload(
+        request: Request,
+        file: UploadFile = File(...),
+        authorship: str = Form(""),
+        third_party_material: str = Form(""),
+        source_url: str = Form(""),
+        licence_grantor: str = Form(""),
+        licence_scope: str = Form(""),
+        licence_evidence_ref: str = Form(""),
+        public_domain_source: str = Form(""),
+    ) -> Any:
+        denied = _reject_foreign_origin(request, cfg)
+        if denied is not None:
+            return denied
+
+        declaration = _declaration_from_form({
+            "authorship": authorship,
+            "third_party_material": third_party_material,
+            "source_url": source_url,
+            "licence_grantor": licence_grantor,
+            "licence_scope": licence_scope,
+            "licence_evidence_ref": licence_evidence_ref,
+            "public_domain_source": public_domain_source,
+        })
+
+        staged = _stage_upload(file)
+        ctx = context(request)
+        try:
+            result = invoke(
+                ctx, "ingest", {"source_path": str(staged), "declaration": declaration}
+            )
+        except ProMediaError as exc:
+            return _error_page(request, exc)
+        finally:
+            ctx.conn.close()
+            # ingest_file() copies the bytes into its own content-addressed
+            # store; the whole staging directory (not just the file — see
+            # _stage_upload) is disposable either way, success or refusal.
+            shutil.rmtree(staged.parent, ignore_errors=True)
+        return RedirectResponse(url=f"/media/{result['asset_id']}", status_code=303)
+
+    @app.get("/media/{asset_id}", response_class=HTMLResponse)
+    def media_detail(request: Request, asset_id: str) -> Any:
+        ctx = context(request)
+        try:
+            detail = invoke(ctx, "asset", {"asset_id": asset_id})
+            rights = invoke(ctx, "rights", {"asset_id": asset_id})
+        except ProMediaError as exc:
+            return _error_page(request, exc)
+        finally:
+            ctx.conn.close()
+        return TEMPLATES.TemplateResponse(
+            request=request,
+            name="asset.html",
+            context={"a": detail, "rights": rights, "principal": principal_of(request)},
+        )
+
+    @app.get("/media/{asset_id}/file")
+    def media_file(request: Request, asset_id: str) -> Any:
+        """Serve a source asset's bytes for playback (T-055's source monitor).
+
+        Same shape as ``render_file`` above, for the same reason: the path
+        comes from the database via the ``asset`` operation, never from the
+        URL, so this cannot become a directory-traversal route on a surface
+        that also holds publish authority. Refuses (rather than 404s) when
+        the media is not 'stored' — MediaUnavailable is the honest signal
+        that the record exists but the bytes do not (T-029).
+        """
+        from fastapi.responses import FileResponse
+
+        from ..errors import MediaUnavailable
+
+        ctx = context(request)
+        try:
+            detail = invoke(ctx, "asset", {"asset_id": asset_id})
+        except ProMediaError as exc:
+            return _error_page(request, exc)
+        finally:
+            ctx.conn.close()
+        asset = detail["asset"]
+        if asset["state"] != "stored":
+            return _error_page(
+                request,
+                MediaUnavailable(
+                    f"this asset's media is '{asset['state']}', not stored", asset_id=asset_id
+                ),
+            )
+        path = Path(asset["object_path"])
+        if not path.is_file():
+            return _error_page(request, NotFound("the file is not on disk", asset_id=asset_id))
+        return FileResponse(path, filename=asset["original_filename"])
+
+    @app.post("/media/{asset_id}/determine-rights")
+    def media_determine_rights(request: Request, asset_id: str) -> Any:
+        try:
+            outcome = guarded(request, "determine-rights", {"asset_id": asset_id})
+            if isinstance(outcome, JSONResponse):
+                return outcome
+        except ProMediaError as exc:
+            return _error_page(request, exc)
+        return RedirectResponse(url=f"/media/{asset_id}", status_code=303)
+
+    @app.post("/media/{asset_id}/attest")
+    def media_attest(request: Request, asset_id: str) -> Any:
+        try:
+            outcome = guarded(request, "attest-declaration", {"asset_id": asset_id})
+            if isinstance(outcome, JSONResponse):
+                return outcome
+        except ProMediaError as exc:
+            return _error_page(request, exc)
+        return RedirectResponse(url=f"/media/{asset_id}", status_code=303)
+
+    @app.post("/media/{asset_id}/seal")
+    def media_seal(request: Request, asset_id: str) -> Any:
+        try:
+            outcome = guarded(request, "seal-provenance", {"asset_id": asset_id})
+            if isinstance(outcome, JSONResponse):
+                return outcome
+        except ProMediaError as exc:
+            return _error_page(request, exc)
+        return RedirectResponse(url=f"/media/{asset_id}", status_code=303)
+
+    @app.post("/media/{asset_id}/evidence")
+    def media_add_evidence(request: Request, asset_id: str, kind: str = Form(...),
+                           body: str = Form(...)) -> Any:
+        # produced_by is derived from the caller's own authenticated principal,
+        # never taken from the form — the same reasoning ops/rights.py applies:
+        # a self-declared produced_by would let a browser posing as an agent
+        # write evidence attributed to 'operator', which guards a permitting
+        # rule (F-5).
+        principal = principal_of(request)
+        try:
+            outcome = guarded(request, "add-evidence", {
+                "asset_id": asset_id, "kind": kind, "body": body,
+                "produced_by": principal.kind,
+            })
+            if isinstance(outcome, JSONResponse):
+                return outcome
+        except ProMediaError as exc:
+            return _error_page(request, exc)
+        return RedirectResponse(url=f"/media/{asset_id}", status_code=303)
 
     @app.get("/posts/{post_id}", response_class=HTMLResponse)
     def post_detail(request: Request, post_id: str) -> Any:
@@ -831,6 +1257,58 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
         except ProMediaError as exc:
             return JSONResponse(exc.to_dict(), status_code=status_for(exc))
         return JSONResponse(result)
+
+    # --- Pro Media v2 rich client (T-053, DR-017) ------------------------------
+    #
+    # A static bundle, mounted alongside the pages above rather than replacing
+    # them: DR-017 extends DR-004 rather than superseding it, so the Jinja2
+    # pages stay the no-JS fallback. This block adds NO business logic and NO
+    # new capability — the built app calls only /api/op/* and /api/ops, which
+    # already exist above. Auth is the SAME operator-token cookie: it is set
+    # with path="/" by "/", so it is already valid here without a second
+    # bootstrap — the one below exists only for the convenience of a link
+    # straight into /studio?token=... .
+    frontend_dist = Path(__file__).parent / "frontend" / "dist"
+    frontend_index = frontend_dist / "index.html"
+
+    if frontend_index.is_file():
+        from fastapi.staticfiles import StaticFiles
+
+        app.mount("/studio/assets", StaticFiles(directory=str(frontend_dist / "assets")), name="studio-assets")
+
+        @app.get("/studio")
+        @app.get("/studio/{_path:path}")
+        def studio(request: Request, _path: str = "") -> Any:
+            from fastapi.responses import FileResponse
+
+            supplied = request.query_params.get(AUTH_QUERY_PARAM)
+            if supplied:
+                response = RedirectResponse(url="/studio", status_code=303)
+                response.set_cookie(
+                    COOKIE_NAME, supplied, httponly=True, samesite="strict", path="/"
+                )
+                return response
+            # Every path under /studio serves the same shell; vue-router
+            # resolves the route client-side. Static assets are served by the
+            # mount above, which FastAPI matches BEFORE this catch-all.
+            return FileResponse(frontend_index)
+
+    else:
+
+        @app.get("/studio")
+        @app.get("/studio/{_path:path}")
+        def studio_not_built(_path: str = "") -> Any:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": "NOT_BUILT",
+                    "message": (
+                        "the rich client has not been built yet — run "
+                        "'npm install && npm run build' in promedia/web/frontend"
+                    ),
+                },
+                status_code=503,
+            )
 
     return app
 

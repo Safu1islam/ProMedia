@@ -271,6 +271,60 @@ tree:
               title: Dashboard rework, posts, publications, settings
               task: T-052
 
+    - id: S-V2-CLIENT
+      type: section
+      title: "Pro Media v2 — rich client"
+      note: >
+        Planned 2026-08-14. DR-017 and project.md section 4's amendment: the
+        operator supplied a design mockup and chose a full rebuild over
+        restyling the existing Jinja2 pages. Sits ALONGSIDE F-MEDIA-UI, not
+        on top of it — the server-rendered pages from N-049..N-052 are kept as
+        the no-JS fallback (DR-004's reasoning extended, not discarded). Every
+        screen here is a projection of the same operation registry (F-1); no
+        new backend surface. F-9 reconfirmed unchanged: "team"/"presence" in
+        the mockup is AI agents, not a second human.
+      children:
+        - id: N-053
+          agent: frontend-agent
+          type: task
+          title: Frontend scaffold, design tokens, navigation shell
+          task: T-053
+        - id: N-054
+          agent: frontend-agent
+          type: task
+          title: Dashboard and Projects screens
+          task: T-054
+        - id: N-055
+          agent: frontend-agent
+          type: task
+          title: "Editor room (Edit): real preview, timeline, EDL editing"
+          task: T-055
+        - id: N-056
+          agent: frontend-agent
+          type: task
+          title: "Agent workspace: run status and a real version diff"
+          task: T-056
+        - id: N-057
+          agent: frontend-agent
+          type: task
+          title: Media library and asset detail
+          task: T-057
+        - id: N-058
+          agent: frontend-agent
+          type: task
+          title: "Approvals & decision queue, post detail (authority-critical)"
+          task: T-058
+        - id: N-059
+          agent: frontend-agent
+          type: task
+          title: Social integration, with honest gaps
+          task: T-059
+        - id: N-060
+          agent: architect
+          type: task
+          title: "DEFERRED — Color/Audio rooms, brand kits, calendar, model marketplace"
+          task: T-060
+
     - id: S-DURABILITY
       type: section
       title: Durability and recovery

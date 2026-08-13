@@ -1,9 +1,121 @@
 # .ai/state/locks.yaml — entity/path ownership.
 # Schema: aef/schemas/lock.schema.yaml
 
-locks: []
+locks:
+  - path: "promedia/core/publishers/x.py, promedia/core/publishers/linkedin.py, promedia/core/publishers/__init__.py, promedia/core/publishers/stub.py, promedia/core/publishers/base.py, promedia/errors.py, promedia/config.py, promedia.toml, tests/test_publishers.py, docs/HUMAN-ACTIONS.md"
+    task_id: "T-019"
+    agent: "claude-code-session-linkedin1"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-13T20:50:00+04:00"
+    expires_at: "2026-08-14T02:50:00+04:00"
+    note: >
+      Operator instruction: "do all necessary things for T-019." T-019 was
+      blocked NEEDS_HUMAN (no platform credentials; O-3 forbids writing API
+      pricing/rate limits from memory). What is actually blocked is narrower
+      than the whole task: the operator must still create the X and LinkedIn
+      developer apps and grant OAuth authorization themselves (NON-NEGOTIABLES
+      — creating accounts and accepting platform terms are not agent actions),
+      so AC-1 (a real publish confirmed live) stays NOT_RUN. Everything else —
+      verifying X/LinkedIn API terms against LIVE documentation (O-3) and
+      implementing the adapters behind DR-010's frozen Publisher interface so
+      they are ready the moment credentials arrive — does not need credentials
+      and is done in this session.
 
+      __init__.py, stub.py and errors.py are added to the claim, not in
+      T-019's original owned_paths (x.py, linkedin.py only): for_platform()
+      must actually route to the new adapters or they are unreachable from
+      either surface (F-1), capabilities_for_real_platform() must stop
+      returning blank UNKNOWN now that verified numbers exist for some fields
+      (T-012 AC-3's discipline — unknown stays unknown, but known no longer
+      pretends to be unknown), and a real platform HTTP failure needs a
+      ProMediaError subclass or it reaches a caller as an unstructured
+      exception (T-003 AC-4's discipline, protocol 05 error handling).
+      promedia.toml/config.py are touched for two new [publishing] keys
+      (request_timeout_seconds, linkedin_api_version) — protocol 05 forbids
+      hardcoding either, and LinkedIn's version header is a value LinkedIn
+      itself revises on a schedule the operator should be able to bump without
+      a code change.
+
+      No external dependency added — both adapters use stdlib urllib rather
+      than requests/httpx, matching pyproject.toml's stated policy ("every
+      dependency is already present... supply_chain_security counts additions
+      against a solo maintainer").
+
+      base.py ADDED TO THE CLAIM MID-TASK, for a real defect the frozen
+      interface only exposed once a live adapter tried to implement it:
+      Publisher.verify_published(self, platform_post_id) takes no credential,
+      but confirming a post is live on a real platform needs an authenticated
+      read. Grep confirms nothing in promedia/ calls verify_published today —
+      the retention-deletion caller DR-010 wrote it for does not exist yet —
+      so this is the last moment to fix the signature for free instead of
+      carrying a broken one forward. Adds a required keyword-only
+      credential_ref to the protocol and to both StubPublisher and the two new
+      adapters; StubPublisher accepts and ignores it, still always returning
+      False, per its own contract.
 history:
+  - path: "promedia/web/**, promedia/core/ops/assets.py, promedia/core/projects.py, promedia/core/ops/projects.py, package.json, .ai/state/fabrications.yaml, tests/test_media_ui.py, tests/test_editor_ui.py, tests/test_frontend_api.py"
+    task_id: "T-050, T-051, T-052, T-053, T-054, T-055, T-057, T-058"
+    agent: "claude-code-session-ui2"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-13T21:00:00+04:00"
+    released_at: "2026-08-14T01:45:00+04:00"
+    note: >
+      RELEASED. T-050/051/052 (Jinja2 workspace) and T-053/054/055/057/058
+      (Pro Media v2 rich client at /studio, DR-017) all complete with
+      evidence in tasks.yaml. T-056 (agent diff workspace), T-059 (social
+      integration polish) and T-060 (deferred rooms) are NOT done — left
+      `ready`/`blocked` for a future claim rather than held open.
+
+      DISCLOSED, not quietly left out of this note: interactive browser
+      verification in this session ran against the OPERATOR'S REAL DEFAULT
+      DATABASE (C:\Users\<operator>\AppData\Local\ProMedia\promedia.db), not
+      an isolated test fixture — a process mistake, named as one. It:
+        - added a 4th (duplicate) clip to the real 'Launch teaser' project,
+          producing a real v3 authored 'operator/ui'
+        - attested the rights declaration and sealed provenance on the
+          operator's real screen-recording asset (as_739b4678bbf94716) —
+          the underlying claim (operator_original) was already true, but
+          the ATTESTATION was not something the operator asked for
+        - created a throwaway 'x' test account (demo_account, no real
+          credential) and two test posts (one rejected, one approved but
+          correctly refused at publish for having no connected account)
+      Disclosed to the operator directly at session end. Operator chose
+      full cleanup. DONE: project restored to v4, content identical to v2
+      (append-only, so v3 stays visible in history as what it was — a
+      reverted test edit — rather than erased); the two test posts and the
+      test account deleted (verified: 0 posts, 0 accounts remaining). The
+      rights attestation and sealed provenance on the real asset were left
+      in place per the operator's own choice — the underlying claim was
+      true, and F-8 provenance is not designed to be un-sealed.
+      Continuing the frontend brief (.ai/design/frontend-brief.md) where T-049
+      left off: the three child tasks it split out, taken together in one
+      session rather than three, because they touch the same templates and the
+      same nav in sequence (media in -> edit -> review).
+
+      CLAIM EXTENDED 2026-08-14 to cover T-053..T-059 (Pro Media v2 rich
+      client, DR-017): the operator supplied a design mockup and chose a full
+      rebuild over restyling. promedia/web/frontend/** (new), package.json and
+      tests/test_frontend_api.py are new paths, already covered or added by
+      this extension. promedia/core/projects.py and ops/projects.py are added
+      for T-056's read-only version-diff helper ONLY, no other change.
+      .ai/state/fabrications.yaml is added for T-059, which must register any
+      'not available' placeholder it introduces rather than silently rendering
+      one. TTL extended given the much larger scope; the old server-rendered
+      pages under promedia/web/templates/** are being KEPT, not replaced, so
+      this claim is additive to what T-050/051/052 already built rather than
+      supplanting it.
+      promedia/core/ops/assets.py added to the claim, not in T-050's original
+      owned_paths: the asset detail screen needs provenance state alongside
+      the declaration/evidence/verdicts the 'asset' operation already returns,
+      and the brief's rule 2 is explicit that a screen needing something no
+      operation provides gets a new field on the operation, not a query in the
+      route. No new operation is registered by this session — parity's case
+      count should be unchanged.
+      promedia/core/acquire.py (T-046, url import) and promedia/core/media/**
+      (T-041, thumbnail extraction would live there) are deliberately NOT
+      claimed or touched — url import and thumbnails are named in the brief
+      but owned by other tasks, and are left as open items.
+
   - path: "promedia/web/app.py, promedia/web/templates/**, tests/test_editor_ui.py, .claude/launch.json"
     task_id: "T-049"
     agent: "claude-code-session-ui"

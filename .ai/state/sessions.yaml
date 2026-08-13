@@ -121,3 +121,93 @@ sessions:
       references:
         - "R-004"
         - "F-003"
+  - id: "claude-code-session-ui2"
+    agent: "frontend-agent"
+    vendor: "anthropic"
+    model: "claude-sonnet-5"
+    main_engineer: false
+    status: "ended"
+    task: "T-053"
+    activity: >
+      T-050/T-051/T-052 (media library, clip editor, dashboard rework)
+      landed with passing tests. Operator then supplied a design mockup
+      (Pro Media v2.dc.html) and, after being shown the conflict with
+      DR-004 and project.md section 4, chose a full rebuild: DR-017 (Vue 3
+      + Vite rich client over the existing /api/op/* JSON surface) and a
+      recorded amendment to project.md section 4 (F-9 reconfirmed
+      unchanged). Built and shipped T-053/054/055/057/058.
+    started_at: "2026-08-13T20:37:00+04:00"
+    heartbeat_at: "2026-08-14T01:45:00+04:00"
+    handoff:
+      ended_at: "2026-08-14T01:45:00+04:00"
+      outcome: "completed"
+      changed: >
+        Pro Media v2 rich client scaffolded and shipped at /studio: Vue 3 +
+        Vite + TypeScript, served as a static bundle from the existing
+        FastAPI app, calling only /api/op/* (no new backend surface except
+        one file-serving route, GET /media/{asset_id}/file, same shape and
+        security reasoning as the pre-existing render_file route). Dashboard,
+        Projects (list+board), Editor room (real preview/timeline/clip
+        editing), Media library, Asset detail, Approvals decision queue and
+        Post review/approve/publish all built and verified against a REAL
+        running server. Honest placeholders (naming the task that will
+        replace them, no fabricated data) for Agent workspace, Import,
+        Templates, Brand kits, Capabilities, Export, Calendar, Settings.
+        DR-017 recorded; project.md section 4 amended with the operator's
+        in-conversation approval as the NON-NEGOTIABLES.md explicit-approval
+        bar. Old Jinja2 pages (T-049/050/051/052) kept unchanged as the
+        no-JS fallback per DR-004's extended reasoning.
+        Also fixed, found only by executing the app rather than reading the
+        code: (1) 4 pre-existing bugs in tests/test_editor_ui.py and
+        promedia/web/templates/project.html left over from the T-050/051/052
+        session before the design-mockup pivot (a _clip_form test-helper
+        TypeError, a Jinja2 nested-for-loop scoping bug that silently broke
+        the transition-substitution warning, a fake-media-bytes render test);
+        (2) a CSS Grid 'blowout' in the new Dashboard (documented in
+        tasks.yaml T-054's findings); (3) 5 clickable-<tr>-without-keyboard-
+        support accessibility gaps across the new views, fixed with
+        tabindex/role=button/keydown handlers.
+      remaining: >
+        T-056 (agent workspace real diff — honest placeholder only), T-059
+        (social integration composer/insights — accounts/queue/publications
+        are real, composer/insights honestly say not-available), T-060
+        (deferred: color/audio rooms, brand kits, calendar, model
+        marketplace — each needs its own planning pass before a task is
+        written, none has a backing operation today).
+      risks: >
+        DISCLOSED IN FULL TO THE OPERATOR: interactive verification in this
+        session ran against the operator's REAL DEFAULT DATABASE, not an
+        isolated fixture — process mistake, not deliberate. Consequences and
+        their resolution, per the operator's explicit choice ("clean it
+        up"): the test clip was reverted (project now v4, content identical
+        to v2 — v3 stays visible in the append-only history as a reverted
+        test edit, not erased); the throwaway test account and its two test
+        posts were deleted (verified: 0 posts, 0 accounts). LEFT IN PLACE,
+        per the operator's own choice: the rights attestation and sealed
+        provenance on the real screen-recording asset — the underlying
+        claim was true, and F-8 provenance is not designed to be un-sealed.
+        Also: no automated component-level tests exist for the new Vue code
+        (no Vitest harness) — correctness evidence is TypeScript's compiler
+        plus the interactive session, not a repeatable suite. tests/
+        test_publishers.py has 3 failures, confirmed pre-existing and owned
+        by the concurrent T-019 session (claude-code-session-linkedin1) —
+        not caused by, or fixed by, this session.
+      next: >
+        Operator decides what to do with the test artefacts in the real
+        database. Then: independent review of T-053..T-058 (Constitution
+        section 7 — none of it has been reviewed by anyone but the
+        implementing session), a Vitest harness if component-level testing
+        of the new code is wanted, then T-056/T-059 to close out this phase.
+      evidence:
+        - "npm run build: vue-tsc -b clean, vite build succeeded"
+        - "python -m pytest: 610 passed (excludes test_publishers.py, owned by a concurrent session)"
+        - "python -m pytest tests/test_frontend_api.py tests/test_editor_ui.py tests/test_media_ui.py tests/test_parity.py: 144 passed"
+        - "python aef/tools/aef.py validate: plan OK, 56 leaves, 56 tasks, all accounted for"
+        - "Real interactive browser session: add-clip -> save -> new version v3; reject a post; approve+publish-attempt a post (correctly refused, account not connected)"
+      references:
+        - "DR-017"
+        - "T-053"
+        - "T-054"
+        - "T-055"
+        - "T-057"
+        - "T-058"

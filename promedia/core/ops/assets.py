@@ -6,6 +6,7 @@ spends nothing. What an agent cannot do is make the result publishable.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from .. import ingest as ingest_layer
@@ -66,11 +67,12 @@ def list_assets(ctx: Context) -> dict[str, Any]:
 
 @register(
     "asset",
-    "Inspect one asset: declaration, evidence, verdict history.",
+    "Inspect one asset: declaration, evidence, verdict history, provenance state.",
     params=(Param("asset_id", "str"),),
 )
 def asset(ctx: Context, asset_id: str) -> dict[str, Any]:
     from ...errors import NotFound
+    from .. import provenance as provenance_layer
 
     row = ctx.conn.execute("SELECT * FROM assets WHERE id = ?", (asset_id,)).fetchone()
     if row is None:
@@ -85,10 +87,28 @@ def asset(ctx: Context, asset_id: str) -> dict[str, Any]:
     verdicts = ctx.conn.execute(
         "SELECT * FROM rights_verdicts WHERE asset_id = ? ORDER BY decided_at DESC", (asset_id,)
     ).fetchall()
+    # Added for T-050's asset detail screen, which the brief (section 2, rule 2)
+    # requires to show provenance state — sealed or not — alongside the
+    # declaration and evidence this operation already returned. Summary only
+    # (id, sealed_at): the full payload duplicates what evidence/verdicts above
+    # already carry, and 'provenance' (by id) already exists for a caller that
+    # wants the sealed record itself, including its integrity verification.
+    sealed = provenance_layer.latest_for_asset(ctx.conn, asset_id)
+    decl_out = dict(declaration) if declaration else None
+    if decl_out is not None:
+        # Stored as a JSON string (ingest.py); parsed here rather than in a
+        # template filter, matching how renders() already parses substitutions
+        # for its caller instead of handing back an opaque string.
+        decl_out["third_party_material"] = json.loads(decl_out["third_party_material"])
     return {
         "ok": True,
         "asset": dict(row),
-        "declaration": dict(declaration) if declaration else None,
+        "declaration": decl_out,
         "evidence": [dict(e) for e in evidence],
         "verdicts": [dict(v) for v in verdicts],
+        "provenance": (
+            {"provenance_id": sealed["id"], "sealed_at": sealed["sealed_at"]}
+            if sealed
+            else None
+        ),
     }

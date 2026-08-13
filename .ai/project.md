@@ -68,8 +68,22 @@ Confirmed 2026-08-08. Do not build, and do not propose:
 - Paid advertising and ad-account management
 - DM inbox, comment moderation, community management
 - Multi-tenant SaaS, billing, other people's accounts
-- A general-purpose non-linear video editor — the system *orchestrates* editing
-  operations, it is not Premiere
+- ~~A general-purpose non-linear video editor — the system *orchestrates* editing
+  operations, it is not Premiere~~ **AMENDED 2026-08-14.** The operator supplied
+  a design mockup (`Pro Media v2.dc.html`) specifying a full multi-room
+  production UI — Edit/Color/Audio/Captions rooms, a real preview and timeline,
+  an agent diff-review workspace — and, shown that this line forbade it,
+  explicitly chose the full-rebuild option over two narrower alternatives. That
+  is the NON-NEGOTIABLES.md "explicit human approval, in the conversation, for
+  that specific action" bar for changing this file. See **DR-017** for the
+  client technology decision this authorises. Two things this amendment does
+  **not** do: it does not invent capability this hardware cannot honestly
+  provide (no discrete GPU — real-time full-resolution 4K scrubbing is
+  substituted with proxy-based preview, DR-017's disclosed tradeoff, not a
+  silent downgrade); and every capability the rich UI exposes is still a
+  registered operation acting on the same EDL (F-1, DR-002, DR-016) — this is
+  a richer *view* onto orchestrated edits, not a frame-accurate compositor
+  with its own storage format or render engine.
 - Analytics beyond what informs the operator's own scheduling decisions
 - Publishing a previously published asset to a *new* platform after retention has
   deleted it (see C-13 — this is foreclosed by the storage ceiling, not an oversight)
@@ -302,6 +316,15 @@ intake.
 | **F-7** | **100 GB media ceiling is hard.** Retention is a first-class feature: track usage, enforce policy, and **queue or refuse ingest that would breach the ceiling** rather than silently filling the disk |
 | **F-8** | **Provenance outlives media.** A rights or provenance record must remain valid and readable after the asset it describes is deleted. It must key on content hash and embedded metadata, **never on a file path**, and evidence must be embedded rather than linked |
 | **F-9** | **Single operator, permanently.** No multi-tenancy, no second human, no team model |
+
+**F-9 explicitly reconfirmed, not reopened, 2026-08-14.** The `Pro Media v2`
+mockup (see section 4's amendment, DR-017) shows "presence" avatars, named
+comments, and a "Team & permissions" screen. Asked directly, the operator
+confirmed these represent **AI agents** (Claude Code, Codex, up to the
+existing C-18 limit of 4 concurrent), not additional human users. F-9 is
+therefore unchanged and this UI introduces no new auth or multi-tenant data
+model — it is a richer way of showing agent identity and authority (already
+`principal.kind` in `promedia/core/principal.py`), not a second human.
 
 ### Retention policy (derived from F-7, F-8)
 
