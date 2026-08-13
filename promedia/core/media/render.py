@@ -34,6 +34,31 @@ EFFECT_FILTERS: dict[str, str] = {
     "saturate": "eq=saturation=1.5",
 }
 
+# Which advertised transitions this compiler ACTUALLY renders, and what each
+# one really produces. The single source of truth for fabrication F-003.
+#
+# It lives here, next to the code that emits the filters, so that implementing a
+# transition and reporting it as implemented are the same edit. The first
+# version of F-003 named `dissolve` alone and missed four more — the reporting
+# was a hand-written list in another module, and it drifted from this one
+# immediately. An independent audit found it by executing _clip_chain over all
+# seven values rather than reading either list.
+TRANSITION_REALITY: dict[str, str | None] = {
+    "cut": None,                      # the absence of a transition; correct
+    "fade": None,                     # fade from black; correct
+    "dissolve": "fade from black",    # WRONG: a real dissolve blends two clips
+    "wipeleft": "hard cut",           # not implemented at all
+    "wiperight": "hard cut",
+    "slideup": "hard cut",
+    "slidedown": "hard cut",
+}
+
+
+def transition_substitution(transition: str) -> str | None:
+    """What this transition really renders as, or None if it is honest."""
+    return TRANSITION_REALITY.get(transition)
+
+
 # Where named positions land, as ffmpeg x/y expressions. Expressions rather
 # than numbers so they hold at any output resolution (see TextOverlay).
 TEXT_POSITIONS: dict[str, str] = {

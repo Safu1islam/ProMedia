@@ -96,11 +96,31 @@ fabrications:
     kind: silent_substitution
     location: promedia/core/media/render.py — _clip_chain
     what_is_fake: >
-      The EDL vocabulary offers 'dissolve' as a transition, and it does not
-      render one. Both 'fade' and 'dissolve' compile to the same thing: a fade
-      from BLACK at the head of the clip. A true cross-dissolve blends the tail
-      of the outgoing clip into the head of the incoming one, which looks
-      materially different and is what the word means to anyone who edits video.
+      The EDL advertises SEVEN transitions and the renderer implements THREE.
+      `edl.py` validates `transition_in` against TRANSITIONS and REJECTS
+      anything outside it, so the vocabulary is an active promise about what is
+      supported — not an open string field a caller might be expected to check.
+
+      Measured against _clip_chain, transition by transition:
+
+        cut         -> no filter. CORRECT; a cut is the absence of a transition.
+        fade        -> fade from black. CORRECT.
+        dissolve    -> fade from black. WRONG TRANSITION. A true cross-dissolve
+                       blends the tail of the outgoing clip into the head of the
+                       incoming one, which looks materially different and is what
+                       the word means to anyone who edits video.
+        wipeleft    -> NO FILTER AT ALL. Renders as a hard cut, silently.
+        wiperight   -> NO FILTER AT ALL. Renders as a hard cut, silently.
+        slideup     -> NO FILTER AT ALL. Renders as a hard cut, silently.
+        slidedown   -> NO FILTER AT ALL. Renders as a hard cut, silently.
+
+      SCOPE CORRECTED 2026-08-13 by independent audit (session audit-0813).
+      This entry originally named `dissolve` alone. The four wipe and slide
+      values are the same defect and arguably worse: dissolve at least produces
+      a visible effect, while a wipe produces nothing whatsoever and the render
+      still reports success. Verified by execution against _clip_chain, not by
+      reading — each of the seven was constructed and its emitted filter chain
+      inspected.
     why: >
       The graph concatenates clips, and concat carries no absolute timeline
       offsets. ffmpeg's xfade filter needs them, so a real cross-dissolve

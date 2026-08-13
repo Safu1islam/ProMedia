@@ -61,6 +61,11 @@ LOCKING_OPERATIONS = {
     "approve-post",
     "publish-post",
     "release-publish-claim",
+    # T-042. render-project matters most of any of these: it reads the edit and
+    # then runs for minutes, so without the lock an edit changed mid-render
+    # produces an output attributed to a version it did not come from.
+    "set-edl",
+    "render-project",
 }
 
 # Mutating operations that CREATE their entity. There is no id to lock because
@@ -71,7 +76,7 @@ LOCKING_OPERATIONS = {
 # T-023 a reconnect preserves the account id, so it writes an EXISTING row. It
 # now locks on its natural key instead — see NATURAL_KEY_OPERATIONS and
 # tests/test_account_locking.py.
-CREATING_OPERATIONS = {"ingest", "queue-post"}
+CREATING_OPERATIONS = {"ingest", "queue-post", "create-project"}
 
 # Mutating operations that write an entity that may already exist but were not
 # handed its id. They lock on a declared natural key (Operation.lock_by).

@@ -195,7 +195,53 @@ CREATE TABLE IF NOT EXISTS audit_log (
     detail      TEXT
 );
 
+-- Media production (T-042). A project is a named edit; its EDL is the document
+-- both the agent and the operator change, and every change is a NEW ROW rather
+-- than an update, so history is a consequence of the shape and not a feature
+-- somebody has to remember to maintain.
+CREATE TABLE IF NOT EXISTS projects (
+    id           TEXT PRIMARY KEY,
+    title        TEXT NOT NULL,
+    status       TEXT NOT NULL CHECK (status IN ('draft', 'archived')),
+    created_by   TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+
+-- Immutable. There is deliberately no UPDATE path: an edit appends a version,
+-- so an earlier one is always readable and two actors can see what changed.
+CREATE TABLE IF NOT EXISTS project_edl_versions (
+    project_id   TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+    version      INTEGER NOT NULL,
+    edl_json     TEXT NOT NULL,
+    note         TEXT,
+    authored_by  TEXT NOT NULL,
+    authored_kind TEXT NOT NULL,   -- 'operator' | 'agent': who shaped this edit
+    authored_at  TEXT NOT NULL,
+    PRIMARY KEY (project_id, version)
+);
+
+-- What was actually produced, from WHICH version. Without the version a render
+-- cannot be traced back to the edit that made it, which is the first question
+-- anyone asks about an output they do not recognise.
+CREATE TABLE IF NOT EXISTS renders (
+    id            TEXT PRIMARY KEY,
+    project_id    TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+    edl_version   INTEGER NOT NULL,
+    output_path   TEXT NOT NULL,
+    quality       TEXT NOT NULL,
+    width         INTEGER,
+    height        INTEGER,
+    duration_seconds REAL,
+    byte_size     INTEGER NOT NULL,
+    substitutions TEXT,             -- JSON: what the render did NOT do as asked
+    rendered_by   TEXT NOT NULL,
+    rendered_at   TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_assets_hash        ON assets (content_hash);
+CREATE INDEX IF NOT EXISTS idx_edl_project        ON project_edl_versions (project_id, version DESC);
+CREATE INDEX IF NOT EXISTS idx_renders_project    ON renders (project_id, rendered_at DESC);
 CREATE INDEX IF NOT EXISTS idx_verdicts_asset     ON rights_verdicts (asset_id, decided_at DESC);
 CREATE INDEX IF NOT EXISTS idx_evidence_asset     ON evidence (asset_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_state       ON storage_ledger (state);

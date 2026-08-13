@@ -930,7 +930,8 @@ tasks:
     mode: critical
     owner_role: implementer
     assigned_model_tier: frontier
-    status: ready
+    status: complete
+    claimed_by: "claude-code-session-next3b"
     depends_on: [T-041]
     blocks: [T-043, T-044, T-046, T-049]
     owned_paths:
@@ -939,29 +940,162 @@ tasks:
       - promedia/core/ops/__init__.py
       - promedia/core/schema.sql
       - promedia/config.py
+      - promedia/core/media/render.py
+      - promedia/core/backup.py
       - tests/test_projects.py
+      - tests/test_locking.py
+      - tests/test_ops_forms.py
+    owned_paths_note: >
+      Four paths added mid-task, each because an existing guard fired rather
+      than because scope grew. media/render.py: one source of truth for which
+      transitions are real (see AC-4). backup.py: T-036's classify_tables()
+      refused the three new tables. test_locking.py and test_ops_forms.py: the
+      locking-set pin and the probe-value pin.
     acceptance_criteria:
       - id: AC-1
         statement: "A project holds a versioned EDL; every edit creates a new version and the previous one remains readable."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          Append-only by construction — project_edl_versions has no UPDATE path
+          and a composite (project_id, version) primary key.
+          test_editing_appends_a_version_and_the_previous_one_survives edits
+          twice and reads version 2 back unchanged after version 3 exists.
+          test_the_history_records_who_shaped_each_edit asserts authored_kind is
+          'operator' or 'agent' per version, which is what an operator needs
+          before approving what came out of an edit they did not make.
+          test_an_invalid_edit_is_refused_and_not_stored — validation happens
+          BEFORE the insert, because a stored version is one someone may later
+          restore.
       - id: AC-2
         statement: "Create, edit, render and inspect are registered operations, and the parity gate covers them on both surfaces."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          Eight operations registered (create-project, set-edl, project,
+          list-projects, project-versions, render-project, renders,
+          media-capabilities). Registry 35 -> 43. tests/test_parity.py rose from
+          72 to 90 cases with NO edit to the parity gate — it picked them up
+          automatically, which is the S4 machinery working: before this task the
+          engine was on ZERO surfaces, the mirror image of the defect that gate
+          exists to catch.
       - id: AC-3
         statement: "Rendering takes a C-19 lock on the project, so an agent and the operator cannot render conflicting edits of the same project concurrently."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          test_a_second_agent_cannot_render_the_same_project_concurrently has
+          agent-beta attempt a render from inside agent-alpha's, on a second
+          connection, and asserts ENTITY_LOCKED naming the owner and entity_type
+          'project'. Locking is derived from the registry convention rather than
+          written per operation, and
+          test_project_mutations_declare_their_entity_so_they_lock pins that.
+          This matters more for render than for any other operation in the
+          system: it reads the edit and then runs for minutes, so without the
+          lock an edit changed mid-render yields an output attributed to a
+          version it did not come from.
       - id: AC-4
         statement: "A render result reports any substitution it made, including the F-003 dissolve-to-fade case, rather than reporting plain success."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          Reported on the render, persisted on the render row, and surfaced by
+          media-capabilities before anyone renders at all. The field is present
+          even when empty, because a caller that has to ask whether a key exists
+          will stop asking.
+          SCOPE OF THIS CRITERION GREW DURING THE TASK, and the growth is the
+          point — see findings.
       - id: AC-5
         statement: "Render timeouts and quality defaults come from configuration, not literals (protocol 05)."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          New [media] config section: render_timeout_seconds, default_quality,
+          font_path. test_render_settings_come_from_configuration moves the
+          configured default and asserts the render follows it, then asserts an
+          explicit argument still wins. An operator on this hardware will want
+          to trade quality against time, and a literal is one they cannot change.
+    verification:
+      - command: "python -m pytest -p no:cacheprovider tests/test_projects.py"
+        status: PASSED
+        observed: "26 passed"
+      - command: "python -m pytest -p no:cacheprovider"
+        status: PASSED
+        observed: "561 passed (508 before this task)"
+      - command: "python -m pytest -p no:cacheprovider tests/test_parity.py"
+        status: PASSED
+        observed: "90 passed, up from 72 — 8 new operations x 2 probes, gate unedited"
+      - command: "python -m pytest -p no:cacheprovider tests/test_projects.py, with _substitutions returning [] unconditionally"
+        status: FAILED
+        observed: >
+          Sabotage of the reporting AC-4 exists for. 6 failures: the
+          dissolve-specific test plus all five parametrised transition cases.
+          Reverted; projects.py SHA-256
+          5ea32bc5de0905d82fcd7d11648b6a8bf8e78936eeebd9cc82bf42bf0040b93d.
+      - command: "Real end-to-end through the operation layer, operator's own footage"
+        status: PASSED
+        observed: >
+          ingest -> create-project -> set-edl -> render-project produced a
+          720x1280 vertical file with the caption "Q1: revenue +12% (it's up)",
+          reported the dissolve substitution, kept version 1 alongside version 2,
+          and left the lock table empty.
+    findings:
+      - >
+        AC-4 WAS TOO NARROW WHEN WRITTEN, and an independent audit (session
+        audit-0813) caught it. Fabrication F-003 named 'dissolve' alone; the EDL
+        actually advertises SEVEN transitions and the renderer implements THREE.
+        wipeleft, wiperight, slideup and slidedown emit NO FILTER AT ALL and
+        render as hard cuts while the render reports success — arguably worse
+        than dissolve, which at least produces a visible effect.
+        Verified independently before acting on it, by executing _clip_chain
+        over all seven values rather than reading the code.
+        The deeper defect was the shape: the reporting was a hand-written list
+        in projects.py, separate from the filters it described, so it drifted
+        from them immediately. Now derived from render.TRANSITION_REALITY, which
+        sits next to the code that emits the filters, and
+        test_every_advertised_transition_is_either_implemented_or_reported
+        asserts the two sets match as a RULE over the vocabulary rather than a
+        list of known-bad names.
+      - >
+        T-036's classify_tables() refused the three new tables, exactly as
+        designed. It was written for "a table added years from now that silently
+        falls out of every backup"; it caught one added hours later, as 50
+        failing tests. projects and project_edl_versions are classified
+        PERMANENT — an EDL is the operator's actual creative work, irreplaceable
+        and kilobytes. `renders` is TRANSIENT: it records output files that are
+        themselves not backed up and are reproducible from the EDL version plus
+        its sources, so restoring those rows would assert renders whose files do
+        not exist — the phantom problem T-029 closed for assets, one table over.
+      - >
+        conftest's media_file fixture writes placeholder bytes, which is correct
+        for ingest and rights tests that never decode it. A render does, so
+        test_projects.py generates real media with ffmpeg instead. Worth
+        recording because the failure looked like a render bug and was a fixture
+        assumption.
+    fabrications_introduced: []
+    fabrications_affected: [F-003]
+    assumptions:
+      - >
+        Rendering is AGENT authority. Producing a file is drafting, not
+        publishing — it does not reach a platform, spend money, or clear a
+        rights flag, so F-2's ceiling is not touched. The operator gate stays
+        where it already is: approval and publication.
+    open_items:
+      - >
+        RENDERS ARE NOT COUNTED AGAINST THE STORAGE CEILING. Every render writes
+        bytes the ledger knows nothing about, and DR-006 makes the ledger the
+        sole source of truth for F-7. The render result says so in a
+        storage_note field rather than staying quiet, but that is disclosure,
+        not enforcement. T-043.
+      - >
+        NO RIGHTS CHECK PRECEDES A RENDER. _resolve_sources verifies media
+        EXISTS but not that its verdict permits use, so an edit composed from
+        BLOCKED footage renders successfully today. F-4 makes this sharp — an
+        editor is a transformation machine, and transformation must never
+        launder unusable material. T-044, and it should be next.
+    decisions: [DR-002, DR-016]
     required_dimensions: [correctness, api_contract_stability, security, error_handling, testing, documentation]
+    independent_review:
+      status: NOT_RUN
+      note: >
+        Constitution section 7. Note that an independent audit DID materially
+        improve this task mid-flight by correcting F-003's scope — which is the
+        argument for R-003 rather than against it.
 
   - id: T-043
     title: "Renders count against the storage ledger"

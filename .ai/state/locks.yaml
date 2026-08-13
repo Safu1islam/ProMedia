@@ -4,6 +4,57 @@
 locks: []
 
 history:
+  - path: "promedia/core/projects.py, promedia/core/ops/projects.py, promedia/core/ops/__init__.py, promedia/core/schema.sql, promedia/config.py, promedia/core/media/render.py, promedia/core/backup.py, tests/test_projects.py, tests/test_locking.py, tests/test_ops_forms.py"
+    task_id: "T-042"
+    agent: "claude-code-session-next3b"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-13T12:00:00+04:00"
+    released_at: "2026-08-13T13:20:00+04:00"
+    note: >
+      Making the media engine reachable from both surfaces (F-1). Project
+      persistence, EDL versioning, and the registered operations.
+      schema.sql is claimed for NEW TABLES ONLY (projects, project_edl_versions,
+      renders) — no existing table is altered, so no migration is needed.
+      promedia/core/media/render.py ADDED to the claim mid-task, after the
+      independent audit (session audit-0813) corrected fabrication F-003. It is
+      not scope growth: AC-4 requires a render to report what it did NOT do as
+      asked, and my reporting only caught 'dissolve' while FOUR more advertised
+      transitions (wipeleft, wiperight, slideup, slidedown) emit no filter at
+      all and render as hard cuts. Verified by executing _clip_chain over all
+      seven, not by reading. The fix puts one source of truth in render.py so
+      the reporting cannot drift from the implementation again.
+      The rest of promedia/core/media/** is untouched.
+
+      promedia/core/backup.py ALSO added mid-task, and for the best possible
+      reason: T-036's classify_tables() refused the three new tables, because it
+      refuses any table that is neither permanent nor transient. That guard was
+      written for "a table added years from now that silently falls out of every
+      backup"; it caught one added hours later. Classifying them is this task's
+      obligation, not a follow-up — the alternative is 50 failing tests and a
+      backup silently missing every project.
+
+  - path: ".ai/state/fabrications.yaml"
+    task_id: "AUDIT-0813"
+    agent: "audit-0813"
+    model: "claude-opus-5"
+    acquired_at: "2026-08-13T15:10:00+04:00"
+    released_at: "2026-08-13T15:20:00+04:00"
+    note: >
+      Independent AEF compliance audit. Narrow and short by design: correcting
+      one factual error in the fabrication registry, nothing else.
+
+      .ai/state/tasks.yaml is deliberately NOT claimed. claude-code-session-next3b
+      is live on T-042 and will write its completion record there; the planning
+      gap this audit found (T-045 is scoped to dissolve only) goes through the
+      recommendation channel instead of a contended edit.
+
+      promedia/** is NOT claimed and will not be touched. The operator's
+      instruction for this session is governance only, no application code.
+
+      RELEASED. F-003's scope corrected to name all five unimplemented
+      transitions; the planning gap went to R-004 rather than a contended
+      edit of tasks.yaml.
+
   - path: "promedia/core/media/**, tests/test_media.py, tests/test_edl.py, .ai/project.md"
     task_id: "T-041"
     agent: "claude-code-session-next3"

@@ -42,6 +42,15 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "allow_simulation": False,  # DR-010 / F-001
     },
     "locks": {"ttl_minutes": 90},
+    # Media production (T-042). Protocol 05: a render budget or a default
+    # quality baked into a literal is one an operator cannot change without a
+    # code edit, and render time is exactly the thing they will want to trade
+    # against quality on this hardware.
+    "media": {
+        "render_timeout_seconds": 1800,   # 30 min; a wedged ffmpeg holds a lock
+        "default_quality": "balanced",
+        "font_path": "",                  # empty = discover a platform default
+    },
     "web": {"host": "127.0.0.1", "port": 8765},
     # T-030 (O2, O3). Both were literals in the modules that used them, which
     # protocol 05 forbids for the same reason as any other limit: the value a

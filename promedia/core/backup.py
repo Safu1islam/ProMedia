@@ -63,6 +63,16 @@ PERMANENT_TABLES: tuple[str, ...] = (
     # Approval and audit log (fourth bullet).
     "approvals",
     "audit_log",
+    # Media projects (T-042). Not named in 5.4's four bullets, which predate the
+    # production platform, but they belong here on the same reasoning: an EDL is
+    # the operator's actual creative work, it is irreplaceable if lost, and it is
+    # kilobytes. The media it references is transient by policy and is NOT here —
+    # so a restored project comes back as an edit whose sources may need
+    # re-ingesting, exactly like a restored asset.
+    # Ordered after `assets` because the edits reference asset ids, and before
+    # nothing, since nothing references a project.
+    "projects",
+    "project_edl_versions",
 )
 
 # Excluded, each for a stated reason. Being listed here is what makes the
@@ -84,6 +94,14 @@ TRANSIENT_TABLES: dict[str, str] = {
         "Session state (C-19). Restoring locks would wedge every listed entity "
         "against agent sessions that no longer exist, and the TTL that normally "
         "reclaims them would be measured from a timestamp in the past."
+    ),
+    "renders": (
+        "Records of output FILES on this machine, and those files are transient "
+        "by policy — not in the artefact, and reproducible from the EDL version "
+        "plus its sources, which ARE backed up. Restoring these rows would "
+        "assert a set of renders whose files do not exist, which is the phantom "
+        "problem T-029 closed for assets, reintroduced one table over. The edit "
+        "that produced any of them survives in project_edl_versions."
     ),
 }
 

@@ -317,11 +317,20 @@ def _seed_full_slice(ctx, media_file):
         ctx, "queue-post",
         {"account_id": account["account_id"], "asset_id": asset["asset_id"], "body": "seeded"},
     )
+    # A real project with a real edit, so render-project's probe is a call that
+    # would genuinely render rather than one that fails validation first.
+    project = invoke(ctx, "create-project", {"title": "seeded project"})
+    invoke(ctx, "set-edl", {
+        "project_id": project["project_id"],
+        "edl": {"aspect": "landscape_720",
+                "clips": [{"asset_id": asset["asset_id"], "start": 0, "end": 1}]},
+    })
     return {
         "account_id": account["account_id"],
         "asset_id": asset["asset_id"],
         "post_id": post["post_id"],
         "provenance_id": sealed["provenance_id"],
+        "project_id": project["project_id"],
         "source_path": str(media_file),
         # A REAL artefact, so restore-permanent-set's probe is a call that would
         # genuinely do something. A path to nothing would make the GET fail on
@@ -358,6 +367,17 @@ def _valid_query_for(op, seeded):
         "status": "queued",
         "derived_from": seeded["asset_id"],
         "scheduled_at": "",
+        # T-042 media production. Values that would genuinely SUCCEED, which is
+        # the whole point of this probe: parameters that merely fail validation
+        # would prove only that bad input does nothing.
+        "title": "a GET must not create this project",
+        "edl": json.dumps({
+            "aspect": "landscape_720",
+            "clips": [{"asset_id": seeded["asset_id"], "start": 0, "end": 1}],
+        }),
+        "quality": "fast",
+        "version": "1",
+        "note": "a GET must not record this edit",
     })
     query = {}
     for p in op.params:
