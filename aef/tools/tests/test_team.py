@@ -287,10 +287,10 @@ class Recommendations(Base):
     def test_an_open_proposal_is_findable_by_the_component_it_touches(self):
         """So an agent about to change a file learns a proposal already stands
         on it, instead of colliding with it."""
-        self.add(affected=["promedia/core/storage.py"])
-        hits = self.team().recommendations_touching("promedia/core/storage.py")
+        self.add(affected=["src/storage/ledger.py"])
+        hits = self.team().recommendations_touching("src/storage/ledger.py")
         self.assertEqual([r.id for r in hits], ["R-001"])
-        self.assertEqual(self.team().recommendations_touching("promedia/web/app.py"), [])
+        self.assertEqual(self.team().recommendations_touching("src/web/app.py"), [])
 
 
 class SessionRestart(Base):

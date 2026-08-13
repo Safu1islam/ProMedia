@@ -12,6 +12,8 @@ import glob
 import os
 import unittest
 
+from aefkit.paths import framework_root
+
 from aefkit import yamlio
 
 try:
@@ -19,17 +21,27 @@ try:
 except ImportError:  # pragma: no cover
     pyyaml = None
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+# Resolve BOTH layouts. AEF is normally vendored at <project>/aef, but it is
+# also a repository in its own right, and its suite must pass in both — it did
+# not, which was found by running it from a fresh clone before publishing.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+FRAMEWORK = os.path.abspath(os.path.join(_HERE, "..", ".."))
+_PARENT = os.path.abspath(os.path.join(FRAMEWORK, ".."))
+# Vendored iff the parent actually contains aef/config; otherwise the framework
+# root IS the project root, which is what a standalone checkout looks like.
+ROOT = _PARENT if os.path.isdir(os.path.join(_PARENT, "aef", "config")) else FRAMEWORK
 
 
 def state_files() -> list[str]:
     patterns = [
         ".ai/state/*.yaml", ".ai/state/decisions/*.yaml", ".ai/config/*.yaml",
-        "aef/config/*.yaml", "aef/schemas/*.yaml",
     ]
     found: list[str] = []
     for pattern in patterns:
         found.extend(sorted(glob.glob(os.path.join(ROOT, pattern))))
+    # Framework config and schemas, wherever the framework actually is.
+    for pattern in ("config/*.yaml", "schemas/*.yaml"):
+        found.extend(sorted(glob.glob(os.path.join(framework_root(ROOT), pattern))))
     return found
 
 
@@ -37,7 +49,12 @@ class BothReadersAgree(unittest.TestCase):
     @unittest.skipIf(pyyaml is None, "PyYAML not installed; nothing to compare against")
     def test_both_readers_agree_on_every_state_file(self):
         files = state_files()
-        self.assertGreater(len(files), 8, "expected to find the project's state files")
+        if not files:
+            # A standalone framework checkout has no project state at all. That
+            # is a legitimate layout, not a failure — skipping is honest where
+            # asserting would make the framework's own repository red.
+            self.skipTest("no state or config files here; standalone framework checkout")
+        self.assertGreater(len(files), 4, "expected to find config and schema files")
         for path in files:
             with self.subTest(path=os.path.relpath(path, ROOT)):
                 with open(path, encoding="utf-8") as handle:

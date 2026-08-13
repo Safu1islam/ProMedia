@@ -70,6 +70,15 @@ unchanged.** See `docs/MIGRATION.md`.
 machine-managed files. Round-trip through **both** readers is a correctness
 requirement, not a nicety: AEF ships without PyYAML
 
+### Fixed
+- **The framework's own test suite failed in the framework's own repository.**
+  `tools/` resolved framework config by assuming AEF is always vendored at
+  `<project>/aef/`, so a standalone checkout produced 13 "agent catalogue not
+  found" errors and one failure. Found by running the suite from a fresh clone
+  before publishing, which is the only place it could have been found.
+  `aefkit/paths.py` now resolves both layouts, and the suite passes vendored
+  **and** standalone
+
 ### Changed
 - `aef.py doctor` reports the new state files and proves the bundled reader
   agrees with PyYAML on them

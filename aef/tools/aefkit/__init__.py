@@ -8,7 +8,7 @@ Read-only rule: this package lives under aef/ and is therefore not editable by a
 project. Projects configure it through .ai/config/overrides.yaml.
 """
 
-__all__ = ["yamlio", "writer", "model", "assign", "team", "teamstore", "render", "server"]
+__all__ = ["paths", "yamlio", "writer", "model", "assign", "team", "teamstore", "render", "server"]
 
 # Kept in step with aef/VERSION. The dashboard displays it so a stale vendored
 # copy is visible rather than silent.

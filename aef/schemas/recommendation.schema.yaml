@@ -46,7 +46,7 @@ recommendations:
       What could go wrong if this IS done. A recommendation with no stated risk
       has usually not been thought through.
 
-    affected_components: [promedia/core/storage.py, promedia/core/ingest.py]
+    affected_components: [src/storage/ledger.py, src/ingest/pipeline.py]
                                      # Paths or subsystem names. Used to warn a
                                      # future agent that an open proposal touches
                                      # the area it is about to change.

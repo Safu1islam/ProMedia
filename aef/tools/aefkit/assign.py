@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import yamlio
+from .paths import framework_file
 
 __all__ = ["Catalogue", "Suggestion", "load_catalogue", "load_requirements",
            "suggest", "set_agent", "AssignError"]
@@ -74,7 +75,7 @@ class Catalogue:
 def load_catalogue(project_root: str = ".", *, force_bundled: bool = False) -> Catalogue:
     """Framework defaults, with the project's `agents:` override deep-merged over
     them. Same precedence rule as framework.yaml / overrides.yaml."""
-    base_path = os.path.join(project_root, "aef", "config", "agents.yaml")
+    base_path = framework_file(project_root, "config", "agents.yaml")
     if not os.path.exists(base_path):
         raise AssignError(f"agent catalogue not found at {base_path}")
     data = yamlio.load(base_path, force_bundled=force_bundled) or {}
@@ -110,7 +111,7 @@ def load_requirements(project_root: str = ".", *, force_bundled: bool = False) -
     """
     out: dict[str, list[str]] = {}
     paths = [
-        os.path.join(project_root, "aef", "config", "routing.yaml"),
+        framework_file(project_root, "config", "routing.yaml"),
         os.path.join(project_root, ".ai", "config", "overrides.yaml"),
     ]
     for path in paths:

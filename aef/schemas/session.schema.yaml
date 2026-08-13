@@ -86,7 +86,7 @@ sessions:
       ended_at: "2026-08-13T05:10:00+04:00"
       outcome: completed             # completed | paused | failed | superseded
       changed: >
-        promedia/core/storage.py — reclaim() now scoped to 'reserved' rows.
+        src/storage/ledger.py — reclaim() now scoped to 'reserved' rows.
       evidence:                      # references, not output. Point at the task.
         - "tasks.yaml T-042 verification[0] — 231 passed"
       remaining: >

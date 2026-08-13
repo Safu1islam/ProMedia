@@ -12,9 +12,18 @@ import tempfile
 import unittest
 
 from aefkit import assign as assign_mod
+from aefkit.paths import framework_file
 from aefkit.model import Plan
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+# Resolve BOTH layouts. AEF is normally vendored at <project>/aef, but it is
+# also a repository in its own right, and its suite must pass in both — it did
+# not, which was found by running it from a fresh clone before publishing.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+FRAMEWORK = os.path.abspath(os.path.join(_HERE, "..", ".."))
+_PARENT = os.path.abspath(os.path.join(FRAMEWORK, ".."))
+# Vendored iff the parent actually contains aef/config; otherwise the framework
+# root IS the project root, which is what a standalone checkout looks like.
+ROOT = _PARENT if os.path.isdir(os.path.join(_PARENT, "aef", "config")) else FRAMEWORK
 
 PLAN = """# a comment that must survive
 meta:
@@ -82,7 +91,7 @@ class Suggestions(unittest.TestCase):
         """A change class routing.yaml knows about but agents.yaml does not would
         silently fall through to a weak keyword match."""
         from aefkit import yamlio
-        routing = yamlio.load(os.path.join(ROOT, "aef", "config", "routing.yaml"))
+        routing = yamlio.load(framework_file(ROOT, "config", "routing.yaml"))
         missing = sorted(set(routing["classes"]) - set(self.catalogue.by_change_class))
         self.assertEqual(missing, [], f"change classes with no agent rule: {missing}")
 

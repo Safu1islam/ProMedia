@@ -53,5 +53,5 @@ loopback. Assignment is a CLI command precisely so no link can change a plan.
   Constitution §7 forbids.
 - **No stored rollups.** Group status and percentages are computed on read. See
   `schemas/plan.schema.yaml`.
-- **No project-specific knowledge.** Nothing here knows what ProMedia, or any
-  other project, is about.
+- **No project-specific knowledge.** Nothing here knows what any particular
+  project is about. The tools read schemas, not domains.

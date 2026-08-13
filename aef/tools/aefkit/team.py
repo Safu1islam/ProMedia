@@ -28,6 +28,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from . import yamlio
+from .paths import framework_file
 
 __all__ = [
     "Session",
@@ -454,10 +455,10 @@ def _stale_minutes(project_root: str, force_bundled: bool) -> int:
     """
     value: Any = None
     for relative in (
-        os.path.join("aef", "config", "framework.yaml"),
-        os.path.join(".ai", "config", "overrides.yaml"),
+        framework_file(project_root, "config", "framework.yaml"),
+        os.path.join(project_root, ".ai", "config", "overrides.yaml"),
     ):
-        path = os.path.join(project_root, relative)
+        path = relative
         if not os.path.exists(path):
             continue
         try:
