@@ -58,6 +58,15 @@ meta:
         The independent human-experience review (OD-5) is an operator action,
         not an agent task, so it is deliberately not a node. It remains open in
         the completion report.
+      - >
+        OPEN, and the reason is a decision rather than an oversight: there is
+        still no OFF-SITE copy of the permanent set. OD-7 (2026-08-13) chose to
+        keep the artefact on this machine for now, so T-038/T-039/T-040 are
+        blocked behind that choice. A local backup does not satisfy project.md
+        5.4's "must survive disk loss" — one disk failure takes the database and
+        its backup together. It does protect against deletion, a bad migration
+        and corruption. Named here because a durability gap that lives only in a
+        blocked task reads, from the dashboard, as work merely not started yet.
 
 tree:
   id: PRJ

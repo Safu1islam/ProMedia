@@ -948,10 +948,44 @@ tasks:
     mode: critical
     owner_role: implementer
     assigned_model_tier: standard
-    status: blocked
-    blocked_reason: "Depends on T-036's artefact format, which does not exist yet."
+    status: ready
     depends_on: [T-036]
     blocks: [T-040]
+    design_finding_before_implementation:
+      found: 2026-08-13
+      found_by: "T-036 implementer, reading the restore path before starting it"
+      summary: >
+        RESTORE NEEDS A THIRD ASSET STATE, AND THEREFORE A SCHEMA MIGRATION.
+        Recorded before implementation so the next session does not rediscover
+        it halfway through and improvise.
+      detail: >
+        Media availability is decided by `assets.state == 'stored'`
+        (posts.py decision_context and the approve/publish gates), NOT by
+        checking that the object exists on disk. Media is transient and is
+        deliberately not in the artefact, so a restored asset row would say
+        'stored' while nothing is on disk — a phantom asset walking straight
+        through the rights gate, which is precisely the defect T-029 closed.
+        Neither existing value is honest for a restored row:
+          * 'stored'  — claims media is present. False, and dangerous: approve
+            and publish would offer controls over nothing.
+          * 'deleted' — means RETENTION destroyed it, which T-029 makes final:
+            re-ingest is permanently refused, and publishing to a new platform
+            is out of scope by policy. Marking a restored asset 'deleted' would
+            wrongly foreclose re-ingesting media the operator still has, turning
+            a recovery into an irreversible loss of capability.
+        The honest shape is a third state — 'absent' (the record is restored,
+        the media is not here, re-ingest is ALLOWED) — which means widening the
+        CHECK constraint on assets.state. SQLite cannot ALTER a CHECK, so this
+        is a table migration and a data_model_change under DR-003, not an
+        incidental edit.
+      consequence_for_this_task: >
+        T-037 is larger than "read the artefact back". It carries a schema
+        migration, a decision about what a restored-but-absent asset may do, and
+        the re-ingest path that makes recovery of media possible. It should be
+        started fresh rather than tacked onto a long session.
+      not_yet_decided:
+        - "Whether a restored 'absent' asset keeps its old verdict as governing, or must be re-determined once its media is re-ingested (C-20 says a verdict is a fact about a rights position, which argues for keeping it)."
+        - "Whether re-ingesting the bytes of an 'absent' asset returns it to 'stored' on the same asset id, or creates a new one."
     owned_paths: [promedia/core/backup.py, promedia/core/ops/backup.py, tests/test_restore.py]
     acceptance_criteria:
       - id: AC-1
@@ -994,9 +1028,16 @@ tasks:
     assigned_model_tier: standard
     status: blocked
     blocked_reason: >
-      NEEDS_HUMAN — destination is an operator decision with a trust dimension
-      (the permanent set leaving the machine) and a possible third party. Also
-      depends on T-036's artefact.
+      DEFERRED BY OPERATOR DECISION (OD-7, 2026-08-13): "for now we'll keep it
+      here". The four options were put with their trade-offs; the answer is to
+      stay local for the moment. This is no longer blocked on missing
+      information — it is blocked on a choice that has been deliberately
+      postponed.
+      CONSEQUENCE, recorded so it does not read as satisfied: a local artefact
+      shares a disk with the database it backs up, so project.md 5.4's "must
+      survive disk loss" is NOT met. The local export still protects against
+      accidental deletion, a bad migration and corruption, which is the more
+      frequent failure. See OD-7.
     depends_on: [T-036]
     blocks: [T-039]
     owned_paths: []
@@ -2515,6 +2556,39 @@ operator_decisions_2026_08_11:
       pricing against the $100/month ceiling) stays unanswered by design — it
       cannot be answered without live access, and must not be answered from
       model memory.
+
+  - id: OD-7
+    question: >
+      Where should the off-site backup go? Options put to the operator:
+      external/removable drive, an already-paid-for cloud drive, object storage
+      (S3/B2/R2), or defer. At megabyte scale every option is effectively free,
+      so this was framed as a trust decision rather than a cost one.
+    answer: "For now we'll keep it here."
+    decided: 2026-08-13
+    action_taken: >
+      T-038 (off-site destination and transport) stays blocked, now on an
+      operator DECISION rather than on missing information. T-039 (scheduling)
+      and T-040 (restore drill) stay blocked behind it. T-036 (export) and T-037
+      (restore) are unaffected — both were deliberately planned to be
+      destination-independent, which is why this deferral costs nothing already
+      built.
+    what_this_means: >
+      STATED PLAINLY BECAUSE IT WOULD OTHERWISE READ AS DONE: keeping the
+      artefact on this machine means the backup shares a disk with the thing it
+      backs up. project.md 5.4 requires the permanent set to "survive disk
+      loss", and a local copy does not — one disk failure takes both. What the
+      local export DOES protect against is the more common failure: an
+      accidental deletion, a bad migration, a corrupted database, or a mistake
+      an operator wants to roll back. That is real and worth having.
+      So the durability requirement in 5.4 is NOT met, and is not being treated
+      as met. It is deferred, with the gap named here and in plan.yaml's
+      known_omissions rather than allowed to disappear behind a green task.
+    relevant_if: >
+      Revisit when the publication history becomes hard to reconstruct, or
+      before this stops being a single-operator tool. The cost of choosing later
+      is unchanged — the artefact format is destination-independent, so adding a
+      destination is additive work, not a rewrite. What grows with time is the
+      amount of irreplaceable evidence at risk.
 
   - id: OD-5
     question: "Who performs the human-experience review?"
