@@ -298,15 +298,26 @@ def test_saving_with_every_clip_removed_and_no_new_one_is_refused(env, media_fil
 
 
 def test_the_transition_picker_marks_known_substitutions(env, media_file):
+    """UPDATED FOR T-045 (retires F-003). This used to assert that the picker
+    warned 'dissolve renders as fade' on every project page, because F-003
+    made that true unconditionally. T-045 gave 'dissolve' (and the rest of
+    the vocabulary) a real ffmpeg xfade implementation — independently
+    verified by the coordinator per transition, not just read from the diff
+    (see tests/test_projects.py's updated render tests and
+    tests/test_transitions.py's pixel measurements) — so the picker now has
+    nothing to warn about and must not show a warning that is no longer true.
+    The sibling test below (test_the_marking_can_actually_go_missing) still
+    proves the WARNING MACHINERY itself works, by forcing a substitution back
+    in; this test proves it stays silent when there genuinely is none."""
     cfg, ctx, store = env
     project_id = _create_project(agent_client(cfg, store, follow_redirects=False))
     response = agent_client(cfg, store).get(f"/projects/{project_id}")
     assert response.status_code == 200
-    # F-003: 'dissolve' is accepted by the EDL vocabulary and renders as a
-    # fade instead — the picker must say so before it is ever chosen.
+    # The picker still offers 'dissolve' as a plain, unmarked option — the
+    # vocabulary itself is unchanged, only its honesty improved.
     assert "dissolve" in response.text
-    assert "renders as fade" in response.text
-    assert "F-003" in response.text
+    assert "renders as fade" not in response.text
+    assert "F-003" not in response.text
 
 
 def test_the_marking_can_actually_go_missing(env, media_file, monkeypatch):
@@ -353,25 +364,78 @@ def test_dashboard_leads_with_pending_posts_and_links_to_projects(env, media_fil
     assert 'href="/projects"' in response.text
 
 
-def test_dashboard_shows_recent_renders_and_flags_substitutions(env, real_media):
+def test_dashboard_shows_recent_renders(env, real_media):
     # A render actually decodes the source, unlike ingest/rights tests — the
     # conftest media_file fixture's placeholder bytes fail against real
     # ffmpeg (found running this suite after the pivot to the rich client:
     # RenderFailed, not the substitution this test means to exercise).
     # test_projects.py's real_media fixture generates genuine frames instead.
+    #
+    # SPLIT FROM test_dashboard_shows_recent_renders_and_flags_substitutions
+    # (T-045, retires F-003). 'dissolve' used to substitute unconditionally,
+    # so a real render with it was enough to prove both halves of the old
+    # name at once. It no longer substitutes — independently verified per
+    # transition by the coordinator, see test_projects.py and
+    # test_transitions.py — so this half now only proves the dashboard lists
+    # a real render. The flagging half moved to the test directly below,
+    # which proves the WARNING MACHINERY itself still works by forcing a
+    # substitution back in, the same technique
+    # test_the_marking_can_actually_go_missing already uses for the picker.
     cfg, ctx, store = env
     from promedia.core.media import ffmpeg
     if not ffmpeg.available():
         pytest.skip("ffmpeg not installed on this machine")
     asset_id = ingest_as_agent(ctx, real_media)
+    # T-044: render-project now refuses anything short of PERMITTED before it
+    # does any work; attest is what a real editing session would have done
+    # between ingest and render (also runs determine-rights, tests/conftest.py).
+    attest(ctx, asset_id)
+    project_id = _create_project(agent_client(cfg, store, follow_redirects=False))
+    # No transition here on purpose: a transition_in on a project's very
+    # first clip has no predecessor to blend from, and T-045's offset-based
+    # composition model refuses it (edl.py, "has no previous clip to
+    # transition from") — a rule this single-clip EDL cannot exercise
+    # regardless of which transition name was used, before or after T-045.
+    invoke(ctx, "set-edl", {
+        "project_id": project_id,
+        "edl": {"aspect": "landscape",
+                "clips": [{"asset_id": asset_id, "start": 0, "end": 1}]},
+    })
+    result = invoke(ctx, "render-project", {"project_id": project_id})
+    assert result["substitutions"] == []
+
+    response = agent_client(cfg, store).get("/")
+    assert response.status_code == 200
+    assert "substituted" not in response.text
+
+
+def test_dashboard_flags_a_substitution_if_one_is_ever_recorded(env, real_media):
+    """The other half of the split above. No real transition substitutes
+    today (F-003 is retired), so this proves the DISPLAY logic directly
+    against a persisted render row rather than depending on a live
+    substitution that no longer exists — the same reasoning
+    test_the_marking_can_actually_go_missing already applies to the picker.
+    A future transition added to the EDL vocabulary without a real
+    implementation would hit this exact code path."""
+    cfg, ctx, store = env
+    from promedia.core.media import ffmpeg
+    if not ffmpeg.available():
+        pytest.skip("ffmpeg not installed on this machine")
+    asset_id = ingest_as_agent(ctx, real_media)
+    attest(ctx, asset_id)  # T-044: render-project now requires PERMITTED first
     project_id = _create_project(agent_client(cfg, store, follow_redirects=False))
     invoke(ctx, "set-edl", {
         "project_id": project_id,
         "edl": {"aspect": "landscape",
-                "clips": [{"asset_id": asset_id, "start": 0, "end": 1,
-                           "transition_in": "dissolve"}]},
+                "clips": [{"asset_id": asset_id, "start": 0, "end": 1}]},
     })
     invoke(ctx, "render-project", {"project_id": project_id})
+    import json as _json
+    ctx.conn.execute(
+        "UPDATE renders SET substitutions = ? WHERE project_id = ?",
+        (_json.dumps([{"requested": "dissolve", "rendered": "fade", "fabrication": "F-003"}]),
+         project_id),
+    )
 
     response = agent_client(cfg, store).get("/")
     assert response.status_code == 200

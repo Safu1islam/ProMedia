@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
+import { onBeforeRouteLeave } from "vue-router";
 import { api, ApiError } from "../api";
 
 const props = defineProps<{ projectId: string }>();
@@ -32,6 +33,18 @@ function assetName(assetId: string): string {
 function assetState(assetId: string): string {
   return assets.value.find((a) => a.id === assetId)?.state ?? "?";
 }
+// The timeline's flex-basis is a duration, not decoration — an invented
+// number here would misrepresent clip length on the one screen whose
+// acceptance criterion is "real durations, not sample data" (T-055 AC-1).
+// A clip with no explicit out point (c.end) runs to the asset's own real
+// duration_seconds (schema.sql, populated by ffprobe at ingest, A-15).
+// Only when NEITHER is known do we fall back to an unweighted share.
+function clipDuration(c: any): number {
+  if (c.end != null) return c.end - c.start;
+  const asset = assets.value.find((a) => a.id === c.asset_id);
+  if (asset?.duration_seconds != null) return asset.duration_seconds - c.start;
+  return 1;
+}
 function substitutionFor(transition: string): any {
   return capabilities.value?.known_substitutions?.find((s: any) => s.requested === transition) ?? null;
 }
@@ -63,6 +76,24 @@ async function load() {
 onMounted(load);
 
 const dirty = computed(() => JSON.stringify(clips.value) !== JSON.stringify(project.value?.edl.clips ?? []));
+
+// Unsaved clip edits are held only in this component's local `clips` ref
+// (see the comment above it) until "Save as new version" runs — so leaving
+// the room, whether by an in-app navigation or closing/reloading the tab,
+// silently discarded them. Neither is hypothetical: the timeline, the room
+// tabs and the top nav all route away from here without passing through
+// saveVersion.
+function onBeforeUnload(e: BeforeUnloadEvent) {
+  if (!dirty.value) return;
+  e.preventDefault();
+  e.returnValue = "";
+}
+onBeforeRouteLeave(() => {
+  if (!dirty.value) return true;
+  return window.confirm("You have unsaved clip changes. Leave without saving as a new version?");
+});
+onMounted(() => window.addEventListener("beforeunload", onBeforeUnload));
+onUnmounted(() => window.removeEventListener("beforeunload", onBeforeUnload));
 
 function moveClip(i: number, dir: -1 | 1) {
   const j = i + dir;
@@ -101,11 +132,22 @@ async function saveVersion() {
   error.value = null;
   try {
     const edl = { ...project.value.edl, clips: clips.value };
-    await api.setEdl(props.projectId, edl, note.value);
+    // expected_version pins this write to the version the local `clips`
+    // copy was actually loaded from (R-010): without it, an agent and this
+    // tab editing the same project's EDL in the minutes this room can stay
+    // open silently overwrite each other with no signal to either side.
+    await api.setEdl(props.projectId, edl, note.value, project.value.edl_version);
     note.value = "";
     await load();
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : "could not save";
+    if (err instanceof ApiError && err.code === "VALIDATION" && "current_version" in err.detail) {
+      error.value =
+        `Someone saved v${err.detail.current_version} while you were editing v${err.detail.expected_version}` +
+        " — your changes were NOT saved. Reload to see the newer version (it's in History below either" +
+        " way), then reapply your edit.";
+    } else {
+      error.value = err instanceof ApiError ? err.message : "could not save";
+    }
   } finally {
     saving.value = false;
   }
@@ -214,7 +256,7 @@ function pickRoom(name: string) {
               :key="i"
               class="tl-clip"
               :class="{ selected: selectedClipIndex === i }"
-              :style="{ flexGrow: Math.max((c.end ?? c.start + 5) - c.start, 1) }"
+              :style="{ flexGrow: Math.max(clipDuration(c), 1) }"
               @click="selectedClipIndex = i"
             >
               <span class="tl-clip-name">{{ assetName(c.asset_id) }}</span>

@@ -10,6 +10,15 @@ plausible-looking guess is worse than a blank — it gets trusted.
 ``verify_published()`` exists because the retention policy permits deletion
 only on "confirmed live on every target platform, not merely the API returned
 200". Without it, retention cannot satisfy its own precondition.
+
+``verify_published()`` takes ``credential_ref`` (T-019). The original
+signature took only a post id, which is fine for a stub that always returns
+False without reaching a network, but unusable for a live adapter: confirming
+a post is live on a real platform means an authenticated read, and nothing
+else in this call carries the credential to authenticate with. Nothing in
+``promedia/`` called ``verify_published()`` yet when this was caught (the
+retention-deletion caller this exists for is not built), so the signature is
+corrected now rather than carried forward broken.
 """
 
 from __future__ import annotations
@@ -57,4 +66,4 @@ class Publisher(Protocol):
 
     def publish(self, *, body: str, content_hash: str, credential_ref: str) -> PublishResult: ...
 
-    def verify_published(self, platform_post_id: str) -> bool: ...
+    def verify_published(self, platform_post_id: str, *, credential_ref: str) -> bool: ...

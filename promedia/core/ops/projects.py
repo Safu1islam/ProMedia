@@ -48,12 +48,26 @@ def create_project(ctx: Context, title: str) -> dict[str, Any]:
             ),
         ),
         Param("note", "str", required=False, help="What changed, for the history."),
+        Param(
+            "expected_version", "int", required=False,
+            help=(
+                "The edl_version this edit was based on. If the project has"
+                " since moved to a different version, the write is refused"
+                " (VALIDATION) instead of silently overwriting a concurrent"
+                " change. Omit to write unconditionally, as before."
+            ),
+        ),
     ),
     mutates=True,
     entity="project",
 )
-def set_edl(ctx: Context, project_id: str, edl: Any, note: str | None = None) -> dict[str, Any]:
-    return projects_layer.set_edl(ctx, project_id=project_id, edl=edl, note=note)
+def set_edl(
+    ctx: Context, project_id: str, edl: Any, note: str | None = None,
+    expected_version: int | None = None,
+) -> dict[str, Any]:
+    return projects_layer.set_edl(
+        ctx, project_id=project_id, edl=edl, note=note, expected_version=expected_version,
+    )
 
 
 @register(
@@ -80,6 +94,25 @@ def list_projects(ctx: Context) -> dict[str, Any]:
 )
 def project_versions(ctx: Context, project_id: str) -> dict[str, Any]:
     return projects_layer.versions(ctx, project_id=project_id)
+
+
+@register(
+    "diff-project-versions",
+    "A human-readable diff between two EDL versions of the same project.",
+    params=(
+        Param("project_id", "str"),
+        Param("from_version", "int", help="The earlier version to compare from."),
+        Param("to_version", "int", help="The later (or simply other) version to compare to."),
+    ),
+)
+def diff_project_versions(
+    ctx: Context, project_id: str, from_version: int, to_version: int
+) -> dict[str, Any]:
+    """Read-only: no lock, no mutation, no new authority (T-056). Reviewing
+    what an agent changed is not itself an act of drafting or publishing."""
+    return projects_layer.diff_versions(
+        ctx, project_id=project_id, from_version=from_version, to_version=to_version,
+    )
 
 
 @register(
@@ -112,6 +145,30 @@ def render_project(ctx: Context, project_id: str, quality: str | None = None) ->
 )
 def renders(ctx: Context, project_id: str | None = None) -> dict[str, Any]:
     return projects_layer.renders(ctx, project_id=project_id)
+
+
+@register(
+    "delete-render",
+    "Delete a rendered file and return its bytes to the storage ledger.",
+    params=(
+        Param("project_id", "str"),
+        Param("render_id", "str"),
+    ),
+    mutates=True,
+    entity="project",
+    danger="Deletes a file from disk. Not reversible.",
+)
+def delete_render(ctx: Context, project_id: str, render_id: str) -> dict[str, Any]:
+    """Agent authority: disposing of a rendered derivative is drafting-adjacent
+    housekeeping, not publishing or clearing a rights flag (F-2) — the source
+    asset and its provenance are untouched (R-006).
+
+    project_id is a real parameter, not decoration: it is what C-19's lock is
+    keyed on (the same ``project_id`` convention ``render-project`` and
+    ``set-edl`` use), and projects_layer.delete_render() cross-checks it
+    against the render's own project_id before deleting anything.
+    """
+    return projects_layer.delete_render(ctx, project_id=project_id, render_id=render_id)
 
 
 @register(

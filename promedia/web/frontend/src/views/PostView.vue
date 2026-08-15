@@ -37,7 +37,26 @@ async function run(action: () => Promise<unknown>) {
   }
 }
 
-const approve = () => run(() => api.approvePost(props.postId, "approved"));
+function approveReason(): string | null {
+  if (!d.value.approvable) {
+    if (!d.value.rights) return "Waiting on a rights verdict — determine-rights has not run.";
+    if (d.value.rights.verdict !== "PERMITTED") return `Rights verdict is ${d.value.rights.verdict}, not PERMITTED.`;
+    if (!d.value.media_available) return "This asset's media is not available to publish.";
+    if (d.value.status !== "queued") return `Post is ${d.value.status}, not queued.`;
+    return "Not currently approvable.";
+  }
+  return null;
+}
+
+function approve() {
+  // A disabled attribute removes the control from the tab order and
+  // assistive-technology reach entirely — so the operator's most frequent
+  // state (no verdict yet) had no way to discover an Approve control exists
+  // at all via keyboard or screen reader (found in independent review). The
+  // button stays focusable; aria-disabled plus this guard keep it inert.
+  if (busy.value || !d.value.approvable) return;
+  run(() => api.approvePost(props.postId, "approved"));
+}
 const reject = () => run(() => api.approvePost(props.postId, "rejected"));
 const publish = () => run(() => api.publishPost(props.postId));
 const releaseClaim = () => run(() => api.releasePublishClaim(props.postId));
@@ -103,6 +122,12 @@ function fmtMB(bytes: number): string {
         by the server, not merely hidden here. Transforming the material does not change this — a
         derivative inherits its source's verdict.
       </div>
+      <div v-else-if="!d.rights" class="banner bad">
+        <strong>No rights verdict yet.</strong> This asset has not been evaluated against the
+        ruleset — <span class="mono">determine-rights</span> has not run for it. Approval is refused
+        by the server until a verdict is recorded; this is the starting state for every newly
+        queued post, not a fault specific to this one.
+      </div>
       <div v-if="!d.media_available" class="banner bad">
         <strong>This asset's media is gone</strong> (state: {{ d.media_state }}). Retention deleted
         the bytes, and deletion is final. The rights verdict and the sealed provenance record remain
@@ -112,7 +137,15 @@ function fmtMB(bytes: number): string {
 
       <div class="actions">
         <template v-if="d.status === 'queued'">
-          <button class="btn primary" :disabled="busy || !d.approvable" @click="approve">Approve for publication</button>
+          <button
+            class="btn primary"
+            :aria-disabled="busy || !d.approvable"
+            :aria-describedby="!d.approvable ? 'approve-reason' : undefined"
+            @click="approve"
+          >
+            Approve for publication
+          </button>
+          <p v-if="!d.approvable" id="approve-reason" class="muted small">{{ approveReason() }}</p>
           <button class="btn danger" :disabled="busy" @click="reject">Reject</button>
         </template>
         <template v-else-if="d.status === 'approved'">
@@ -222,7 +255,8 @@ h1 {
   color: var(--red-soft);
   border-color: var(--red-border);
 }
-.btn:disabled {
+.btn:disabled,
+.btn[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
 }

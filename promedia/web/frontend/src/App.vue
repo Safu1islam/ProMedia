@@ -29,6 +29,32 @@ function onDocClick(e: MouseEvent) {
     closeMenu();
   }
 }
+function onDocKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape" && openMenu.value) {
+    closeMenu();
+  }
+}
+function onMenuKeydown(e: KeyboardEvent, label: string) {
+  const focusable = () =>
+    Array.from(headerEl.value?.querySelectorAll<HTMLElement>(".menu-panel .menu-item") ?? []);
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    if (openMenu.value !== label) {
+      openMenu.value = label;
+      return;
+    }
+    const els = focusable();
+    if (!els.length) return;
+    const current = els.indexOf(document.activeElement as HTMLElement);
+    const next = e.key === "ArrowDown" ? (current + 1) % els.length : (current - 1 + els.length) % els.length;
+    els[next]?.focus();
+  } else if (e.key === "Enter" || e.key === " ") {
+    if (openMenu.value !== label) {
+      e.preventDefault();
+      openMenu.value = label;
+    }
+  }
+}
 
 // Real data, not decoration: storage pressure (the dashboard's original
 // headline stat, DR-004/DR-017 both keep numbers honest) and pending posts
@@ -48,6 +74,7 @@ function initialsFor(agent: string): string {
 async function loadHeaderData() {
   try {
     const [status, posts, locks] = await Promise.all([api.status(), api.listPosts(), api.locks()]);
+    loadError.value = null;
     storagePct.value = Math.round((status.storage?.fraction_used ?? 0) * 100);
     pendingCount.value = posts.posts.filter((p: any) =>
       ["queued", "approved", "publishing"].includes(p.status),
@@ -70,6 +97,7 @@ let refreshTimer: ReturnType<typeof setInterval> | undefined;
 
 onMounted(() => {
   document.addEventListener("click", onDocClick, true);
+  document.addEventListener("keydown", onDocKeydown);
   loadHeaderData();
   // Locks and the decision queue both change while this tab sits open —
   // an agent can start a render or queue a post at any moment. 20s matches
@@ -78,6 +106,7 @@ onMounted(() => {
 });
 onUnmounted(() => {
   document.removeEventListener("click", onDocClick, true);
+  document.removeEventListener("keydown", onDocKeydown);
   if (refreshTimer) clearInterval(refreshTimer);
 });
 </script>
@@ -95,8 +124,11 @@ onUnmounted(() => {
           <button
             class="menu-btn"
             :class="{ active: openMenu === m.label }"
+            :aria-expanded="openMenu === m.label"
+            aria-haspopup="menu"
             @click="toggleMenu(m.label)"
             @mouseenter="hoverMenu(m.label)"
+            @keydown="onMenuKeydown($event, m.label)"
           >
             {{ m.label }}
           </button>

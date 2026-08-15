@@ -218,6 +218,16 @@ tree:
               type: task
               title: Timeline composition — true cross-dissolves
               task: T-045
+            - id: N-062
+              agent: backend-agent
+              type: task
+              title: "Fix R-006/R-007: delete-render registration, config nested-dict copy"
+              task: T-062
+            - id: N-063
+              agent: verifier
+              type: task
+              title: "Independent review pass answering R-003 (8 self-verified tasks)"
+              task: T-063
         - id: F-MEDIA-INPUT
           type: feature
           title: Acquisition and analysis
@@ -324,6 +334,11 @@ tree:
           type: task
           title: "DEFERRED — Color/Audio rooms, brand kits, calendar, model marketplace"
           task: T-060
+        - id: N-061
+          agent: frontend-agent
+          type: task
+          title: "Fix findings from the T-053/055/057/058 independent review (R-008..R-012)"
+          task: T-061
 
     - id: S-DURABILITY
       type: section

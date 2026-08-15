@@ -22,8 +22,8 @@ from promedia.core import db
 from promedia.core.media import ffmpeg
 from promedia.core.principal import agent, operator
 from promedia.core.registry import Context, invoke, load_operations
-from promedia.errors import MediaUnavailable, NotFound, ValidationError
-from tests.conftest import declaration_original, make_config
+from promedia.errors import MediaUnavailable, NotFound, RightsBlocked, ValidationError
+from tests.conftest import attest, declaration_original, make_config
 
 OPERATIONS = load_operations()
 needs_ffmpeg = pytest.mark.skipif(not ffmpeg.available(), reason="ffmpeg not installed")
@@ -67,10 +67,18 @@ def real_media(tmp_path_factory):
 
 @pytest.fixture
 def source_asset(env, real_media):
+    """A rights-clean, render-ready asset: ingested, operator-attested, and
+    determined PERMITTED (T-044). Before T-044 nothing checked rights at
+    render time, so this fixture only had to ingest; now render() refuses
+    anything short of PERMITTED (AC-1), and these tests exist to exercise
+    render MECHANICS, not to re-prove the rights gate — that is
+    tests/test_render_rights.py's job."""
     cfg, ctx = env
-    return invoke(ctx, "ingest", {
+    asset_id = invoke(ctx, "ingest", {
         "source_path": str(real_media), "declaration": declaration_original(),
     })["asset_id"]
+    attest(ctx, asset_id)  # also runs determine-rights (tests/conftest.py)
+    return asset_id
 
 
 def an_edl(asset_id, **kw):
@@ -139,6 +147,49 @@ def test_the_history_records_who_shaped_each_edit(env, source_asset):
     assert history[1]["authored_kind"] == "agent"
 
 
+def test_set_edl_with_no_expected_version_writes_unconditionally(env, source_asset):
+    """Backward compatible: every existing caller (CLI, tests, an agent that
+    never reads the current version first) omits expected_version and keeps
+    writing exactly as before this task."""
+    cfg, ctx = env
+    pid = invoke(ctx, "create-project", {"title": "P"})["project_id"]
+    invoke(ctx, "set-edl", {"project_id": pid, "edl": an_edl(source_asset)})
+    result = invoke(ctx, "set-edl", {"project_id": pid, "edl": an_edl(source_asset)})
+    assert result["edl_version"] == 3
+
+
+def test_set_edl_with_the_correct_expected_version_succeeds(env, source_asset):
+    cfg, ctx = env
+    pid = invoke(ctx, "create-project", {"title": "P"})["project_id"]
+    result = invoke(ctx, "set-edl", {
+        "project_id": pid, "edl": an_edl(source_asset), "expected_version": 1,
+    })
+    assert result["edl_version"] == 2
+
+
+def test_set_edl_with_a_stale_expected_version_is_refused_R010(env, source_asset):
+    """R-010 (independent review, 2026-08-14): without this, an agent and the
+    editor room silently overwrite each other's EDL edits with no signal to
+    either side — a lost update the append-only version model does not by
+    itself prevent, because 'append' still means 'whoever writes last wins'."""
+    cfg, ctx = env
+    pid = invoke(ctx, "create-project", {"title": "P"})["project_id"]
+    # Someone else's write lands first — this project is now at version 2.
+    invoke(ctx, "set-edl", {"project_id": pid, "edl": an_edl(source_asset), "note": "the other writer"})
+
+    with pytest.raises(ValidationError) as exc:
+        invoke(ctx, "set-edl", {
+            "project_id": pid, "edl": an_edl(source_asset, aspect="vertical"),
+            "expected_version": 1,
+        })
+    assert exc.value.detail["current_version"] == 2
+    assert exc.value.detail["expected_version"] == 1
+
+    # The refused write left no trace: still at v2, still landscape.
+    current = invoke(ctx, "project", {"project_id": pid})
+    assert current["edl_version"] == 2 and current["aspect"] == "landscape_720"
+
+
 def test_an_invalid_edit_is_refused_and_not_stored(env, source_asset):
     """A stored version is one an operator may later restore. Storing an
     unrenderable one is a trap with a delay on it."""
@@ -184,9 +235,26 @@ def test_rendering_produces_a_file_and_records_where_it_came_from(env, source_as
 
 @needs_ffmpeg
 def test_a_render_reports_what_it_did_not_do_as_asked(env, source_asset):
-    """AC-4. Fabrication F-003: 'dissolve' renders a fade, and the render
-    SUCCEEDS — which is exactly why it has to be reported. A silent
-    substitution that succeeds prompts nobody to look."""
+    """AC-4, UPDATED FOR T-045 (retires F-003). This test used to assert that
+    'dissolve' silently rendered as a fade and had to be reported as a
+    substitution. T-045 replaced the concat-based composition model with an
+    absolute-offset one and gave 'dissolve' a real ffmpeg xfade cross-dissolve
+    instead — independently verified by the coordinator (2026-08-14), not
+    just read from the diff: at the transition's exact midpoint the decoded
+    frame contains a genuine blend of both source colours (mean luminance
+    well above black), matching tests/test_transitions.py's own
+    test_dissolve_blends_both_clips_at_the_midpoint_ac1. So the render no
+    longer does anything other than what was asked, and the field this test
+    exists to protect (AC-4: a render must report what it did NOT do) must
+    now show nothing to report — reporting a substitution that did not
+    happen would itself be the silent-lie class Constitution section 6
+    forbids, just in the opposite direction.
+
+    The rule that survives untouched, and the one that actually matters, is
+    test_every_advertised_transition_is_either_implemented_or_reported below:
+    if 'dissolve' (or anything else) ever regresses back to a substitution,
+    that rule fails immediately, on the whole vocabulary, not on a
+    hand-maintained list of known-bad names."""
     cfg, ctx = env
     pid = invoke(ctx, "create-project", {"title": "P"})["project_id"]
     edl = an_edl(source_asset)
@@ -196,13 +264,13 @@ def test_a_render_reports_what_it_did_not_do_as_asked(env, source_asset):
 
     result = invoke(ctx, "render-project", {"project_id": pid, "quality": "fast"})
 
-    assert len(result["substitutions"]) == 1
-    substitution = result["substitutions"][0]
-    assert substitution["requested"] == "dissolve"
-    assert substitution["fabrication"] == "F-003"
-    # and it is persisted, not just returned once
+    assert result["substitutions"] == [], (
+        "'dissolve' reported a substitution — F-003 has regressed, or T-045's "
+        "xfade path is not actually being taken"
+    )
+    # and the honesty is persisted, not just returned once
     stored = invoke(ctx, "renders", {"project_id": pid})["renders"][0]
-    assert stored["substitutions"][0]["requested"] == "dissolve"
+    assert stored["substitutions"] == []
 
 
 @needs_ffmpeg
@@ -233,6 +301,33 @@ def test_rendering_an_edit_whose_media_is_gone_is_refused(env, source_asset):
 
     with pytest.raises(MediaUnavailable):
         invoke(ctx, "render-project", {"project_id": pid})
+
+
+def test_rendering_an_edit_composed_from_blocked_footage_is_refused(env, source_asset):
+    """T-044 AC-1. F-4: editing is a production function, not a
+    copyright-clearing one — an edit built from BLOCKED footage must not
+    render successfully just because rendering does not itself publish
+    anything. The refusal names the offending asset, not just the verdict."""
+    cfg, ctx = env
+    # source_asset is already PERMITTED (the fixture runs determine-rights);
+    # re-declare it as third-party with no licence, which THE_PARTY_MATERIAL_
+    # UNCLEARED (conservative-1.0.0.yaml) blocks outright and unconditionally.
+    op_ctx = Context(config=cfg, conn=ctx.conn, principal=operator("op"))
+    ctx.conn.execute(
+        "UPDATE rights_declarations SET authorship = 'third_party',"
+        " third_party_material = '[\"unlicensed clip\"]' WHERE asset_id = ?",
+        (source_asset,),
+    )
+    invoke(op_ctx, "determine-rights", {"asset_id": source_asset})
+    assert invoke(op_ctx, "rights", {"asset_id": source_asset})["verdict"] == "BLOCKED"
+
+    pid = invoke(ctx, "create-project", {"title": "P"})["project_id"]
+    invoke(ctx, "set-edl", {"project_id": pid, "edl": an_edl(source_asset)})
+
+    with pytest.raises(RightsBlocked) as excinfo:
+        invoke(ctx, "render-project", {"project_id": pid})
+    assert excinfo.value.detail["asset_id"] == source_asset
+    assert excinfo.value.detail["verdict"] == "BLOCKED"
 
 
 def test_rendering_an_edit_referencing_no_such_asset_is_refused(env, source_asset):
@@ -341,7 +436,12 @@ def test_capabilities_reports_what_cannot_be_generated(env):
     assert "video generation" in missing
     for item in caps["not_available"]:
         assert item["needs"], f"{item['capability']} does not say what it needs"
-    assert all(s["fabrication"] == "F-003" for s in caps["known_substitutions"])
+    # UPDATED FOR T-045: F-003 is retired, so there is nothing left to warn
+    # about. This used to be `all(... == "F-003" ...)`, which is vacuously
+    # true over an empty list and would have kept passing silently even after
+    # T-045 landed — asserting the empty list directly instead, so a future
+    # regression that reintroduces a substitution is caught here too.
+    assert caps["known_substitutions"] == []
 
 
 def test_every_advertised_transition_is_either_implemented_or_reported(env):
@@ -368,11 +468,24 @@ def test_every_advertised_transition_is_either_implemented_or_reported(env):
 @needs_ffmpeg
 @pytest.mark.parametrize("transition", ["dissolve", "wipeleft", "wiperight",
                                         "slideup", "slidedown"])
-def test_each_unimplemented_transition_is_reported_on_the_render(
+def test_each_transition_is_honest_now_that_f_003_is_retired(
     transition, env, source_asset
 ):
-    """Not just dissolve. Every one that lies must say so, on the render that
-    used it."""
+    """UPDATED FOR T-045. This test used to assert that each of these five
+    lied about what it rendered (F-003), and had to be caught doing so. T-045
+    gave all five a real ffmpeg xfade implementation, replacing the old
+    concat-only composition model — independently re-verified per transition
+    by the coordinator (2026-08-14), not taken from the agent's report alone:
+    for each of wipeleft/wiperight/slideup/slidedown, the decoded frame at
+    the transition's exact midpoint shows a clean, correctly-oriented
+    spatial split between the two source clips (e.g. wipeleft: left half
+    still the outgoing colour, right half already the incoming one — the
+    mirror image for wiperight; top/bottom for slideup/slidedown) rather than
+    a uniform blend or a plain cut, at the correct overlap-subtracted
+    duration. That is real, measured proof each name does what it claims,
+    the same evidentiary bar dissolve was already held to
+    (tests/test_transitions.py::test_dissolve_blends_both_clips_at_the_midpoint_ac1).
+    So none of the five has anything left to report."""
     cfg, ctx = env
     pid = invoke(ctx, "create-project", {"title": "P"})["project_id"]
     edl = an_edl(source_asset)
@@ -381,8 +494,10 @@ def test_each_unimplemented_transition_is_reported_on_the_render(
     invoke(ctx, "set-edl", {"project_id": pid, "edl": edl})
 
     result = invoke(ctx, "render-project", {"project_id": pid, "quality": "fast"})
-    reported = {s["requested"] for s in result["substitutions"]}
-    assert transition in reported, f"'{transition}' rendered as something else, silently"
+    assert result["substitutions"] == [], (
+        f"'{transition}' reported a substitution — it has regressed to lying "
+        "about what it rendered, or T-045's xfade path is not being taken"
+    )
 
 
 @needs_ffmpeg

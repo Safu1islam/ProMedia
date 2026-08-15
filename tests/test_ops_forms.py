@@ -325,12 +325,28 @@ def _seed_full_slice(ctx, media_file):
         "edl": {"aspect": "landscape_720",
                 "clips": [{"asset_id": asset["asset_id"], "start": 0, "end": 1}]},
     })
+    # R-006. A real renders row, so delete-render's probe would genuinely find
+    # and delete something rather than fail on NotFound before proving
+    # anything — same reasoning as every other id in this dict. Written
+    # directly (like tests/test_render_storage.py's legacy-render case)
+    # rather than through a real ffmpeg encode, which delete-render does not
+    # need in order to act.
+    render_id = "rnd_probe"
+    render_output = media_file.parent / "probe-render.mp4"
+    render_output.write_bytes(b"a render for the GET-must-not-execute probe")
+    ctx.conn.execute(
+        "INSERT INTO renders (id, project_id, edl_version, output_path, quality,"
+        " width, height, duration_seconds, byte_size, substitutions, rendered_by, rendered_at)"
+        " VALUES (?, ?, 1, ?, 'fast', 1280, 720, 1.0, 123, NULL, 'probe', ?)",
+        (render_id, project["project_id"], str(render_output), db.iso()),
+    )
     return {
         "account_id": account["account_id"],
         "asset_id": asset["asset_id"],
         "post_id": post["post_id"],
         "provenance_id": sealed["provenance_id"],
         "project_id": project["project_id"],
+        "render_id": render_id,
         "source_path": str(media_file),
         # A REAL artefact, so restore-permanent-set's probe is a call that would
         # genuinely do something. A path to nothing would make the GET fail on
@@ -378,6 +394,17 @@ def _valid_query_for(op, seeded):
         "quality": "fast",
         "version": "1",
         "note": "a GET must not record this edit",
+        "expected_version": "2",
+        # T-046 acquisition, T-048 providers/spend ledger. Values that would
+        # genuinely succeed if this were ever actually invoked, matching
+        # every other entry in this dict — even though the whole point of
+        # the test is that a GET never reaches invoke() at all.
+        "url": "https://example.com/video",
+        "capability": "transcription",
+        "provider": "test-provider",
+        "amount_usd": "1.00",
+        "approved": "true",
+        "input_ref": seeded["asset_id"],
     })
     query = {}
     for p in op.params:

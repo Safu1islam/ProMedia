@@ -17,8 +17,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ...errors import ValidationError
 from . import ffmpeg
-from .edl import EDL, Clip, TextOverlay
+from .edl import EDL, Clip, TextOverlay, TIMELINE_TRANSITIONS
 
 # ffmpeg filter fragments per named effect. Kept here, next to the compiler, so
 # that adding an effect to the EDL vocabulary and teaching the compiler to
@@ -43,15 +44,46 @@ EFFECT_FILTERS: dict[str, str] = {
 # was a hand-written list in another module, and it drifted from this one
 # immediately. An independent audit found it by executing _clip_chain over all
 # seven values rather than reading either list.
+#
+# RETIRED 2026-08-14 (T-045). All five were the same underlying defect: concat
+# carries no absolute timeline offset, and every one of these needs ffmpeg's
+# xfade (video) / acrossfade (audio) filters, which do. Once the graph could
+# express an offset at all, it turned out ffmpeg's own xfade transition
+# vocabulary already contains 'dissolve', 'wipeleft', 'wiperight', 'slideup'
+# and 'slidedown' under exactly those names (see XFADE_TRANSITIONS) — so
+# implementing the composition model once retired all five, not just the one
+# AC-1 names. Every value below is None: nothing in the advertised vocabulary
+# renders as anything other than what was asked for.
+#
+# projects.py's tests/test_projects.py::test_a_render_reports_what_it_did_not_do_as_asked
+# and test_each_unimplemented_transition_is_reported_on_the_render pin the OLD
+# values (dissolve/wipeleft/wiperight/slideup/slidedown reported as
+# substitutions). Those are now stale by design — this dict is their source of
+# truth and T-042 built it that way on purpose ("the reporting follows
+# automatically") — but T-045 does not own tests/test_projects.py and does not
+# edit it. Reported as a finding, not silently patched around.
 TRANSITION_REALITY: dict[str, str | None] = {
-    "cut": None,                      # the absence of a transition; correct
-    "fade": None,                     # fade from black; correct
-    "dissolve": "fade from black",    # WRONG: a real dissolve blends two clips
-    "wipeleft": "hard cut",           # not implemented at all
-    "wiperight": "hard cut",
-    "slideup": "hard cut",
-    "slidedown": "hard cut",
+    "cut": None,        # the absence of a transition; correct
+    "fade": None,        # fade from black; correct
+    "dissolve": None,    # real cross-dissolve via xfade (was: fade from black)
+    "wipeleft": None,    # real xfade wipe (was: hard cut, no filter at all)
+    "wiperight": None,   # real xfade wipe (was: hard cut, no filter at all)
+    "slideup": None,     # real xfade slide (was: hard cut, no filter at all)
+    "slidedown": None,   # real xfade slide (was: hard cut, no filter at all)
 }
+
+# Transitions realised with ffmpeg's xfade/acrossfade filters rather than a
+# filter applied to one clip in isolation. Backed by edl.TIMELINE_TRANSITIONS
+# (the vocabulary-level fact "this transition needs a previous clip") rather
+# than redeclared here, so the two cannot drift.
+#
+# The mapping to ffmpeg's own `transition=` values is the identity: verified
+# against this build (`ffmpeg -h filter=xfade`) that wipeleft/wiperight/
+# slideup/slidedown/dissolve exist under exactly these names in xfade's own
+# enum. That coincidence is what makes retiring four "no filter at all" cases
+# and one "wrong filter" case the same eight lines of code instead of five
+# bespoke ones.
+XFADE_TRANSITIONS = frozenset(TIMELINE_TRANSITIONS)
 
 
 def transition_substitution(transition: str) -> str | None:
@@ -93,6 +125,12 @@ class RenderPlan:
     height: int
     quality: str
     source_count: int
+    # AC-2. The timeline length this graph actually produces: the sum of every
+    # clip's own duration MINUS every real transition's overlap (xfade/
+    # acrossfade shorten the timeline by exactly their `duration`; a plain cut
+    # or a fade-from-black do not). None when it cannot be computed without
+    # probing a source — see _compose_timeline.
+    expected_duration_seconds: float | None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -101,6 +139,7 @@ class RenderPlan:
             "quality": self.quality,
             "sources": self.source_count,
             "filter_graph": self.filter_graph,
+            "expected_duration_seconds": self.expected_duration_seconds,
         }
 
 
@@ -119,10 +158,11 @@ def _clip_chain(index: int, clip: Clip, width: int, height: int) -> str:
     effect = EFFECT_FILTERS.get(clip.effect, "")
     if effect:
         steps.append(effect)
-    if clip.transition_in in ("fade", "dissolve") and clip.transition_duration > 0:
-        # A fade from black at the head of the clip. True cross-dissolves
-        # between clips need xfade, which requires absolute timeline offsets;
-        # this is the honest subset that works with concat.
+    if clip.transition_in == "fade" and clip.transition_duration > 0:
+        # A fade from black at the head of the clip. Deliberately NOT applied
+        # for 'dissolve' (or any other XFADE_TRANSITIONS member) any more —
+        # those are real cross-clip blends now, built at the graph level in
+        # compile_render via xfade, not a filter on one clip in isolation.
         steps.append(f"fade=t=in:st=0:d={clip.transition_duration:g}")
     return f"[{index}:v]" + ",".join(steps) + f"[v{index}]"
 
@@ -147,6 +187,150 @@ def _audio_chain(index: int, clip: Clip) -> str:
     steps.append("aresample=48000")
     steps.append("aformat=sample_fmts=fltp:channel_layouts=stereo")
     return f"[{index}:a]" + ",".join(steps) + f"[a{index}]"
+
+
+# --- timeline composition (T-045) --------------------------------------------
+#
+# concat has no notion of "this clip starts before the previous one ends" — it
+# is a strict end-to-end splice. xfade/acrossfade DO overlap two streams, but
+# they need to be told exactly where on the timeline the overlap begins, and
+# concat's output carries no such coordinate. So a real transition forces the
+# clip list to be cut into SEGMENTS at every point one is requested: clips
+# joined by 'cut' or 'fade' keep concatenating exactly as before (this is what
+# keeps every pre-T-045 filter_graph assertion in tests/test_edl.py true
+# byte-for-byte whenever an edit uses none of XFADE_TRANSITIONS), and adjacent
+# segments are stitched with xfade/acrossfade instead.
+
+Segment = list[tuple[int, Clip]]
+
+
+def _segments(clips: list[Clip]) -> list[Segment]:
+    """Group clips into runs joined by concat, split at every real transition.
+
+    A boundary belongs to clip[i] (i >= 1): it describes how clip[i] enters,
+    relative to clip[i-1]. edl.validate() already refuses a real transition on
+    clip[0] (there is nothing before it to blend with), so index 0 never
+    starts a segment on its own account here — it is simply always the first
+    clip of the first segment.
+    """
+    segments: list[Segment] = [[(0, clips[0])]]
+    for index in range(1, len(clips)):
+        clip = clips[index]
+        if clip.transition_in in XFADE_TRANSITIONS:
+            segments.append([(index, clip)])
+        else:
+            segments[-1].append((index, clip))
+    return segments
+
+
+def _segment_duration(segment: Segment) -> float | None:
+    """Total duration of a segment's clips, or None if any is open-ended.
+
+    Deliberately NOT resolved by probing the source here: compile_render never
+    spawns a subprocess (that is execute()'s job), and tests/test_edl.py pins
+    exactly that property by calling compile_render with source paths that do
+    not exist on disk at all. An open-ended clip (end=None) whose duration is
+    needed for an offset is refused with a clear message instead — see its use
+    in compile_render.
+    """
+    total = 0.0
+    for _, clip in segment:
+        duration = clip.duration(None)
+        if duration is None:
+            return None
+        total += duration
+    return total
+
+
+def _concat_segment(segment: Segment, chains: list[str], tag: str) -> tuple[str, str]:
+    """Concatenate one segment's clips into a single [v.]/[a.] pair.
+
+    A single-clip segment needs no concat filter at all — its own [vN]/[aN]
+    labels already ARE the segment's output. Skipping the no-op filter is what
+    keeps a plain two-clip cut edit's filter_graph identical to the pre-T-045
+    shape (single segment, no concat-of-one anywhere new).
+    """
+    if len(segment) == 1:
+        index = segment[0][0]
+        return f"v{index}", f"a{index}"
+    concat_inputs = "".join(f"[v{i}][a{i}]" for i, _ in segment)
+    chains.append(f"{concat_inputs}concat=n={len(segment)}:v=1:a=1[vseg{tag}][aseg{tag}]")
+    return f"vseg{tag}", f"aseg{tag}"
+
+
+def _compose_timeline(
+    clips: list[Clip], chains: list[str]
+) -> tuple[str, str, float | None]:
+    """Build the video/audio graph for a clip list, honouring real transitions.
+
+    Returns (video_label, audio_label, expected_duration_seconds). Appends
+    whatever concat/xfade/acrossfade filters are needed to ``chains``.
+    """
+    segments = _segments(clips)
+
+    if len(segments) == 1:
+        # No real transition anywhere in this edit. This is the common case,
+        # and it is spelled out exactly as compile_render always has, rather
+        # than routed through _concat_segment, so the emitted string is
+        # identical to every existing 'concat=n=...' assertion.
+        concat_inputs = "".join(f"[v{i}][a{i}]" for i in range(len(clips)))
+        chains.append(f"{concat_inputs}concat=n={len(clips)}:v=1:a=1[vcat][acat]")
+        return "vcat", "acat", _segment_duration(segments[0])
+
+    video_label, audio_label = _concat_segment(segments[0], chains, "0")
+    cumulative_duration = _segment_duration(segments[0])
+
+    for seg_index in range(1, len(segments)):
+        segment = segments[seg_index]
+        boundary_index, boundary_clip = segment[0]
+        where = f"clips[{boundary_index}]"
+        duration = boundary_clip.transition_duration
+
+        if cumulative_duration is None:
+            raise ValidationError(
+                f"{where}.transition_in '{boundary_clip.transition_in}' needs the "
+                "exact duration of every clip before it on the timeline, and an "
+                "earlier clip has no explicit 'end' — give every clip before this "
+                "one an explicit end, or use 'cut'",
+                parameter=where,
+            )
+        if duration <= 0:
+            raise ValidationError(
+                f"{where}.transition_duration must be greater than 0 for "
+                f"transition_in '{boundary_clip.transition_in}'",
+                parameter=where,
+            )
+        if duration >= cumulative_duration:
+            raise ValidationError(
+                f"{where}.transition_duration ({duration:g}s) cannot reach past "
+                f"the start of the clips before it ({cumulative_duration:g}s)",
+                parameter=where,
+            )
+        seg_video, seg_audio = _concat_segment(segment, chains, str(seg_index))
+        seg_duration = _segment_duration(segment)
+        if seg_duration is not None and duration >= seg_duration:
+            raise ValidationError(
+                f"{where}.transition_duration ({duration:g}s) cannot reach past "
+                f"the end of its own clip ({seg_duration:g}s)",
+                parameter=where,
+            )
+
+        offset = cumulative_duration - duration
+        new_video, new_audio = f"vx{seg_index}", f"ax{seg_index}"
+        # xfade needs the ABSOLUTE offset concat cannot carry — the reason
+        # this whole composition model exists (F-003's root cause).
+        chains.append(
+            f"[{video_label}][{seg_video}]xfade=transition={boundary_clip.transition_in}:"
+            f"duration={duration:g}:offset={offset:g}[{new_video}]"
+        )
+        # acrossfade needs no offset: it crossfades the TAIL of stream 1 with
+        # the HEAD of stream 2 for `d` seconds by construction, which is
+        # exactly the audio counterpart of what the video offset expresses.
+        chains.append(f"[{audio_label}][{seg_audio}]acrossfade=d={duration:g}[{new_audio}]")
+        video_label, audio_label = new_video, new_audio
+        cumulative_duration = None if seg_duration is None else offset + seg_duration
+
+    return video_label, audio_label, cumulative_duration
 
 
 def _text_filter(overlay: TextOverlay, font: Path | None, text_path: Path) -> str:
@@ -211,8 +395,6 @@ def compile_render(
     """
     edl.validate()
     if quality not in QUALITY_PRESETS:
-        from ...errors import ValidationError
-
         raise ValidationError(
             f"unknown quality '{quality}'", parameter="quality",
             supported=sorted(QUALITY_PRESETS),
@@ -245,10 +427,8 @@ def compile_render(
         chains.append(_clip_chain(index, clip, width, height))
         chains.append(_audio_chain(index, clip))
 
-    concat_inputs = "".join(f"[v{i}][a{i}]" for i in range(len(edl.clips)))
-    chains.append(f"{concat_inputs}concat=n={len(edl.clips)}:v=1:a=1[vcat][acat]")
+    video_label, base_audio_label, expected_duration = _compose_timeline(edl.clips, chains)
 
-    video_label = "vcat"
     if edl.text:
         scratch = workspace or (output_path.parent / f".{output_path.stem}-text")
         text_filters = ",".join(
@@ -258,7 +438,7 @@ def compile_render(
         chains.append(f"[{video_label}]{text_filters}[vtxt]")
         video_label = "vtxt"
 
-    audio_label = "acat"
+    audio_label = base_audio_label
     for position, track in enumerate(edl.audio):
         input_index = audio_offset + position
         steps = [f"volume={track.volume:g}", "aresample=48000",
@@ -295,6 +475,7 @@ def compile_render(
     return RenderPlan(
         args=args, filter_graph=filter_graph, output_path=output_path,
         width=width, height=height, quality=quality, source_count=len(ordered_ids),
+        expected_duration_seconds=expected_duration,
     )
 
 

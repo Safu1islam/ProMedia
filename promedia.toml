@@ -37,3 +37,33 @@ ttl_minutes = 90
 # DR-004 / DR-008 residual risk: localhost only.
 host = "127.0.0.1"
 port = 8765
+
+[acquire]
+# T-046. Fallback storage estimate when a source reports no filesize at all,
+# so the pre-download reservation (F-7) still has something honest to reserve
+# against. Matches C-12's "typical master file size" assumption (~1.5 GB).
+default_estimate_bytes = 1610612736
+# yt-dlp format selector. "best" keeps acquisition to a single output file,
+# avoiding a video+audio merge step.
+format = "best"
+socket_timeout_seconds = 30
+
+[analysis]
+# T-047. Silence detection (ffmpeg silencedetect) and the rough-cut proposal.
+silence_noise_threshold_db = -30.0
+silence_min_duration_seconds = 0.5
+rough_cut_min_clip_seconds = 1.0
+rough_cut_padding_seconds = 0.15
+scene_change_threshold = 0.4
+# faster-whisper model size used when an operation does not name one.
+transcription_model_size = "base"
+analysis_timeout_seconds = 120
+
+[spend]
+# C-31 (T-048): $100/month ceiling across all paid AI capability providers.
+# Hard stop at 150% ($150) — a stop, not a warning. Per-operation cap $5
+# without explicit approval. Enforced by promedia/core/providers/spend.py,
+# which records and refuses only; nothing in this codebase spends money.
+monthly_ceiling_usd = 100.0
+hard_stop_fraction = 1.5
+per_operation_cap_usd = 5.0

@@ -109,7 +109,7 @@ function fmtDate(iso: string): string {
           <tr><th>Project</th><th>Version</th><th>Created by</th><th>Last changed</th></tr>
         </thead>
         <tbody>
-          <tr v-for="p in projects" :key="p.id" class="row" tabindex="0" role="button"
+          <tr v-for="p in projects" :key="p.id" class="row" tabindex="0"
               :aria-label="`Open project ${p.title}`"
               @click="router.push(`/editor/${p.id}`)"
               @keydown.enter="router.push(`/editor/${p.id}`)"

@@ -42,8 +42,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: "/agent",
     name: "agent",
-    component: () => import("./views/PanelPlaceholderView.vue"),
-    props: { screenId: "agent" },
+    component: () => import("./views/AgentWorkspaceView.vue"),
   },
   {
     path: "/generation",

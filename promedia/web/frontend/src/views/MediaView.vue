@@ -46,6 +46,26 @@ function onFileChange(e: Event) {
   file.value = input.files?.[0] ?? null;
 }
 
+// The /media route renders its refusal as an HTML page (error.html), not
+// JSON — there is no fetch-friendly error body. Parsing the actual DOM
+// (error.error in <h1>, error.message in .banner.bad) surfaces the SAME
+// reason the CLI and the Jinja2 workspace show, instead of a single
+// hardcoded guess that collapsed every VALIDATION refusal into "a rights
+// declaration is required" and silently lost every other refusal's message
+// — including the F-7 storage-ceiling refusal, a first-class expected
+// outcome the operator needs to be able to act on.
+function parseErrorPage(html: string): string | null {
+  try {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const code = doc.querySelector("h1")?.textContent?.trim();
+    const message = doc.querySelector(".banner.bad")?.textContent?.trim();
+    if (!message) return null;
+    return code ? `${code}: ${message}` : message;
+  } catch {
+    return null;
+  }
+}
+
 // Reuses T-050's exact /media upload route rather than a second
 // implementation: this is adapter-level staging (write bytes to a temp
 // path, then call the `ingest` operation), not a capability of its own, and
@@ -62,10 +82,18 @@ async function upload() {
     const response = await fetch("/media", { method: "POST", body: form, credentials: "same-origin" });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(text.includes("VALIDATION") ? "a rights declaration is required" : `upload failed (HTTP ${response.status})`);
+      throw new Error(parseErrorPage(text) ?? `upload failed (HTTP ${response.status})`);
     }
     const assetId = new URL(response.url).pathname.split("/").filter(Boolean).pop();
-    if (assetId) router.push(`/media/${assetId}`);
+    if (assetId) {
+      router.push(`/media/${assetId}`);
+    } else {
+      // Redirect landed somewhere unparseable — surface that rather than
+      // doing nothing at all and leaving the operator staring at a spinner
+      // that quietly stopped.
+      uploadError.value = "upload finished, but the asset id could not be read from the redirect — reloading the list.";
+      await load();
+    }
   } catch (err) {
     uploadError.value = err instanceof Error ? err.message : "upload failed";
   } finally {
@@ -128,7 +156,7 @@ function fmtMB(bytes: number): string {
       <table>
         <thead><tr><th>Asset</th><th>Rights</th><th>Media</th><th>Size</th></tr></thead>
         <tbody>
-          <tr v-for="a in filtered" :key="a.id" class="row" tabindex="0" role="button"
+          <tr v-for="a in filtered" :key="a.id" class="row" tabindex="0"
               :aria-label="`Open asset ${a.original_filename}`"
               @click="router.push(`/media/${a.id}`)"
               @keydown.enter="router.push(`/media/${a.id}`)"

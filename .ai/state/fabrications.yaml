@@ -140,13 +140,220 @@ fabrications:
       An absolute-offset composition model that can express overlapping clips,
       allowing xfade. Recorded in DR-016 revisit_if.
     replacement_task: T-045
-    status: active
+    status: resolved
+    resolved_at: "2026-08-14"
+    resolved_by_task: T-045
     blocks_release: false
     interim_mitigation: >
-      NONE YET — this is why it is registered rather than resolved. The cheapest
-      honest interim is for the render result to report the substitution, so a
-      caller asking for 'dissolve' is told it rendered a fade. That belongs with
-      T-042, which is where render results first reach a surface.
+      SUPERSEDED. Reporting the substitution shipped in T-042 and worked as
+      intended; it is now moot because there is nothing left to report.
+    resolution: >
+      T-045 replaced the concat-based composition model with an
+      absolute-offset one (render._compose_timeline), letting adjacent
+      segments be stitched with ffmpeg's real xfade (video) / acrossfade
+      (audio) filters at a computed offset instead of a plain concat.
+      render.TRANSITION_REALITY now maps all seven vocabulary entries to
+      None (no substitution) rather than three.
+
+      Verified per transition, not taken from the implementing agent's report
+      alone (that report only measured 'dissolve' before the session ended —
+      see .ai/HANDOFF-2026-08-14-parallel-run.md §3):
+        - dissolve: at the transition's exact midpoint (t=2.5s, red->blue,
+          1.0s dissolve over 3+3s clips) the decoded frame shows R=119.9
+          G=7.5 B=132.2, mean luminance 86.5 — a genuine blend of both source
+          colours, sharply distinct from the same edit with 'fade' at its
+          midpoint (mean luminance 43.7, and 0.0/pure black at the cut
+          point). tests/test_transitions.py::test_dissolve_blends_both_clips_at_the_midpoint_ac1.
+        - wipeleft / wiperight / slideup / slidedown: independently rendered
+          and pixel-sampled by REGION (not whole-frame mean, since these are
+          spatially directional) at the same t=2.5s midpoint. Each shows a
+          clean, sharp, correctly-oriented 50/50 spatial split between the
+          two source colours — wipeleft: left half still red (R=243.6),
+          right half already blue (B=254.0); wiperight: the mirror image;
+          slideup: top red / bottom blue; slidedown: top blue / bottom red —
+          with duration correctly overlap-subtracted to 5.00s in every case.
+          A uniform blend (dissolve's signature) or an unsplit frame (a hard
+          cut, or a mislabelled/defaulted transition) would both have failed
+          this check; none did. Script and raw output available in this
+          session's scratchpad if needed again.
+      Structural regression coverage:
+      tests/test_transitions.py::test_every_previously_silent_hard_cut_now_emits_its_own_xfade
+      and ::test_every_previously_hard_cut_transition_renders_without_error
+      (parametrised over all four), plus
+      tests/test_projects.py::test_every_advertised_transition_is_either_implemented_or_reported,
+      which asserts EDL.TRANSITIONS and render.TRANSITION_REALITY match as a
+      rule over the whole vocabulary — so a transition added later without a
+      real implementation fails this immediately, not eventually.
+      tests/test_projects.py and tests/test_editor_ui.py's eight tests that
+      asserted the old substitution behaviour were rewritten (coordinator,
+      2026-08-14) to assert the new one; none was deleted. Two of the
+      editor_ui rewrites (test_the_marking_can_actually_go_missing,
+      test_dashboard_flags_a_substitution_if_one_is_ever_recorded) now prove
+      the WARNING MACHINERY itself still works, by forcing a substitution
+      back in via monkeypatch/direct row edit, since no real transition can
+      exercise that path honestly anymore.
+
+  - id: F-004
+    created_by_task: T-047
+    created_at: "2026-08-14"
+    kind: honest_absence
+    location: promedia/core/media/analyse.py — transcribe operation
+    what_is_fake: >
+      Nothing is fake. Registered per the task's own fabrications_introduced
+      list in tasks.yaml, which named this but was never written here — see
+      .ai/HANDOFF-2026-08-14-parallel-run.md §6. `faster-whisper` is not
+      installed on this machine (verified twice by the implementing agent:
+      `pip show` reports nothing, `import` raises ModuleNotFoundError, `torch`
+      also absent). The `transcribe` operation raises a structured
+      TranscriptionUnavailable naming the package, install command, model
+      size, download-size estimate, CPU realtime-factor estimate and a
+      remedy — it never returns an empty result and calls that success.
+      Kept in this registry for the same reason ffprobe's absence is NOT
+      registered here (see the notes section below): an honest, structurally
+      reported absence is not itself a fabrication under this project's own
+      convention, EXCEPT that the two estimates it carries (download size,
+      realtime factor) are not measurements — see F-005, which is the actual
+      fabricated content here.
+    why: >
+      Installing faster-whisper is an operator decision (several-hundred-MB
+      disk/bandwidth cost, and T-041's precedent for installing system
+      tooling rested on explicit operator instruction, which this task did
+      not carry) — an agent should not install it unasked. No code change
+      follows the install; the operation already carries both `segments` and
+      `captions` in TextOverlay shape.
+    visible_to_user: true
+    visibility_note: >
+      Every caller of `transcribe` on this machine receives a structured
+      refusal naming exactly what is missing, never a silent empty result —
+      tests/test_analyse.py::test_transcribe_operation_refuses_structurally_through_the_real_operation_layer
+      exercises this through the real registered operation, not the bare
+      function.
+    replacement_condition: "pip install faster-whisper, plus a model choice. Operator decision; no code change follows."
+    replacement_task: null
+    status: active
+    blocks_release: false
+
+  - id: F-005
+    created_by_task: T-047
+    created_at: "2026-08-14"
+    kind: unverified_constant
+    location: promedia/core/media/analyse.py — transcription_requirements()
+    what_is_fake: >
+      Per-model download sizes and CPU realtime-factor estimates shown to a
+      caller asking what installing faster-whisper would cost, in time and
+      bandwidth. Disclosed estimates from general knowledge, not benchmarks
+      run on this hardware.
+    why: >
+      A caller deciding whether to ask the operator to install the package
+      needs SOME idea of the cost before committing several hundred MB and
+      an unknown amount of CPU time; a bare "unknown" would make the
+      capability-requirements response useless for that decision, unlike
+      API pricing (project.md O-3), where no such estimate is admissible at
+      all because the number becomes real dollars the instant it is wrong.
+    visible_to_user: false
+    visibility_note: >
+      Not user-visible as a decision-grade number: it appears only inside
+      capability-requirements/TranscriptionUnavailable's advisory detail,
+      never in a verdict, a ledger total, or anything F-2/F-5 gate on.
+    replacement_condition: >
+      A real run on this machine, the same way T-041 measured render speed
+      (60s of footage, three quality presets, real wall-clock time) once
+      faster-whisper is actually installed.
+    replacement_task: null
+    status: active
+    blocks_release: false
+
+  - id: F-006
+    created_by_task: T-043
+    created_at: "2026-08-14"
+    kind: unverified_constant
+    location: promedia/config.py — media.render_size_safety_margin
+    what_is_fake: >
+      A 1.25 multiplier applied on top of the duration x bitrate render-size
+      projection. A round number, not derived from any observed distribution
+      of estimate errors — none exists yet, because T-043 is the first place
+      a projected byte figure is ever reconciled against a real, measured one
+      via storage.commit().
+    why: >
+      The projection has to exist before the render runs, and no error
+      distribution can be measured until real renders have gone through
+      commit() and been compared. A safety margin has to ship with some
+      value; this one is a guess in the safe direction (over-reservation),
+      not an estimate from data.
+    visible_to_user: false
+    visibility_note: >
+      Not user-visible: it only affects a transient over-reservation during
+      the render window, which storage.commit() always corrects to the true
+      byte count immediately after. No verdict, ledger total, or displayed
+      figure is ever wrong because of it once a render completes.
+    replacement_condition: >
+      Enough real renders have gone through commit() to compare
+      projected_bytes against committed_bytes and compute an actual error
+      distribution; tighten or loosen from measured data rather than a guess.
+    replacement_task: null
+    status: active
+    blocks_release: false
+
+  - id: F-007
+    created_by_task: T-043
+    created_at: "2026-08-14"
+    kind: unverified_constant
+    location: "promedia/config.py — media.estimated_bitrate_bytes_per_second['fast'] and ['quality']"
+    what_is_fake: >
+      150000 and 260000 bytes/sec respectively. NOT independently measured —
+      extrapolated from the CRF each quality preset uses, relative to the two
+      values that ARE anchored to a real T-041 measurement ('balanced'
+      ~175000, 'hardware' ~95000 bytes/sec, both close to real 60s-render
+      byte counts already on record from that task).
+    why: >
+      T-041 only measured 'balanced' and 'hardware' quality on the operator's
+      own footage. 'fast' and 'quality' were never separately benchmarked;
+      shipping the render-size projection without SOME figure for all four
+      configured qualities would leave two of them unable to project at all.
+    visible_to_user: false
+    visibility_note: >
+      Could be mistaken for a measurement if the config comment is not read.
+      Same mitigation as F-006: storage.commit() reconciles to the real
+      byte_size the instant a render finishes, so no persisted or displayed
+      figure stays wrong — only the transient reservation window is affected.
+    replacement_condition: >
+      Run a real render at 'fast' and 'quality' quality on representative
+      footage and replace these two figures with the observed bytes/sec, the
+      same way 'balanced' and 'hardware' were derived from T-041's measurement.
+    replacement_task: null
+    status: active
+    blocks_release: false
+
+  - id: F-008
+    created_by_task: T-043
+    created_at: "2026-08-14"
+    kind: unverified_constant
+    location: promedia/config.py — media.unknown_clip_duration_seconds
+    what_is_fake: >
+      A 60-second per-clip fallback duration, used only when a clip runs to
+      the end of its source and that source's duration was never probed
+      (residue of retired assumption A-15 — probing absent or failed at
+      ingest). Not a measurement of anything; a deliberately generous guess
+      so the render-size projection has a number to use.
+    why: >
+      Duration must be known to project render size before encoding starts
+      (AC-1). Almost every source now carries a real ffprobe duration since
+      A-15's retirement, but the case where probing itself failed still
+      needs a value rather than a crash or a silent zero.
+    visible_to_user: false
+    visibility_note: >
+      Every render result whose projection used this fallback carries
+      storage.duration_measured=False, specifically so the estimate is never
+      read downstream as a real measurement. No verdict or ledger total is
+      permanently wrong because of it — storage.commit() reconciles to the
+      real output size regardless of which duration the projection used.
+    replacement_condition: >
+      Becomes moot once every stored asset has a probed duration (ffmpeg 9.0
+      is already installed per A-15's retirement in T-041); until then it is
+      the honest fallback for the residual case where probing itself failed.
+    replacement_task: null
+    status: active
+    blocks_release: false
 
 notes:
   - >
@@ -185,3 +392,28 @@ notes:
     fabrication because nothing fake is produced: the absence is recorded
     honestly and tested (test_ingest.py::test_missing_probe_records_unavailable_not_guess).
     A guessed duration would have been a fabrication.
+  - >
+    T-048's AI capability providers (promedia/core/providers/{text,speech,image,
+    video,transcription}.py) are, on this machine, unconditionally unavailable —
+    every capability's available() checks a real package (importlib.util.find_spec)
+    and a real credential (os.environ), both genuinely absent for all five.
+    NOT registered as a fabrication, checked directly (coordinator, 2026-08-14):
+    base.py's estimate() unconditionally returns UNKNOWN for unit, unit_cost_usd
+    and basis, never a number — no capability subclass overrides it or carries any
+    numeric constant of its own (grepped: none define anything beyond kind,
+    provider_name, package, credential_env, pricing_reference, all plain
+    strings). This is the T-012/DR-010 "unknown reads as unknown, never a
+    plausible guess" discipline applied here without exception, unlike T-047's
+    F-005 above (which DOES carry two invented numbers) or T-043's F-006/F-007
+    (invented bitrate figures) — the difference is exactly what makes those three
+    fabrications and this one not. The handoff (.ai/HANDOFF-2026-08-14-parallel-run.md
+    §6) asked for a fabrication list to be "rebuilt from the code" here; rebuilding
+    it found nothing to register, which is itself the finding, recorded so a future
+    session does not re-open this without re-checking the code first. Also grepped
+    (per the same handoff item) for any purchase/checkout/payment/network-client
+    code anywhere in promedia/core/providers/: none exists — spend.py only ever
+    writes a ledger row or refuses, never contacts anything. Independently
+    sabotage-verified: disabling spend.record()'s C-31 refusal check failed
+    exactly the three ceiling/cap tests in tests/test_providers.py; reverted,
+    spend.py SHA-256 4ed1eebd63d06d48413f0e120a6b4e6c65c4864e0564a6232d9ba89c8a4e2e0d
+    confirmed identical pre/post.

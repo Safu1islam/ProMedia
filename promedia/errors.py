@@ -135,3 +135,19 @@ class LedgerDrift(ProMediaError):
 class ConfigurationError(ProMediaError):
     code = "CONFIGURATION"
     exit_code = 2
+
+
+class PlatformError(ProMediaError):
+    """A real call to an external platform (T-019) failed or was refused.
+
+    Deliberately distinct from ``ConfigurationError``: a configuration error is
+    a problem this process could have caught before making the call (a
+    malformed credential, a missing field); a ``PlatformError`` is the
+    platform itself failing or refusing the request over the network, and the
+    caller cannot fix it by reading its own config. Both surfaces only give
+    structured, non-traceback output for ``ProMediaError`` subclasses (T-003
+    AC-4), so a real HTTP failure needs one of these or it reaches an operator
+    as a raw stack trace instead of a reported error.
+    """
+
+    code = "PLATFORM_ERROR"

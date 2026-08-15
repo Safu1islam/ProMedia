@@ -66,6 +66,10 @@ LOCKING_OPERATIONS = {
     # produces an output attributed to a version it did not come from.
     "set-edl",
     "render-project",
+    # R-006. Same reasoning as render-project: the entity is the project, not
+    # the render, because a delete racing a concurrent edit or render of the
+    # SAME project is the hazard C-19 exists to close.
+    "delete-render",
 }
 
 # Mutating operations that CREATE their entity. There is no id to lock because

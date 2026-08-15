@@ -43,6 +43,17 @@ ASPECT_PRESETS: dict[str, tuple[int, int]] = {
 
 TRANSITIONS = ("cut", "fade", "dissolve", "wipeleft", "wiperight", "slideup", "slidedown")
 
+# Transitions that blend the tail of the clip BEFORE this one into it, and
+# therefore need a previous clip to blend with. 'fade' is deliberately
+# excluded from this set: it fades this clip in from black, which is a
+# meaningful thing to ask for even on the very first clip of an edit.
+#
+# render.py (T-045) uses this same tuple to decide which boundaries need an
+# absolute timeline offset (ffmpeg's xfade/acrossfade) instead of a plain
+# concat. It lives here rather than being duplicated there because it is a
+# property of the VOCABULARY, not of the compiler.
+TIMELINE_TRANSITIONS = ("dissolve", "wipeleft", "wiperight", "slideup", "slidedown")
+
 # Effects expressible today. Each is one ffmpeg filter with a known invocation;
 # adding one means adding its compilation, not just its name.
 CLIP_EFFECTS = ("none", "grayscale", "sepia", "blur", "sharpen", "brighten", "darken", "saturate")
@@ -260,6 +271,13 @@ class EDL:
                 raise ValidationError(
                     f"{where}.transition_in '{clip.transition_in}' is not available",
                     parameter=where, supported=list(TRANSITIONS),
+                )
+            if index == 0 and clip.transition_in in TIMELINE_TRANSITIONS:
+                raise ValidationError(
+                    f"{where}.transition_in '{clip.transition_in}' has no previous "
+                    "clip to transition from; only 'cut' or 'fade' are meaningful "
+                    "on the first clip",
+                    parameter=where,
                 )
             if clip.transition_duration < 0:
                 raise ValidationError(f"{where}.transition_duration cannot be negative",

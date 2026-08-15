@@ -105,8 +105,15 @@ export const api = {
   project: (projectId: string, version?: number) =>
     post("project", version ? { project_id: projectId, version } : { project_id: projectId }),
   projectVersions: (projectId: string) => post("project-versions", { project_id: projectId }),
-  setEdl: (projectId: string, edl: unknown, note?: string) =>
-    post("set-edl", { project_id: projectId, edl, note: note ?? "" }),
+  diffProjectVersions: (projectId: string, fromVersion: number, toVersion: number) =>
+    post("diff-project-versions", { project_id: projectId, from_version: fromVersion, to_version: toVersion }),
+  setEdl: (projectId: string, edl: unknown, note?: string, expectedVersion?: number) =>
+    post("set-edl", {
+      project_id: projectId,
+      edl,
+      note: note ?? "",
+      ...(expectedVersion !== undefined ? { expected_version: expectedVersion } : {}),
+    }),
   renderProject: (projectId: string, quality?: string) =>
     post("render-project", quality ? { project_id: projectId, quality } : { project_id: projectId }),
   renders: (projectId?: string) => post("renders", projectId ? { project_id: projectId } : {}),

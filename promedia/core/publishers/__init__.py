@@ -1,8 +1,14 @@
 """Publisher selection.
 
-Real adapters (T-019) are blocked on credentials and on verifying access terms
-against live documentation (O-3). Until then the only available publisher is
-the stub, and it is disabled by default.
+T-019 added live adapters for both platforms (see x.py, linkedin.py), each
+implemented against LIVE documentation per project.md O-3. ``allow_simulation``
+still routes to the stub unconditionally — that switch exists so the whole
+slice can be exercised safely with no network calls and no risk of a real
+post, independent of whether real credentials happen to be configured — and
+is the ONLY way to reach fabrication F-001. With it off (the default), a
+platform call now reaches the real adapter rather than raising
+ConfigurationError: T-019's whole purpose was to make that reachable, once it
+could be done without guessing at API terms.
 """
 
 from __future__ import annotations
@@ -24,5 +30,16 @@ def for_platform(platform: str, config: Config) -> Publisher:
             f"unsupported platform '{platform}'", platform=platform, supported=list(SUPPORTED_PLATFORMS)
         )
     allow_simulation = bool(config.get("publishing", "allow_simulation"))
-    # No real adapter exists yet; this raises unless simulation is explicit.
-    return StubPublisher(key, allow_simulation=allow_simulation)
+    if allow_simulation:
+        return StubPublisher(key, allow_simulation=True)
+
+    timeout = int(config.get("publishing", "request_timeout_seconds"))
+    if key == "x":
+        from .x import XPublisher
+
+        return XPublisher(request_timeout_seconds=timeout)
+
+    from .linkedin import LinkedInPublisher
+
+    api_version = str(config.get("publishing", "linkedin_api_version"))
+    return LinkedInPublisher(request_timeout_seconds=timeout, api_version=api_version)

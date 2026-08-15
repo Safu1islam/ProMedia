@@ -90,7 +90,7 @@ function fmtDate(iso: string): string {
                 <tr><th>Post</th><th>Status</th><th>Body</th><th>Queued by</th></tr>
               </thead>
               <tbody>
-                <tr v-for="p in pendingPosts" :key="p.id" class="row" tabindex="0" role="button"
+                <tr v-for="p in pendingPosts" :key="p.id" class="row" tabindex="0"
                     :aria-label="`Open post ${p.id}`"
                     @click="router.push(`/posts/${p.id}`)"
                     @keydown.enter="router.push(`/posts/${p.id}`)"

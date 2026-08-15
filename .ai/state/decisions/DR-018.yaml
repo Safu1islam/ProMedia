@@ -1,0 +1,146 @@
+id: DR-018
+title: "T-058 threat model and rollback plan — the publish-authority screen (F-2)"
+date: 2026-08-14
+status: accepted
+decision_area: security_and_operability
+
+prompted_by: >
+  R-008, raised by the independent review of T-053/054/055/057/058
+  (review-0814-ui2, 2026-08-14): T-058's task record lists required_dimensions
+  [correctness, security, human_experience, accessibility, testing,
+  documentation] while aef/config/routing.yaml's auth_or_permissions class
+  mandates [correctness, security, threat_model, data_privacy, error_handling,
+  observability, testing, human_experience, audit_trail] — five mandated
+  dimensions were absent, and mode: critical additionally asks for a recorded
+  threat model, rollback plan and architecture review, none of which existed.
+  Constitution section 9: dimensions are computed from config, not chosen.
+  This record closes the threat-model and rollback-plan gap for T-058
+  specifically — the one screen in this phase that carries F-2 (only the
+  operator may approve or publish).
+
+scope: >
+  promedia/web/frontend/src/views/PostView.vue (the client), the
+  /api/op/approve-post and /api/op/publish-post operations it calls, and the
+  server-side enforcement those operations depend on (promedia/web/app.py's
+  guarded()/principal_of(), promedia/core/registry.py's authority check,
+  promedia/core/posts.py's four publish gates). Does NOT cover T-053's
+  navigation shell or T-055's editor beyond what they share with this path
+  (the same auth handshake, the same CSRF guard) — those are named as a
+  separate open item below, not folded into this record.
+
+trust_boundaries:
+  - "Browser tab (fully untrusted — the reviewer demonstrated live DOM tampering, see verified_by below) crossing into the FastAPI process over HTTP on localhost."
+  - "The FastAPI process crossing into promedia/core/registry.py's authority check, which is the actual boundary that matters: everything client-side is advisory."
+  - "The FastAPI process crossing out to the real platform (X/LinkedIn) at publish time — outside this record's scope; covered by T-019's publisher adapters."
+
+assets_protected:
+  - "The operator's publish authority itself (F-2) — an agent or a compromised/malicious tab must never be able to cause a real-platform publish."
+  - "Decision context integrity — the account, rights verdict, ruleset version and provenance shown must be the same facts the server will act on, not a client-side approximation that can drift from them."
+  - "The append-only post/publication ledger (audit trail) — every approve/reject/publish must be attributable to a real principal."
+
+threats:
+  - id: T1
+    description: >
+      Client-side tampering: a user (or malicious script) with DevTools access
+      re-enables a disabled Approve/Publish control and fires the click,
+      attempting to approve/publish through the UI alone.
+    mitigation: >
+      The client holds no authority. approve-post and publish-post are
+      re-evaluated server-side against the four gates in
+      promedia/core/posts.py regardless of what the client sent or which
+      control fired the request.
+    verified_by: >
+      review-0814-ui2, live: force-set the Approve button's `disabled` DOM
+      property to false and clicked it. Server returned RIGHTS_BLOCKED
+      ("rights verdict is ESCALATE, not PERMITTED"); the post stayed queued.
+      See T-058 review: entries in .ai/state/tasks.yaml.
+    residual_risk: low
+  - id: T2
+    description: >
+      No-credential access: a process on the same machine (an agent, a
+      script, another browser tab) calls the operation endpoints directly
+      with no operator cookie, attempting to approve or publish without ever
+      touching the UI.
+    mitigation: >
+      principal_of() (promedia/web/app.py) resolves a principal from the
+      operator cookie / auth header / bootstrap query param; with none
+      supplied it falls back to agent_principal("ui"). approve-post and
+      publish-post are registered operator-authority operations (F-2), so
+      registry.py's authority check refuses an agent principal outright.
+    verified_by: >
+      review-0814-ui2, live: POST /api/op/approve-post with no operator
+      cookie returned 403 FORBIDDEN, "operation 'approve-post' requires
+      operator authority", principal 'agent'.
+    residual_risk: low
+  - id: T3
+    description: >
+      Unsafe-method triggering: publish-post reachable via GET, so a
+      prefetch, a link preview, or browser history restoration could trigger
+      an irreversible publish with no user action at all.
+    mitigation: "The operation is registered mutating; the API surface only exposes it via POST /api/op/publish-post. There is no GET route for it."
+    verified_by: "review-0814-ui2, live: GET /api/op/publish-post returned 405 METHOD_NOT_ALLOWED."
+    residual_risk: low
+  - id: T4
+    description: >
+      Cross-site request forgery: an external page auto-submits a form or
+      fires a fetch to this app's origin, relying on the operator's ambient
+      session cookie to approve/publish on their behalf.
+    mitigation: >
+      SameSite=strict on the operator cookie (browser-side) plus
+      _reject_foreign_origin() (server-side, T-025/N8): every state-changing
+      request is checked against the CONFIGURED host/port, not against a
+      client-suppliable Host/Origin header, closing the spoofing gap N8
+      found in an earlier version of this same guard.
+    verified_by: >
+      review-0814-ui2, live: a cross-origin POST (scratch server's own port
+      mismatched against the configured one) was refused, "cross-origin
+      state-changing request refused".
+    residual_risk: low
+  - id: T5
+    description: >
+      Decision-context drift: the client renders account/rights/provenance
+      state that is stale or does not match what the server will actually
+      check at approve/publish time, so the operator authorises based on a
+      fact that is no longer true.
+    mitigation: >
+      The `post` operation (promedia/core/posts.py) is the SAME read the
+      server re-derives from at approve/publish time — there is no separate
+      client-side cache of rights state. The window between load and click is
+      real but small (a single page view), and every gate re-checks live at
+      the moment of the write (T2 above demonstrates the server does not
+      trust a stale client claim).
+    verified_by: "Code reading only — not independently re-executed this pass. See open_items."
+    residual_risk: medium
+  - id: T6
+    description: >
+      Audit-trail integrity: could an approve/publish attempt (including a
+      refused one, like T1's bypass attempt) go unrecorded, leaving no trace
+      for the operator to review later?
+    mitigation: "Not independently verified this pass — see open_items. The audit_trail dimension routing.yaml mandates for auth_or_permissions was flagged by the review as unverified, not as failing."
+    verified_by: "NOT VERIFIED — named honestly rather than assumed."
+    residual_risk: unknown
+
+rollback_plan: >
+  Reversibility is asymmetric by design, which is the correct shape for a
+  publish-authority surface: APPROVE/REJECT are reversible (append-only EDL/
+  post-status model, T-042; rejecting after approving is a normal state
+  transition, not a rollback). PUBLISH is NOT reversible once a platform has
+  accepted it — T-058's own UI states this before the control ("Not
+  reversible once seen") and F-2 places that decision with the operator
+  specifically because of it. There is therefore no code-level rollback for
+  a completed publish; the operational rollback is: (1) the "stuck mid-publish"
+  state (post.status == 'publishing') already has a recorded recovery path —
+  releasePublishClaim returns the post to 'approved' after the operator
+  manually verifies the real platform state, exactly the UI's existing
+  instruction — and (2) if this task's OWN CHANGE (the client, not the
+  publish action) needs rolling back, it is a pure frontend revert:
+  promedia/web/frontend/src/views/PostView.vue and no schema or server
+  authority logic changed under this task, so reverting the file is
+  sufficient and touches no data.
+
+open_items:
+  - "T5 (decision-context drift) and T6 (audit-trail completeness) are named, not verified — a VERIFIER lens (independent re-execution of T-058's own verification set, including inspecting the audit log the approve/publish/reject attempts actually wrote) is still outstanding, per the review's own admission."
+  - "An ARCHITECT lens on T-058 (is the authority boundary in the right layer; does the Vue rich client change any trust assumption DR-017 made) is still outstanding — routing.yaml names four reviewer roles for auth_or_permissions and this pass, plus the original review, together supply reviewer + human_experience_reviewer only."
+  - "T-053 and T-055 are also mode: critical and carry the same gap (no recorded threat model / rollback plan / architecture review) — their required_dimensions were corrected alongside T-058's as part of R-008, but a full threat model for either was judged out of proportion for a navigation shell (T-053) and an editor room whose authority-relevant surface is fully covered by T-058's model (T-055 calls set-edl, which is agent-authority, not operator-authority — F-2 does not gate it). Recorded as a conscious scope decision, not an oversight."
+
+relates_to: [DR-017, DR-012]

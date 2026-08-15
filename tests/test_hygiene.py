@@ -72,6 +72,64 @@ def test_defaults_helper_copies_every_section():
         )
 
 
+# --- R-007: a nested dict VALUE must not be shared across Configs --------------
+
+
+def test_defaults_helper_also_copies_a_nested_dict_value():
+    """media.estimated_bitrate_bytes_per_second (T-043) is the first config
+    entry whose value is itself a dict. A one-level copy leaves it pointing at
+    the exact same object as DEFAULTS; mutating it through one Config must not
+    move it for every other Config built the same way."""
+    fresh = config_module.defaults()
+    table = fresh["media"]["estimated_bitrate_bytes_per_second"]
+    assert table is not config_module.DEFAULTS["media"]["estimated_bitrate_bytes_per_second"], (
+        "the nested dict is shared by reference, not copied"
+    )
+
+    original = dict(config_module.DEFAULTS["media"]["estimated_bitrate_bytes_per_second"])
+    table["fast"] = -1
+    assert config_module.DEFAULTS["media"]["estimated_bitrate_bytes_per_second"] == original, (
+        "mutating one Config's nested dict moved the module-level DEFAULTS"
+    )
+    assert config_module.defaults()["media"]["estimated_bitrate_bytes_per_second"] == original
+
+
+def test_two_loads_do_not_share_a_nested_dict_either(monkeypatch, tmp_path):
+    """The two-Config version of the test above, on the no-file path — the
+    same shape as test_two_loads_do_not_share_one_mutable_dict, one level
+    deeper."""
+    monkeypatch.delenv(config_module.ENV_CONFIG_PATH, raising=False)
+    monkeypatch.chdir(tmp_path)
+    a, b = config_module.load(), config_module.load()
+    a.values["media"]["estimated_bitrate_bytes_per_second"]["fast"] = -1
+    assert b.values["media"]["estimated_bitrate_bytes_per_second"]["fast"] != -1
+    assert (
+        a.values["media"]["estimated_bitrate_bytes_per_second"]
+        is not b.values["media"]["estimated_bitrate_bytes_per_second"]
+    )
+
+
+def test_a_config_loaded_from_a_toml_file_does_not_share_the_nested_dict_either(tmp_path, monkeypatch):
+    """_deep_merge's path, not defaults()'s: load() calls
+    ``_deep_merge(DEFAULTS, ...)`` directly, so this is the branch the old
+    ``{k: dict(v) ...}`` one-level copy in _deep_merge itself protected —
+    incompletely, which is exactly what R-007 reported."""
+    monkeypatch.delenv(config_module.ENV_CONFIG_PATH, raising=False)
+    toml_path = tmp_path / "promedia.toml"
+    toml_path.write_text('[storage]\nceiling_bytes = 12345\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    cfg = config_module.load()
+    assert cfg.source == toml_path  # exercising the file path, not the default path
+
+    original = dict(config_module.DEFAULTS["media"]["estimated_bitrate_bytes_per_second"])
+    cfg.values["media"]["estimated_bitrate_bytes_per_second"]["fast"] = -1
+    assert config_module.DEFAULTS["media"]["estimated_bitrate_bytes_per_second"] == original, (
+        "a Config built from a promedia.toml still shared DEFAULTS' nested dict"
+    )
+    assert config_module.load().values["media"]["estimated_bitrate_bytes_per_second"]["fast"] != -1
+
+
 # --- O2/O3: the limits are configuration, not literals -------------------------
 
 

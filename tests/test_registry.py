@@ -91,6 +91,20 @@ def test_operator_only_operations_are_the_expected_set():
     same way the CLI does (PROMEDIA_OPERATOR_TOKEN) — there is no
     scheduler-specific credential path, which is the thing that would have
     deserved a decision record.
+
+    record-spend and run-capability joined the set in T-048, and this pin firing
+    is what forced that reasoning to be written down too rather than assumed.
+    Both are mutating and reach money-adjacent state: run-capability is the one
+    call that would ever reach a paid API if a live adapter existed behind it
+    (today it always structurally refuses — see capability-requirements), and
+    record-spend writes the financial record itself. F-2 reserves exactly this
+    class for the operator ("agents may never spend money without operator
+    approval"), the same reasoning that put publish-post and publish-tick here.
+    Verified independently (coordinator, 2026-08-14): sabotaging spend.record()
+    to skip its C-31 refusal check failed exactly the three ceiling/cap tests in
+    tests/test_providers.py; reverted, spend.py SHA-256
+    4ed1eebd63d06d48413f0e120a6b4e6c65c4864e0564a6232d9ba89c8a4e2e0d confirmed
+    identical pre/post.
     """
     ops = load_operations()
     operator_ops = {name for name, op in ops.items() if op.authority == "operator"}
@@ -103,6 +117,8 @@ def test_operator_only_operations_are_the_expected_set():
         "publish-tick",
         "export-permanent-set",
         "restore-permanent-set",
+        "record-spend",
+        "run-capability",
     }
 
 

@@ -239,7 +239,26 @@ CREATE TABLE IF NOT EXISTS renders (
     rendered_at   TEXT NOT NULL
 );
 
+-- C-31 spend ledger (T-048). Records money spent against AI capability
+-- providers and REFUSES a recording that would breach the ceiling; nothing
+-- in this codebase performs a purchase (see
+-- promedia/core/providers/spend.py). Append-only, like audit_log — no
+-- UPDATE path, because a financial record that could be quietly edited
+-- after the fact is not a record.
+CREATE TABLE IF NOT EXISTS spend_ledger (
+    id           TEXT PRIMARY KEY,
+    month        TEXT NOT NULL,   -- 'YYYY-MM', the C-31 accounting period
+    capability   TEXT NOT NULL,   -- transcription | text | speech | image | video | other
+    provider     TEXT NOT NULL,   -- which API or service this was spent with
+    amount_usd   REAL NOT NULL CHECK (amount_usd >= 0),
+    approved     INTEGER NOT NULL CHECK (approved IN (0, 1)),
+    note         TEXT,
+    recorded_by  TEXT NOT NULL,
+    recorded_at  TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_assets_hash        ON assets (content_hash);
+CREATE INDEX IF NOT EXISTS idx_spend_month        ON spend_ledger (month);
 CREATE INDEX IF NOT EXISTS idx_edl_project        ON project_edl_versions (project_id, version DESC);
 CREATE INDEX IF NOT EXISTS idx_renders_project    ON renders (project_id, rendered_at DESC);
 CREATE INDEX IF NOT EXISTS idx_verdicts_asset     ON rights_verdicts (asset_id, decided_at DESC);

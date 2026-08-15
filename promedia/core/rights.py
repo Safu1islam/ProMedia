@@ -12,9 +12,9 @@ clean verdict. Editing is a production function, not a copyright-clearing one.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Iterable
 
-from ..errors import NotFound
+from ..errors import NotFound, ValidationError
 from . import rights_engine as engine
 from .db import canonical_json, iso, new_id
 from .registry import Context
@@ -28,6 +28,7 @@ __all__ = [
     "latest_verdict",
     "media_available",
     "media_state",
+    "worst_verdict_of",
 ]
 
 _WORST_FIRST = {engine.BLOCKED: 0, engine.ESCALATE: 1, engine.PERMITTED: 2}
@@ -234,6 +235,34 @@ def effective_verdict(ctx: Context, asset_id: str) -> dict[str, Any]:
                 "Transformation is a production function, not a copyright-clearing"
                 f" function (F-4). Inherited from ancestor {ancestor_id}."
             )
+    return worst
+
+
+def worst_verdict_of(ctx: Context, asset_ids: Iterable[str]) -> dict[str, Any]:
+    """The verdict that governs content built from ALL of these sources at
+    once — the single most restrictive result among them (T-044).
+
+    ``effective_verdict`` already walks ONE asset's ``derived_from`` chain to
+    find its worst ancestor (F-4, finding B3). A render can name many direct
+    sources in the same EDL, and ``assets.derived_from`` is a single column,
+    so the identical rule — a derivative is never cleaner than its worst
+    input — is applied here across the whole set rather than one chain.
+
+    Used both to gate a render before it starts (refuse and name the
+    offending asset) and to compute the verdict the rendered output itself
+    should carry, so the two never drift apart into separately-maintained
+    copies of the same rule.
+    """
+    ids = list(dict.fromkeys(asset_ids))  # de-dup, first-seen order (C-20: reproducible)
+    if not ids:
+        raise ValidationError("no source assets to evaluate", parameter="asset_ids")
+    worst: dict[str, Any] | None = None
+    for asset_id in ids:
+        verdict = effective_verdict(ctx, asset_id)
+        if worst is None or _WORST_FIRST[verdict["verdict"]] < _WORST_FIRST[worst["verdict"]]:
+            worst = dict(verdict)
+            worst["evaluated_source"] = asset_id
+    assert worst is not None
     return worst
 
 

@@ -73,6 +73,17 @@ PERMANENT_TABLES: tuple[str, ...] = (
     # nothing, since nothing references a project.
     "projects",
     "project_edl_versions",
+    # C-31 spend ledger (T-048). Classified PERMANENT, not transient — it is
+    # the operator's actual money history against the $100/month ceiling,
+    # not a cache recomputable from anything else on this machine. Nothing
+    # produced it references this table (no foreign key points at it, and
+    # it references nothing), so its position in this tuple is arbitrary;
+    # placed last because it was added last. It is tiny: this ledger will
+    # hold, at the project's own $5 per-operation cap, at most a few hundred
+    # rows a year even at sustained maximum spend, nowhere near the scale
+    # that made masters transient (project.md 5.4's A-4 reasoning, applied
+    # to a second small permanent table rather than reopened from scratch).
+    "spend_ledger",
 )
 
 # Excluded, each for a stated reason. Being listed here is what makes the

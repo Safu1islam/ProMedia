@@ -28,12 +28,6 @@ const SCREENS: Record<string, { title: string; blurb: string; note: string; task
     note: "No brand-kit data model exists yet. Needs its own planning pass before a task is written (T-060).",
     task: "T-060",
   },
-  agent: {
-    title: "Agent workspace",
-    blurb: "The IDE agent and the UI agent are one agent on one project store.",
-    note: "Live run status and a real version-to-version diff are planned (T-056) and not built yet. Who currently holds a lock on what is already real — see the presence avatars in the top bar.",
-    task: "T-056",
-  },
   generation: {
     title: "Capabilities & models",
     blurb: "What the system can do today, what needs an integration, and what has no path yet.",

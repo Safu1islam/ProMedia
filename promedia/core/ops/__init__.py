@@ -7,10 +7,13 @@ different set of operations than the other (F-1, S4).
 
 from . import (  # noqa: F401
     accounts,
+    acquire,
+    analyse,
     assets,
     backup,
     posts,
     projects,
+    providers,
     provenance,
     rights,
     schedule,
@@ -20,10 +23,13 @@ from . import (  # noqa: F401
 
 __all__ = [
     "accounts",
+    "acquire",
+    "analyse",
     "assets",
     "backup",
     "posts",
     "projects",
+    "providers",
     "provenance",
     "rights",
     "schedule",

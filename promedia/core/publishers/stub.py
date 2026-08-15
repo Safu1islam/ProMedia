@@ -69,16 +69,35 @@ class StubPublisher:
             },
         )
 
-    def verify_published(self, platform_post_id: str) -> bool:
+    def verify_published(self, platform_post_id: str, *, credential_ref: str) -> bool:
         """Always False.
 
         A stub must never assert that something is live on a platform: that
         assertion is the precondition for deleting the master, and a false one
         would authorise irreversible deletion of media that was never published.
+        ``credential_ref`` is accepted (T-019 widened the protocol) and ignored
+        — a stub reaches no network and needs no credential either way.
         """
         return False
 
 
 def capabilities_for_real_platform(platform: str) -> dict[str, Any]:
-    """Limits for a real platform, before verification: all unknown."""
+    """Limits for a real platform.
+
+    T-019 populated verified numbers for x/linkedin behind their own adapter
+    modules (each cites the live documentation it came from — O-3). Anything
+    not verified there, and every other platform string, still reads as
+    UNKNOWN rather than a guess — T-012 AC-3's discipline, unchanged by this
+    task; what changed is that "unverified" no longer means "everything",
+    because some fields now genuinely are verified.
+    """
+    key = platform.strip().lower()
+    if key == "x":
+        from .x import CAPABILITIES as X_CAPABILITIES
+
+        return X_CAPABILITIES.to_dict()
+    if key == "linkedin":
+        from .linkedin import CAPABILITIES as LINKEDIN_CAPABILITIES
+
+        return LINKEDIN_CAPABILITIES.to_dict()
     return Capabilities(platform=platform).to_dict()
