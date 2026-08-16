@@ -84,6 +84,17 @@ PERMANENT_TABLES: tuple[str, ...] = (
     # that made masters transient (project.md 5.4's A-4 reasoning, applied
     # to a second small permanent table rather than reopened from scratch).
     "spend_ledger",
+    # Brand kits (T-068, DR-021). PERMANENT for the same reason accounts and
+    # projects are: small, operator-authored configuration with no other
+    # record of itself anywhere in the system — losing it would mean the
+    # operator re-typing a name, two colours and a font, not a cache miss.
+    # DR-021's own point is that a RENDER never depends on this table (the
+    # logo is baked into the EDL as an ImageOverlay at apply time), but that
+    # is an argument for why the row is safely DELETABLE after use, not an
+    # argument for excluding it from backup while it still exists. Ordered
+    # after `assets` (its logo_asset_id foreign key target) and last because
+    # it was added last, same convention as spend_ledger above.
+    "brand_kits",
 )
 
 # Excluded, each for a stated reason. Being listed here is what makes the

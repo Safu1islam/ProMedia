@@ -290,3 +290,161 @@ sessions:
       ended_at: "2026-08-15T17:34:26+04:00"
       outcome: "completed"
       next: "T-056 complete: real version-to-version diff (diff-project-versions op) + version-level accept/reject in the Pro Media v2 rich client. Independent review found and this session fixed 1 BLOCKING (false reorder-as-remove+add) + 1 IMPORTANT (transition-duration self-contradiction) finding; both sabotage-verified. Full suite green, frontend builds clean, manually verified in the running app. Next ready work: T-059 (Social integration, honest gaps) or T-050/T-051/T-052 (legacy Jinja2 surface — note: these may be superseded by the already-complete T-054/055/057 rich-client equivalents; worth a planning pass before picking one up, not a blind implement)."
+  - id: "claude-code-t049check-0816"
+    agent: "architect"
+    main_engineer: false
+    task: "T-049CHECK"
+    status: "ended"
+    started_at: "2026-08-16T00:41:53+04:00"
+    heartbeat_at: "2026-08-16T00:52:29+04:00"
+    handoff:
+      ended_at: "2026-08-16T00:56:00+04:00"
+      outcome: "completed"
+      changed: "Closed by the coordinator, not by the agent — the agent's own connection dropped after its substantive work was written and its lock released, but before it could write this handoff. All of its work was independently re-checked against disk before writing this record: `.ai/state/locks.yaml` shows a clean claim/release for this session id with no overlapping path; `aef.py validate` reports 67/67 plan leaves accounted for; T-050/T-051/T-052 in tasks.yaml carry real re-executed evidence (46/46 tests personally run and passed: 20 in tests/test_media_ui.py, 26 in tests/test_editor_ui.py), not a re-statement of the earlier claims it was reconciling. Reconciled a genuine bookkeeping gap: T-050/T-051/T-052 had every AC reading NOT_RUN/\"not implemented\" despite a RELEASED lock note and claude-code-session-ui2's own handoff both claiming they landed with passing tests. Verdict: not superseded by T-054/T-055/T-057 — DR-017's own text confirms the Jinja2 pages are a DELIBERATELY-KEPT no-JS fallback, so all three are now marked complete with real evidence rather than left looking abandoned. Filed R-017 (recommendations.yaml) for a genuine gap found while verifying: T-051's Jinja2 clip editor lacks the expected_version optimistic-concurrency guard T-055/R-010 added to the Vue editor, so the same silent-lost-update class is still open on this surface.\n"
+      remaining: "None of T-050/051/052 has ever had an independent review (Constitution section 7) — recorded as a live, named gap in each task's own independent_review block, not silently closed by this reconciliation. R-017 is unclaimed.\n"
+      risks: "No code was changed by this task — investigation/records only, per its own brief. R-017 (concurrency gap) was found and disclosed, not fixed.\n"
+      next: "R-017 is unclaimed and ready. An independent review pass for T-050/T-051/T-052 is also open."
+      evidence:
+        - "python -m pytest tests/test_media_ui.py tests/test_editor_ui.py -v: 46/46 passed"
+        - "aef.py validate: 67/67 plan leaves accounted for"
+      references:
+        - "T-050"
+        - "T-051"
+        - "T-052"
+        - "R-017"
+        - "DR-017"
+  - id: "claude-code-r002-0816"
+    agent: "architect"
+    main_engineer: false
+    status: "ended"
+    started_at: "2026-08-16T00:44:05+04:00"
+    heartbeat_at: "2026-08-16T00:45:40+04:00"
+    handoff:
+      ended_at: "2026-08-16T00:45:40+04:00"
+      outcome: "completed"
+      next: "R-002 resolved (accepted, resolution recorded, became_decision DR-017): project.md's 2026-08-14 section 4 amendment and F-9 reconfirmation genuinely close all four named concerns, verified against project.md text and the running code (principal.py, App.vue presence, config.py ceiling_bytes, storage.py). R-005 left pending with a scoping note: its fix is aef/-only (READ-ONLY), needs an AEF-0.x.0 pseudo-task. Next: nothing further required on either; R-003's remaining backlog and R-014/R-015/R-016 are still open elsewhere."
+  - id: "claude-code-t060-planning"
+    agent: "architect"
+    model: "claude-sonnet-5"
+    main_engineer: false
+    task: "T-060"
+    activity: "Planning pass for T-060: technology-selection and task decomposition for Color/Audio rooms, brand kits, calendar, model marketplace"
+    status: "ended"
+    started_at: "2026-08-16T00:45:33+04:00"
+    heartbeat_at: "2026-08-16T00:53:25+04:00"
+    handoff:
+      ended_at: "2026-08-16T00:53:25+04:00"
+      outcome: "completed"
+      next: "T-060 planning pass complete: 5 decision records (DR-019..DR-023) and 8 new sized tasks (T-064..T-071) written, plan.yaml S-V2-ROOMS-2 section added (plan_version 2->3), T-060 itself marked complete. Two structural findings: colour/audio need no new engine (extend the existing ffmpeg render pipeline the same way CLIP_EFFECTS/TRANSITIONS already work); calendar/marketplace need NO new backend operation at all (client-side view over list-posts/publications and T-048's already-complete provider registry respectively). 'True real-time 4K scrubbing' deliberately got no task -- already architecturally foreclosed by DR-016/DR-017, not reopened. Ready next: T-064 (colour engine), T-066 (audio engine), T-068 (brand kits data model) -- all data_model_change/critical, no dependencies. T-065/T-067/T-069 (their screens) are correctly blocked behind them. T-070 (calendar) and T-071 (capability directory) are ready now with no backend dependency. Nothing implemented -- this was architect/planning only, per Constitution section 7 (architect is not implementer or reviewer of its own plan). validate/doctor both clean; two concurrent sessions (T-049CHECK, T-059) correctly deferred their own tasks.yaml writes around this lock and were checked for collision at release -- none found."
+  - id: "claude-code-t059-0816"
+    agent: "frontend-agent"
+    main_engineer: false
+    status: "ended"
+    started_at: "2026-08-16T00:46:00+04:00"
+    heartbeat_at: "2026-08-16T01:19:01+04:00"
+    handoff:
+      ended_at: "2026-08-16T01:19:01+04:00"
+      outcome: "completed"
+      next: "T-059 complete, independent_review NOT_RUN — next session should review AC-1 evidence live (fresh isolated scratch DB, this session's own scratch dir under the Temp scratchpad was not preserved for reuse) and sanity-check F-009/F-010's honest_absence classification against the ffprobe/T-048-provider notes at the bottom of fabrications.yaml before trusting this session's own reasoning for why they were registered rather than left as unregistered honest gaps."
+  - id: "claude-code-t064"
+    agent: "implementer"
+    main_engineer: false
+    status: "idle"
+    started_at: "2026-08-16T01:13:44+04:00"
+    heartbeat_at: "2026-08-16T01:13:44+04:00"
+  - id: "claude-code-t070-0816"
+    agent: "frontend-agent"
+    vendor: "anthropic"
+    model: "claude-sonnet-5"
+    main_engineer: false
+    task: "T-070"
+    activity: "Content calendar screen (DR-022): hand-built month grid over list-posts/publications"
+    status: "ended"
+    started_at: "2026-08-16T01:14:11+04:00"
+    heartbeat_at: "2026-08-16T01:30:08+04:00"
+    handoff:
+      ended_at: "2026-08-16T01:30:08+04:00"
+      outcome: "completed"
+      changed: "New CalendarView.vue (month grid over list-posts/publications, DR-022); router.ts points /calendar at it; PanelPlaceholderView's dead calendar entry removed; one new test (test_studio_calendar_route_serves_the_same_shell)."
+      remaining: "independent_review NOT_RUN (Constitution 7 - needs a separate session)."
+      risks: "None known BLOCKING. DR-022's own revisit trigger: client-side grouping of the full post/publication set may want a bounded date-range fetch if volume grows well past C-10."
+      next: "T-071 (capability directory) is next and ready, same shape (no backend dependency). T-070 itself needs an independent reviewer before anyone treats it as fully closed per Constitution section 7."
+      evidence:
+        - "tasks.yaml T-070 record - all 3 ACs PASSED with live evidence"
+        - "npm run build clean; pytest tests/test_frontend_api.py 21 passed"
+      references:
+        - "T-070"
+        - "DR-022"
+  - id: "claude-code-t066-0816"
+    agent: "implementer"
+    main_engineer: false
+    status: "idle"
+    started_at: "2026-08-16T01:14:22+04:00"
+    heartbeat_at: "2026-08-16T01:14:22+04:00"
+  - id: "claude-code-t068-0816"
+    agent: "implementer"
+    model: "claude-sonnet-5"
+    main_engineer: false
+    task: "T-068"
+    activity: "Brand kits data model (DR-021): brand_kits table, backup classification, create/list/update/delete-brand-kit. apply-brand-kit (needs edl.py/render.py) deferred — those paths are locked live by claude-code-t064.\n"
+    status: "ended"
+    started_at: "2026-08-16T05:05:00+04:00"
+    heartbeat_at: "2026-08-16T05:45:00+04:00"
+    handoff:
+      ended_at: "2026-08-16T05:45:00+04:00"
+      outcome: "partial"
+      changed: >
+        T-068's CRUD half: promedia/core/schema.sql (brand_kits table),
+        promedia/core/backup.py (PERMANENT classification), new
+        promedia/core/ops/brandkits.py (create/list/update/delete-brand-kit
+        plus a read-by-id 'brand-kit' op), registered in ops/__init__.py.
+        New tests/test_brandkits.py (12 tests). tests/test_ops_forms.py
+        extended to seed a real brand kit and probe the five new
+        operations' params so its generic AC-1/AC-3 coverage stays real
+        rather than silently stopping at the new surface.
+      remaining: >
+        apply-brand-kit (AC-2/AC-3): a new ImageOverlay type in
+        promedia/core/media/edl.py, a compiler branch in
+        promedia/core/media/render.py (ffmpeg overlay filter, mirrors
+        TextOverlay/drawtext), and the operation itself in
+        ops/brandkits.py calling projects_layer.set_edl(). Blocked for
+        this whole session by claude-code-t064's live lock on exactly
+        those files (T-064, colour grading — same three paths). Next
+        session: check .ai/state/locks.yaml's ACTIVE list for real before
+        touching edl.py/render.py.
+      risks: >
+        R-018/R-019: T-064, T-066 and T-068 all own
+        edl.py/render.py/test_edl.py with no depends_on between them — a
+        genuine three-way collision the planning pass (T-060) left
+        unresolved. Whichever of the three lands first should hold the
+        lock for its whole session; the other two should keep doing what
+        this session did (implement everything else, leave the EDL-
+        vocabulary half honestly NOT_RUN) rather than editing a locked
+        file.
+      next: >
+        Once edl.py/render.py are free: add ImageOverlay (asset_id,
+        position, size, start/end — five named corner/centre positions,
+        e.g. top_left/top_right/bottom_left/bottom_right/center, unlike
+        TextOverlay's top/center/bottom, because a logo's natural
+        placement is a corner) to EDL, extend asset_ids() to include image
+        overlay asset ids (this is what makes projects.render()'s existing
+        rights gate and source resolution cover the logo for free, with NO
+        edit needed to projects.py), add the overlay/scale filter branch
+        to render.compile_render, then implement apply-brand-kit in
+        ops/brandkits.py (read current_version, append an ImageOverlay,
+        call projects_layer.set_edl with expected_version). Test with the
+        same measurement discipline test_transitions.py already
+        established: a solid-colour background clip and a solid-colour
+        logo image, decode a frame, and assert the overlay region's colour
+        differs from the background — not just that compilation succeeded.
+      evidence:
+        - "tests/test_brandkits.py: 12 passed"
+        - "tests/test_ops_forms.py + test_registry.py + test_parity.py + test_backup.py + test_restore.py + test_hardening.py + test_surface_signals.py + test_account_locking.py: all passed"
+        - "full suite (tests/), run twice: 100% collected, exactly 1 failure both times — tests/test_locking.py::test_the_locking_and_creating_sets_are_what_this_task_intended, a hardcoded-set pin in a file this task does not own, disclosed not fixed (same class as T-045's test_projects.py finding)"
+        - "aef.py validate: 67/67 plan leaves accounted for"
+        - "aef.py doctor: all five state files agree between readers"
+      references:
+        - "T-068"
+        - "DR-021"
+        - "R-018"
+        - "R-019"

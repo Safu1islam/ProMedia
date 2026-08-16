@@ -257,6 +257,25 @@ CREATE TABLE IF NOT EXISTS spend_ledger (
     recorded_at  TEXT NOT NULL
 );
 
+-- Brand kits (T-068, DR-021). Data ABOUT how to build an EDL, not a second
+-- thing a render reads: applying a kit compiles its logo into a new EDL
+-- version (a burned-in ImageOverlay) and this row is never consulted again
+-- at render time. logo_asset_id points at a real, ingested, rights-declared
+-- asset like any other (F-3/F-4 — branding never launders rights); the
+-- media it references is otherwise ordinary and subject to the same
+-- retention/rights machinery as any other asset.
+CREATE TABLE IF NOT EXISTS brand_kits (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    logo_asset_id   TEXT NOT NULL REFERENCES assets (id) ON DELETE RESTRICT,
+    primary_color   TEXT,
+    secondary_color TEXT,
+    font_family     TEXT,
+    created_by      TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_assets_hash        ON assets (content_hash);
 CREATE INDEX IF NOT EXISTS idx_spend_month        ON spend_ledger (month);
 CREATE INDEX IF NOT EXISTS idx_edl_project        ON project_edl_versions (project_id, version DESC);

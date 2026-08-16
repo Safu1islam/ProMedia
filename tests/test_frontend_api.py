@@ -55,6 +55,20 @@ def test_studio_deep_paths_serve_the_same_shell(env):
 
 @pytest.mark.skipif(not (FRONTEND_DIST / "index.html").is_file(),
                      reason="frontend not built (npm run build) in this environment")
+def test_studio_calendar_route_serves_the_same_shell(env):
+    """T-070: /calendar is a client-only route (DR-022, no new backend
+    surface) — this pins that it actually reaches the SPA shell rather than
+    404ing, the same 'no dead links' guarantee as the projects deep path
+    above."""
+    cfg, ctx, store = env
+    direct = agent_client(cfg, store).get("/studio")
+    calendar = agent_client(cfg, store).get("/studio/calendar")
+    assert calendar.status_code == 200
+    assert calendar.text == direct.text
+
+
+@pytest.mark.skipif(not (FRONTEND_DIST / "index.html").is_file(),
+                     reason="frontend not built (npm run build) in this environment")
 def test_studio_serves_the_real_built_assets(env):
     cfg, ctx, store = env
     shell = agent_client(cfg, store).get("/studio")

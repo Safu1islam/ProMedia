@@ -355,6 +355,76 @@ fabrications:
     status: active
     blocks_release: false
 
+  - id: F-009
+    created_by_task: T-059
+    created_at: "2026-08-16"
+    kind: honest_absence
+    location: promedia/web/frontend/src/views/SocialView.vue — Composer tab
+    what_is_fake: >
+      Nothing is fake. Registered per T-059's own task record instruction
+      ("anything shown as a placeholder is registered ... at the moment it is
+      added"), the same discipline F-004 used for an honest absence rather
+      than a fabricated value. The mockup's Composer section (drafting or
+      adapting one piece of media/text per target platform from a single
+      brief — cross-platform variant preparation) has no backing operation in
+      the registry today. The Composer tab renders an explicit "Not available
+      in this client" card naming exactly what is missing and why, rather
+      than a form that would silently do less than it implies or a plausible
+      -looking but empty composer UI.
+    why: >
+      No operation exists to prepare per-platform variants from a brief.
+      Building a composer form against nothing would either be decorative
+      (collects input, does nothing with it) or would silently reduce to
+      `queue-post` while implying more — both violate frontend-brief.md rule
+      2 (a screen needing something no operation provides gets a new
+      operation, not a mock in the route) and Constitution section 6.
+    visible_to_user: true
+    visibility_note: >
+      The gap is named on screen, in plain words, every time the tab is
+      opened — not hidden behind a spinner or an empty state that could be
+      mistaken for "loading" or "nothing queued yet".
+    replacement_condition: >
+      A registered operation for cross-platform variant preparation exists
+      (its own planning pass — see T-060's pattern for how a deferred
+      capability gets scoped before a task is written).
+    replacement_task: null
+    status: active
+    blocks_release: false
+
+  - id: F-010
+    created_by_task: T-059
+    created_at: "2026-08-16"
+    kind: honest_absence
+    location: promedia/web/frontend/src/views/SocialView.vue — Insights tab
+    what_is_fake: >
+      Nothing is fake, registered for the same reason as F-009. project.md
+      section 4 ("Out of scope") explicitly excludes "analytics beyond what
+      informs the operator's own scheduling decisions", and the only
+      publishing-related success measure in section 3 (S6) is about missed
+      scheduled windows, not engagement or reach. No impressions, engagement,
+      follower-count or reach data exists anywhere in the database — there is
+      no operation, no table, and no ingestion path for platform analytics.
+      The Insights tab renders an explicit "Not available in this client"
+      card naming this, rather than a chart or numbers of any kind.
+    why: >
+      The mockup's Insights section implies engagement/reach analytics.
+      Fabricating plausible-looking numbers for it (the exact case
+      Constitution section 6 names — "a demo running on invented data is not
+      progress; it is undisclosed debt") was rejected in favour of stating
+      the gap in plain words. This is a scope boundary (project.md section 4),
+      not a temporarily-unbuilt capability like F-009's — there is currently
+      no plan to build it at all.
+    visible_to_user: true
+    visibility_note: >
+      The gap is named on screen every time the tab is opened.
+    replacement_condition: >
+      project.md section 4 is amended (per Constitution section 2, an
+      Amendment, not a routine edit) to bring analytics beyond scheduling into
+      scope, AND a data source for it is chosen and a task written.
+    replacement_task: null
+    status: active
+    blocks_release: false
+
 notes:
   - >
     T-028's parity probes use a sentinel identifier

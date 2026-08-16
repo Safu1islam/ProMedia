@@ -56,12 +56,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import("./views/PanelPlaceholderView.vue"),
     props: { screenId: "export" },
   },
-  {
-    path: "/calendar",
-    name: "calendar",
-    component: () => import("./views/PanelPlaceholderView.vue"),
-    props: { screenId: "calendar" },
-  },
+  { path: "/calendar", name: "calendar", component: () => import("./views/CalendarView.vue") },
   // Anything unknown resolves to the dashboard rather than a dead route — the
   // menu is the exhaustive list of destinations, so an unmatched path can
   // only be a stale link, never a screen the menu itself would offer.

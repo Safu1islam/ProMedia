@@ -340,6 +340,13 @@ def _seed_full_slice(ctx, media_file):
         " VALUES (?, ?, 1, ?, 'fast', 1280, 720, 1.0, 123, NULL, 'probe', ?)",
         (render_id, project["project_id"], str(render_output), db.iso()),
     )
+    # T-068 brand kits (DR-021). A real kit, so update/delete-brand-kit's own
+    # GET probe would genuinely succeed rather than fail on NotFound first —
+    # same reasoning as every other id in this dict.
+    brand_kit_id = invoke(
+        ctx, "create-brand-kit",
+        {"name": "probe kit", "logo_asset_id": asset["asset_id"]},
+    )["brand_kit_id"]
     return {
         "account_id": account["account_id"],
         "asset_id": asset["asset_id"],
@@ -347,6 +354,7 @@ def _seed_full_slice(ctx, media_file):
         "provenance_id": sealed["provenance_id"],
         "project_id": project["project_id"],
         "render_id": render_id,
+        "brand_kit_id": brand_kit_id,
         "source_path": str(media_file),
         # A REAL artefact, so restore-permanent-set's probe is a call that would
         # genuinely do something. A path to nothing would make the GET fail on
@@ -405,6 +413,15 @@ def _valid_query_for(op, seeded):
         "amount_usd": "1.00",
         "approved": "true",
         "input_ref": seeded["asset_id"],
+        # T-068 brand kits (DR-021). Values that would genuinely SUCCEED for
+        # create/list/update/delete-brand-kit, same reasoning as every other
+        # entry here — a GET that executes would otherwise be invisible
+        # behind a parameter that merely fails validation.
+        "name": "a GET must not create this brand kit",
+        "logo_asset_id": seeded["asset_id"],
+        "primary_color": "#112233",
+        "secondary_color": "#445566",
+        "font_family": "Inter",
     })
     query = {}
     for p in op.params:

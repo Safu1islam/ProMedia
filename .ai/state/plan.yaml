@@ -22,12 +22,21 @@
 # rescoped — only arranged. See DR-012.
 
 meta:
-  plan_version: 2
+  plan_version: 3
   schema_version: 1
   project: ProMedia
   aef_version: 0.5.2
   planned_at: 2026-08-08
   restructured_at: 2026-08-12
+  replanned_at: 2026-08-16
+  replanned_by_role: architect
+  replan_note: >
+    plan_version 2 -> 3: T-060's planning pass (DR-019..DR-023). N-060's
+    single deferred placeholder is unchanged (now records the completed
+    planning pass itself) and gains a sibling section, S-V2-ROOMS-2, with
+    eight new leaves (N-064..N-071 / T-064..T-071) for the five items it
+    named: Color room, Audio room, brand kits, content calendar, model
+    marketplace. No existing task was renumbered, rewritten or rescoped.
   planned_by_role: analyst
   mode: critical
 
@@ -332,8 +341,62 @@ tree:
         - id: N-060
           agent: architect
           type: task
-          title: "DEFERRED — Color/Audio rooms, brand kits, calendar, model marketplace"
+          title: "Planning pass — Color/Audio rooms, brand kits, calendar, model marketplace"
           task: T-060
+        - id: S-V2-ROOMS-2
+          type: section
+          title: "Colour, audio, brand kits, calendar, capability directory"
+          note: >
+            Planned 2026-08-16 (T-060's planning pass, DR-019..DR-023).
+            "True real-time 4K scrubbing" (also named in T-060's original
+            title) is deliberately absent here — DR-016/DR-017 already
+            decided it is architecturally foreclosed on this hardware and
+            substituted with proxy preview; that is a closed decision, not a
+            gap this section needed to fill. Each pair below is an engine/
+            data-model task (data_model_change, critical) feeding a screen
+            task (ui_change, standard); calendar and the capability
+            directory need no backend task at all, per DR-022/DR-023.
+          children:
+            - id: N-064
+              agent: implementer
+              type: task
+              title: "Color grading — EDL vocabulary + render engine"
+              task: T-064
+            - id: N-065
+              agent: frontend-agent
+              type: task
+              title: "Color room screen"
+              task: T-065
+            - id: N-066
+              agent: implementer
+              type: task
+              title: "Audio mixing — EDL vocabulary + render engine"
+              task: T-066
+            - id: N-067
+              agent: frontend-agent
+              type: task
+              title: "Audio room screen"
+              task: T-067
+            - id: N-068
+              agent: implementer
+              type: task
+              title: "Brand kits — data model and operations"
+              task: T-068
+            - id: N-069
+              agent: frontend-agent
+              type: task
+              title: "Brand kits screen"
+              task: T-069
+            - id: N-070
+              agent: frontend-agent
+              type: task
+              title: "Content calendar screen"
+              task: T-070
+            - id: N-071
+              agent: frontend-agent
+              type: task
+              title: "Model marketplace — Capability Directory screen"
+              task: T-071
         - id: N-061
           agent: frontend-agent
           type: task

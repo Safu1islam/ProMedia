@@ -44,7 +44,9 @@ def test_an_edl_round_trips_through_json():
     original = EDL(
         aspect="vertical",
         clips=[Clip(asset_id="a", start=1, end=4, effect="sepia", speed=2.0,
-                    transition_in="fade", volume=0.8)],
+                    transition_in="fade", volume=0.8,
+                    brightness=0.2, contrast=1.3, saturation=0.7,
+                    white_balance=-0.4, temperature=4200.0)],
         text=[TextOverlay(text="Title", position="top", size=50)],
         audio=[AudioTrack(asset_id="music", volume=0.2, fade_in=1.5)],
         subtitle_asset_id="subs",
@@ -69,6 +71,32 @@ def test_clip_duration_accounts_for_speed():
     # An open-ended clip needs the source duration to be knowable at all.
     assert Clip(asset_id="a", start=0).duration(None) is None
     assert Clip(asset_id="a", start=0).duration(30) == 30
+
+
+def test_an_edl_written_before_grading_existed_loads_with_neutral_grade(tmp_path):
+    """AC-2's document-level half: a v1 EDL (T-064 bumped EDL_VERSION to 2)
+    with no grade keys at all — exactly what every EDL on disk before this
+    task looked like — must load with every grade field at GRADE_NEUTRAL."""
+    raw = {
+        "version": 1,
+        "aspect": "landscape",
+        "clips": [{"asset_id": "a", "start": 0, "end": 5}],
+        "text": [], "audio": [], "subtitle_asset_id": None, "normalise_audio": True,
+    }
+    restored = EDL.from_dict(raw)
+    clip = restored.clips[0]
+    assert clip.brightness == 0.0
+    assert clip.contrast == 1.0
+    assert clip.saturation == 1.0
+    assert clip.white_balance == 0.0
+    assert clip.temperature == 6500.0
+    assert clip.is_graded() is False
+
+
+def test_a_default_clip_reports_not_graded_a_graded_one_does():
+    assert Clip(asset_id="a").is_graded() is False
+    assert Clip(asset_id="a", brightness=0.1).is_graded() is True
+    assert Clip(asset_id="a", temperature=5000.0).is_graded() is True
 
 
 def test_asset_ids_covers_video_audio_and_subtitles():
@@ -96,6 +124,11 @@ def test_an_empty_edl_is_refused():
     (Clip(asset_id="a", speed=50), "range"),
     (Clip(asset_id="a", effect="cartoonify"), "not available"),
     (Clip(asset_id="a", transition_in="starwipe"), "not available"),
+    (Clip(asset_id="a", brightness=5.0), "range"),
+    (Clip(asset_id="a", contrast=-1.0), "range"),
+    (Clip(asset_id="a", saturation=10.0), "range"),
+    (Clip(asset_id="a", white_balance=2.0), "range"),
+    (Clip(asset_id="a", temperature=100.0), "range"),
 ])
 def test_unrenderable_clips_are_refused(bad, message):
     """Each refusal names the offending clip, because an agent acting on it
@@ -104,6 +137,16 @@ def test_unrenderable_clips_are_refused(bad, message):
         EDL(clips=[bad]).validate()
     text = str(excinfo.value)
     assert message in text and "clips[0]" in text
+
+
+def test_an_out_of_range_grade_value_is_refused_before_any_render_is_attempted():
+    """AC-3, spelled out explicitly rather than folded only into the
+    parametrized table above: compile_render must never reach ffmpeg for an
+    unrenderable grade value — edl.validate() is called first and refuses."""
+    edl = EDL(clips=[Clip(asset_id="a", end=5, saturation=99.0)])
+    with pytest.raises(ValidationError) as excinfo:
+        render.compile_render(edl, SRC, OUT)
+    assert "saturation" in str(excinfo.value) and "clips[0]" in str(excinfo.value)
 
 
 def test_an_unknown_aspect_is_refused_and_lists_the_real_ones():
@@ -256,3 +299,61 @@ def test_compiling_validates_first():
     before ffmpeg is ever invoked."""
     with pytest.raises(ValidationError):
         render.compile_render(EDL(clips=[Clip(asset_id="a", start=10, end=5)]), SRC, OUT)
+
+
+# --- colour grading (T-064, DR-019) -------------------------------------------
+#
+# Structural only, run without ffmpeg on PATH — same split as everything else
+# in this file. The real-render, decoded-pixel proof for AC-1 and AC-2 lives
+# in tests/test_transitions.py, which already carries the solid-colour clip
+# fixtures and the _mean_rgb helper this needs; see its "colour grading"
+# section for measured evidence rather than filter-string reasoning alone.
+
+
+def test_a_neutral_grade_clip_emits_no_grade_filter_at_all_ac2():
+    """AC-2's structural half: an EDL whose clips carry only GRADE_NEUTRAL
+    values (exactly what every pre-T-064 EDL defaults to, per from_dict)
+    must produce a filter_graph with none of the three grade filters in it —
+    this is what makes it byte-identical to what compile_render produced
+    before this task."""
+    plan = render.compile_render(simple(), SRC, OUT)
+    assert "eq=" not in plan.filter_graph
+    assert "colorbalance=" not in plan.filter_graph
+    assert "colortemperature=" not in plan.filter_graph
+
+
+def test_only_the_changed_grade_field_is_emitted_in_the_eq_filter():
+    """Adjusting one eq-backed field must not silently reset the other two to
+    eq's own built-in defaults — only the field that changed appears."""
+    plan = render.compile_render(
+        EDL(clips=[Clip(asset_id="a", end=2, brightness=0.3)]), SRC, OUT
+    )
+    assert "eq=brightness=0.3" in plan.filter_graph
+    assert "contrast=" not in plan.filter_graph
+    assert "saturation=" not in plan.filter_graph
+
+
+def test_all_three_eq_backed_fields_combine_into_one_eq_call():
+    plan = render.compile_render(
+        EDL(clips=[Clip(asset_id="a", end=2, brightness=0.1, contrast=1.2, saturation=0.5)]),
+        SRC, OUT,
+    )
+    assert "eq=brightness=0.1:contrast=1.2:saturation=0.5" in plan.filter_graph
+
+
+def test_white_balance_compiles_to_colorbalance():
+    plan = render.compile_render(
+        EDL(clips=[Clip(asset_id="a", end=2, white_balance=0.5)]), SRC, OUT
+    )
+    assert "colorbalance=rs=0.5:bs=-0.5:rm=0.5:bm=-0.5:rh=0.5:bh=-0.5" in plan.filter_graph
+    assert "eq=" not in plan.filter_graph
+    assert "colortemperature=" not in plan.filter_graph
+
+
+def test_temperature_compiles_to_colortemperature():
+    plan = render.compile_render(
+        EDL(clips=[Clip(asset_id="a", end=2, temperature=3200.0)]), SRC, OUT
+    )
+    assert "colortemperature=temperature=3200" in plan.filter_graph
+    assert "eq=" not in plan.filter_graph
+    assert "colorbalance=" not in plan.filter_graph

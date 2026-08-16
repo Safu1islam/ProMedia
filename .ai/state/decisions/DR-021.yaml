@@ -1,0 +1,140 @@
+id: DR-021
+title: Brand kits — a new SQLite table, applied by compiling into the EDL (never a parallel render-time input)
+date: 2026-08-16
+status: accepted
+decision_area: brand_kit_data_model
+
+prompted_by: >
+  T-060 named brand kits as deferred: no data model exists. Operator
+  instruction (2026-08-16): full planning pass for T-060's five items.
+
+binding_constraints:
+  - "edl.py's own stated design: 'An EDL is a declarative description of a
+    finished video ... it is the ONLY thing an edit ever changes.' A second
+    input a render silently also depends on would break EDL's determinism
+    guarantee (C-20's sibling property for renders: same EDL, same output)
+    and its reproducibility claim (edl.py docstring: renders are reproducible
+    years later from the EDL alone)"
+  - "F-8: provenance/rights records key on content hash and embedded metadata,
+    never a file path or an external, mutable reference — a rendered video's
+    branding must not depend on a brand_kits row that could later change or
+    be deleted"
+  - "Every other structured, queryable, operator-owned entity in this project
+    (accounts, projects, posts) already lives in the same SQLite database
+    (schema.sql) — no second datastore exists anywhere in this codebase"
+  - "The logo/watermark itself is media: F-3/F-4 (rights are a hard
+    constraint; editing/branding never launders rights) mean a brand kit's
+    logo image is an asset like any other and must carry its own rights
+    declaration before use, not a special-cased bypass"
+
+problem_statement: >
+  Two separable questions: where does brand-kit DATA (name, colours, font,
+  logo reference) live, and how does APPLYING a kit to a project actually
+  affect a render. Getting the second one wrong (e.g. a render reading the
+  kit live) breaks the EDL's core guarantee, so it is decided explicitly
+  here rather than left to the implementing task's judgement.
+
+ruled_out:
+  - option: "Brand kit as a runtime render-time input alongside the EDL (render(project, edl, brand_kit))"
+    reason: >
+      Breaks reproducibility: the same EDL could render differently depending
+      on which brand kit exists (or has been edited) at render time, which
+      is exactly the property edl.py's docstring names as the reason an EDL
+      is the only thing an edit changes. Also breaks F-8 (a render's
+      provenance must remain valid after any input it depended on changes or
+      is deleted) if the kit is edited or removed later.
+  - option: "A JSON/config file for brand kits (e.g. promedia.toml or a flat file per kit)"
+    reason: >
+      Every comparable operator-owned entity (accounts, projects) is a
+      SQLite row with an id, CRUD operations, and audit fields
+      (created_by/created_at) — a config file would be the only entity in
+      this project without list/query/history, and promedia.toml is
+      reserved for deployment configuration (timeouts, API versions), not
+      operator content.
+
+candidates:
+  - option: "New brand_kits SQLite table + CRUD operations; APPLYING a kit compiles it into a new EDL version (logo as a burned-in image overlay, colours/font recorded for future caption styling)"
+    advantages:
+      - "Preserves EDL determinism exactly: once applied, the branding is
+        baked into that EDL version like any other edit — the brand_kits row
+        becomes a convenience generator, safely deletable afterward, matching
+        how F-8 treats provenance as independent of its inputs' later state"
+      - "Follows the exact pattern this project already uses for
+        'a screen needs something no operation provides ⇒ new operation,
+        never a query in a route' (frontend-brief.md rule 2): apply-brand-kit
+        becomes a real operation, callable from CLI and UI alike (F-1)"
+      - "The logo overlay reuses the render engine's existing image-burn-in
+        capability class (an ffmpeg overlay filter) rather than inventing a
+        second compositing path"
+    disadvantages:
+      - "Requires one new EDL construct — an ImageOverlay, mirroring
+        TextOverlay's position-by-name approach — which is schema growth in
+        the EDL, not just the SQL layer; named explicitly rather than
+        understated as 'just a table'"
+      - "Font/colour metadata has nowhere to land YET beyond being stored and
+        shown — this project has no Captions room (T-060 itself defers it)
+        to consume a font choice, and TextOverlay's styling is minimal
+        (size/color/box). Disclosed as a real, named gap: brand-kit colour
+        and font are captured and displayed, and colour is usable
+        immediately for TextOverlay.color, but full brand-consistent caption
+        styling waits for whatever task eventually builds captions"
+  - option: "Brand kit as a project-level column (projects.brand_kit_id) applied live at every render"
+    advantages: ["Simplest schema — one foreign key"]
+    disadvantages:
+      - >
+        Reintroduces the ruled-out live-dependency problem above at the
+        project level instead of the render level — a project's every past
+        AND future render would silently change if the kit changed, which
+        is worse, not better, than a per-render live dependency.
+
+decision: >
+  New schema.sql table brand_kits (id, name, logo_asset_id REFERENCES assets,
+  primary_color, secondary_color, font_family, created_by, created_at,
+  updated_at) plus promedia/core/ops/brandkits.py: create-brand-kit,
+  list-brand-kits, update-brand-kit, delete-brand-kit, apply-brand-kit
+  (project_id, brand_kit_id) -> writes a new EDL version. edl.py gains
+  ImageOverlay (asset_id, position, size, start/end — same position-by-name
+  approach as TextOverlay) rendered via ffmpeg's overlay filter. The logo
+  asset is ingested and rights-declared through the existing ingest path,
+  no special case. apply-brand-kit is agent authority (F-2: drafting an
+  edit is not spending or publishing), matching set-edl's own authority
+  level.
+
+rationale: >
+  This keeps exactly one thing deciding what a render looks like — the EDL
+  — which is the property every other design decision in this project (T-041
+  through DR-017) has protected. A brand kit is data ABOUT how to build an
+  EDL, not a second thing a render reads. This is the same reasoning F-8
+  already established for provenance (embed, never link) applied to a new
+  case.
+
+fluency_bias_check: >
+  The reach here would be to store brand_kit_id on the project and resolve
+  it at render time, because that is the normal "settings" pattern in most
+  web apps. Checked against edl.py's explicit, load-bearing design
+  statement, that pattern is wrong for this project specifically — named
+  rather than defaulted to.
+
+operator_fit: >
+  One more entity to manage through the same CRUD pattern already familiar
+  from accounts/projects. No new package, no new credential, no new
+  external service.
+
+reversibility: moderate
+reversibility_note: >
+  The SQL table is new (additive migration, no existing table altered — same
+  low-risk shape as T-042's original schema growth). ImageOverlay is an
+  additive EDL field, defaulted on load. Deleting brand_kits entirely later
+  would strand no renders, by design (the decision's whole point).
+
+revisit_if:
+  - "A Captions room is planned (T-060 itself defers it) — brand-kit font
+    should be revisited as a real input to caption styling at that point,
+    not before"
+  - "The operator wants a kit's branding to update ALREADY-APPLIED but
+    not-yet-rendered EDL versions automatically — that is a different,
+    live-binding design and needs its own decision, not a quiet change here"
+
+relates_to: [DR-002, DR-016, F-8]
+supersedes: []
+extends: []

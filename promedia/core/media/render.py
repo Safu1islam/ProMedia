@@ -19,7 +19,7 @@ from typing import Any
 
 from ...errors import ValidationError
 from . import ffmpeg
-from .edl import EDL, Clip, TextOverlay, TIMELINE_TRANSITIONS
+from .edl import EDL, GRADE_NEUTRAL, Clip, TextOverlay, TIMELINE_TRANSITIONS
 
 # ffmpeg filter fragments per named effect. Kept here, next to the compiler, so
 # that adding an effect to the EDL vocabulary and teaching the compiler to
@@ -143,6 +143,48 @@ class RenderPlan:
         }
 
 
+def _grade_filters(clip: Clip) -> list[str]:
+    """The colour-grade filter fragments for one clip (T-064, DR-019).
+
+    Three known ffmpeg filters, one per field group, each omitted entirely
+    when its field(s) sit at GRADE_NEUTRAL — this is what makes a clip with
+    no grading applied compile to no grade filter at all (AC-2):
+
+    * ``eq``               — brightness / contrast / saturation. Only the
+      params that differ from neutral are emitted, so adjusting one field
+      does not silently reset the other two to eq's own defaults.
+    * ``colorbalance``     — white_balance. A warm (+) value shifts red up
+      and blue down uniformly across shadows/midtones/highlights; cool (-)
+      is the reverse. Simpler than grading each tonal range independently,
+      which this vocabulary does not expose.
+    * ``colortemperature`` — temperature, passed straight through in
+      Kelvin, ffmpeg's own unit for this filter, so there is no second
+      mapping to keep in sync with GRADE_RANGES.
+    """
+    filters: list[str] = []
+
+    eq_params = []
+    if clip.brightness != GRADE_NEUTRAL["brightness"]:
+        eq_params.append(f"brightness={clip.brightness:g}")
+    if clip.contrast != GRADE_NEUTRAL["contrast"]:
+        eq_params.append(f"contrast={clip.contrast:g}")
+    if clip.saturation != GRADE_NEUTRAL["saturation"]:
+        eq_params.append(f"saturation={clip.saturation:g}")
+    if eq_params:
+        filters.append("eq=" + ":".join(eq_params))
+
+    if clip.white_balance != GRADE_NEUTRAL["white_balance"]:
+        wb = clip.white_balance
+        filters.append(
+            f"colorbalance=rs={wb:g}:bs={-wb:g}:rm={wb:g}:bm={-wb:g}:rh={wb:g}:bh={-wb:g}"
+        )
+
+    if clip.temperature != GRADE_NEUTRAL["temperature"]:
+        filters.append(f"colortemperature=temperature={clip.temperature:g}")
+
+    return filters
+
+
 def _clip_chain(index: int, clip: Clip, width: int, height: int) -> str:
     """The video filter chain for one clip, ending at label [vN]."""
     steps = [
@@ -155,6 +197,9 @@ def _clip_chain(index: int, clip: Clip, width: int, height: int) -> str:
     ]
     if clip.speed != 1.0:
         steps.append(f"setpts={1.0 / clip.speed:.6f}*PTS")
+    # Colour correction before the creative EFFECT below, same order a
+    # grading pass would run in by hand: correct, then stylise.
+    steps.extend(_grade_filters(clip))
     effect = EFFECT_FILTERS.get(clip.effect, "")
     if effect:
         steps.append(effect)

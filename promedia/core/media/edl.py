@@ -29,7 +29,7 @@ from typing import Any
 
 from ...errors import ValidationError
 
-EDL_VERSION = 1
+EDL_VERSION = 2
 
 # Aspect presets, named by what they are FOR rather than by their numbers,
 # because that is how the operator and the agent both think about them.
@@ -58,6 +58,41 @@ TIMELINE_TRANSITIONS = ("dissolve", "wipeleft", "wiperight", "slideup", "slidedo
 # adding one means adding its compilation, not just its name.
 CLIP_EFFECTS = ("none", "grayscale", "sepia", "blur", "sharpen", "brighten", "darken", "saturate")
 
+# Colour-grade vocabulary (T-064, DR-019). Same discipline as CLIP_EFFECTS and
+# TRANSITIONS: each field maps to one known ffmpeg filter in render.py's
+# compiler (see render._grade_filters) —
+#   brightness / contrast / saturation -> eq (one filter, only the changed
+#     params are emitted, so adjusting one does not silently reset the others)
+#   white_balance                      -> colorbalance (warm/cool shift,
+#     applied uniformly across shadows/midtones/highlights)
+#   temperature                        -> colortemperature (ffmpeg's own
+#     Kelvin parameter, used directly rather than remapped)
+# Every value below is each field's NEUTRAL default: a clip whose grade
+# fields are all at these values must compile to no grade filter at all,
+# which is what makes an EDL written before this change render identically
+# (AC-2) — Clip.from_dict defaults every missing grade field to exactly one
+# of these.
+GRADE_NEUTRAL: dict[str, float] = {
+    "brightness": 0.0,
+    "contrast": 1.0,
+    "saturation": 1.0,
+    "white_balance": 0.0,
+    "temperature": 6500.0,
+}
+
+# Range each field is refused outside of by EDL.validate(). Not the raw
+# tolerance of the underlying ffmpeg filter (colortemperature alone accepts
+# 1000-40000) but the range this vocabulary considers a meaningful grade for
+# short screen-recording social clips (project.md C-11), matching the
+# existing speed field's own "supported range, not filter tolerance" style.
+GRADE_RANGES: dict[str, tuple[float, float]] = {
+    "brightness": (-1.0, 1.0),
+    "contrast": (0.0, 3.0),
+    "saturation": (0.0, 3.0),
+    "white_balance": (-1.0, 1.0),
+    "temperature": (2000.0, 12000.0),
+}
+
 
 @dataclass
 class Clip:
@@ -77,12 +112,28 @@ class Clip:
     transition_duration: float = 0.5
     volume: float = 1.0
     mute: bool = False
+    # Colour grade (T-064, DR-019). Defaults are GRADE_NEUTRAL's own values,
+    # not duplicated as literals here so the two cannot drift apart.
+    brightness: float = GRADE_NEUTRAL["brightness"]
+    contrast: float = GRADE_NEUTRAL["contrast"]
+    saturation: float = GRADE_NEUTRAL["saturation"]
+    white_balance: float = GRADE_NEUTRAL["white_balance"]
+    temperature: float = GRADE_NEUTRAL["temperature"]
 
     def duration(self, source_duration: float | None) -> float | None:
         end = self.end if self.end is not None else source_duration
         if end is None:
             return None
         return max(0.0, (end - self.start) / (self.speed or 1.0))
+
+    def is_graded(self) -> bool:
+        """True if any colour-grade field differs from its neutral default.
+
+        Used for reporting (EDL.summary()) — the render compiler decides
+        filter-by-filter, on its own, whether each individual field needs to
+        be emitted (see render._grade_filters), rather than calling this.
+        """
+        return any(getattr(self, name) != neutral for name, neutral in GRADE_NEUTRAL.items())
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -91,6 +142,9 @@ class Clip:
             "transition_in": self.transition_in,
             "transition_duration": self.transition_duration,
             "volume": self.volume, "mute": self.mute,
+            "brightness": self.brightness, "contrast": self.contrast,
+            "saturation": self.saturation, "white_balance": self.white_balance,
+            "temperature": self.temperature,
         }
 
     @classmethod
@@ -105,6 +159,14 @@ class Clip:
             transition_duration=float(raw.get("transition_duration", 0.5)),
             volume=float(raw.get("volume", 1.0)),
             mute=bool(raw.get("mute", False)),
+            # An EDL written before T-064 has none of these keys at all — each
+            # defaults to GRADE_NEUTRAL, which is what makes a pre-existing
+            # EDL render identically to before (AC-2).
+            brightness=float(raw.get("brightness", GRADE_NEUTRAL["brightness"])),
+            contrast=float(raw.get("contrast", GRADE_NEUTRAL["contrast"])),
+            saturation=float(raw.get("saturation", GRADE_NEUTRAL["saturation"])),
+            white_balance=float(raw.get("white_balance", GRADE_NEUTRAL["white_balance"])),
+            temperature=float(raw.get("temperature", GRADE_NEUTRAL["temperature"])),
         )
 
 
@@ -282,6 +344,14 @@ class EDL:
             if clip.transition_duration < 0:
                 raise ValidationError(f"{where}.transition_duration cannot be negative",
                                       parameter=where)
+            for name, (low, high) in GRADE_RANGES.items():
+                value = getattr(clip, name)
+                if not low <= value <= high:
+                    raise ValidationError(
+                        f"{where}.{name} {value:g} is outside the supported "
+                        f"{low:g}-{high:g} range",
+                        parameter=where,
+                    )
 
         for index, overlay in enumerate(self.text):
             where = f"text[{index}]"
@@ -335,4 +405,5 @@ class EDL:
             "effects_used": sorted({c.effect for c in self.clips if c.effect != "none"}),
             "transitions_used": sorted({c.transition_in for c in self.clips
                                         if c.transition_in != "cut"}),
+            "graded_clips": sum(1 for c in self.clips if c.is_graded()),
         }

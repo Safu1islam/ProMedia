@@ -40,17 +40,11 @@ const SCREENS: Record<string, { title: string; blurb: string; note: string; task
     note: "Rendering exists and is real (one target at a time, from a project) — see a project's Editor room. Batch multi-target export is not built.",
     task: "T-060",
   },
-  calendar: {
-    title: "Content calendar",
-    blurb: "Drafts, scheduled, published and failed items across every channel and brand.",
-    note: "Scheduling exists and is real (publish-tick, T-018) but has no calendar view yet. See Approvals for the queue as a list.",
-    task: "T-060",
-  },
   settings: {
     title: "Settings & integrations",
     blurb: "Accounts, storage, backup and what this installation can do.",
-    note: "This is a placeholder in the new client. Every one of these is real and working today at the classic settings page.",
-    task: "T-059",
+    note: "This is a placeholder in the new client. Accounts now have a real home at Distribute > Social; storage, backup and capabilities are still real and working today only at the classic settings page. No task currently plans a rich-client settings screen.",
+    task: "not planned",
   },
 };
 

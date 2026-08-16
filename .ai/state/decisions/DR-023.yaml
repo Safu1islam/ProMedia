@@ -1,0 +1,148 @@
+id: DR-023
+title: "Model marketplace" scoped honestly as a capability directory over T-048's existing provider registry — not a live multi-vendor marketplace
+date: 2026-08-16
+status: accepted
+decision_area: ai_capability_marketplace_ui
+
+prompted_by: >
+  T-060 named "model marketplace" as deferred, with T-048 (AI capability
+  providers and the spend ledger) named as its "closest thing to a 'model
+  marketplace' backend." Operator instruction (2026-08-16): full planning
+  pass for T-060's five items. This record exists because "marketplace" is
+  the one of the five words in T-060's title that most invites scope the
+  project's own constraints forbid, and that has to be said before a task is
+  written, not discovered while implementing it.
+
+binding_constraints:
+  - "T-048's own module docstring, unconditionally: 'NO PURCHASING OR
+    PAYMENT CODE lives anywhere behind this interface' — a literal
+    marketplace (browse, compare, buy/subscribe to a provider) is a
+    purchasing surface by definition"
+  - "F-2: agents may never spend money without operator approval in the UI;
+    C-31: $100/month ceiling, $5 per-operation cap without approval — any UI
+    that makes acquiring a new AI provider feel like a checkout flow works
+    against both"
+  - "project.md O-3: API pricing/access terms may never be written from model
+    memory, verified only against live documentation at first connection —
+    a marketplace implies a catalog of providers with prices, which this
+    project is structurally not allowed to author speculatively"
+  - "NON-NEGOTIABLES §B: adding a new external dependency needs explicit
+    approval — a live multi-vendor catalog fetch is itself a new external
+    integration, not a UI change"
+  - "F-9 / multi-tenancy permanently out of scope: a marketplace with
+    listings, reviews, or third-party publishers implies multiple actors
+    transacting, which project.md §2 forecloses ('there is no third [actor],
+    now or later')"
+
+problem_statement: >
+  What does "model marketplace" honestly mean for a single-operator system
+  that is contractually forbidden from purchasing anything and forbidden
+  from inventing pricing? The word implies browsing and acquiring from
+  multiple vendors; the project's own non-negotiables forbid building that.
+  This record exists to resolve the tension explicitly rather than let an
+  implementing task quietly build toward the word instead of the constraint.
+
+ruled_out:
+  - option: "A live, multi-vendor marketplace: fetch a catalog of AI providers, show live pricing, let the operator subscribe/pay from the UI"
+    reason: >
+      Directly violates T-048's own binding rule (no purchasing/payment
+      code), C-31 (agents may not spend), and O-3 (no pricing from memory —
+      and a 'catalog' implies exactly the kind of invented-until-verified
+      pricing O-3 exists to prevent). Also a new external dependency (a
+      catalog-fetching integration) requiring NON-NEGOTIABLES §B approval
+      that has not been sought or needed for anything else in this project.
+  - option: "A marketplace where AI agents 'sell' capabilities to each other or to the operator via an internal economy"
+    reason: >
+      Answers a question this project never asked. F-9 forecloses any model
+      with more than one human actor, and nothing in project.md or the T-048
+      task envisions inter-agent commerce; inventing it here would be scope
+      the operator did not authorise, the specific failure mode Constitution
+      §5 ('do not ask what you can discover... but do not invent restrictions
+      OR capability either') warns against in the capability-inventing
+      direction.
+
+candidates:
+  - option: "A 'Capability Directory' screen: project T-048's existing list-capabilities/capability-requirements/estimate-capability-cost/spend-status/spend-history/run-capability operations as cards, one per AI capability kind"
+    advantages:
+      - "Zero new backend surface — T-048 already built every operation this
+        needs (list-capabilities, capability-requirements,
+        estimate-capability-cost, run-capability, spend-status, spend-check,
+        record-spend, spend-history), all already registered and tested"
+      - "Structurally cannot violate C-31 or the no-purchasing rule, because
+        it is a read-mostly projection of a registry that itself cannot
+        purchase anything (T-048's own proof, re-verified by
+        HANDOFF-CLOSEOUT-0814: grepped, no purchase path anywhere)"
+      - "Honestly matches what actually exists today: every capability
+        reports UNAVAILABLE with exactly what would make it available
+        (package + credential + verified pricing) — the directory SHOWS that
+        state rather than hiding it behind a marketplace metaphor that
+        implies something is purchasable today when nothing is"
+    disadvantages:
+      - "Will look sparse — every capability card shows 'unavailable' today
+        (T-048's own AC-2), by design, not by bug. Named explicitly so the
+        implementing task does not try to make it look more populated than
+        it honestly is (Constitution §6: never present a substitution, or
+        here, an absence, as something else)"
+      - "Does not deliver the browsing/comparison experience the word
+        'marketplace' evokes — a deliberate, disclosed narrowing, not an
+        oversight"
+  - option: "Build vs buy: skip this screen, leave AI capabilities reachable only via /ops or the CLI"
+    advantages: ["Cheapest"]
+    disadvantages:
+      - >
+        Leaves a real, if narrow, gap: an operator using the rich client has
+        no crafted view of what capabilities exist or what would unlock
+        them, only the generic /ops form (layer 1, per frontend-brief.md
+        §4) — which works, but is exactly the 'ugly, supposed to be' floor
+        the brief describes, not the experience layer T-060 was asked to plan.
+
+decision: >
+  Build a "Capability Directory" screen (not named "marketplace" in the UI
+  itself, to avoid promising what it does not do): one card per AI
+  capability kind (transcription/text/speech/image/video), each showing
+  availability, exactly what requirements() lists as missing, an UNKNOWN-
+  unless-verified cost estimate, and a "why this refuses today" state for
+  run-capability. A spend-status/spend-history panel shows the C-31 ledger.
+  No new backend operation. No purchase, checkout, subscribe, or payment
+  control exists anywhere on this screen — verified by the same grep
+  discipline T-048's own verification used, as an acceptance criterion on
+  whichever task builds it.
+
+rationale: >
+  The honest reading of "T-048 is the closest thing to a marketplace
+  backend" (T-060's own objective text) is that it IS the backend — this
+  decision is about presentation, not about building the marketplace T-060's
+  title's word suggests. Naming the narrower, correct scope now is what
+  keeps a future task from reaching for the wrong shape under time pressure.
+
+fluency_bias_check: >
+  "Marketplace" is a strong pull toward e-commerce UI patterns (cards,
+  prices, an "add" or "buy" button) purely from how common that pattern is
+  in training data, independent of whether this project's constraints
+  support it. They do not, and are explicit about it (T-048's own
+  docstring); named here rather than let the word decide the design.
+
+operator_fit: >
+  No new package, no new credential, no new external service, no new
+  operational burden — purely a projection of what T-048 already built and
+  already operates.
+
+reversibility: cheap
+reversibility_note: >
+  Pure UI, no schema, no new operation. If a live provider adapter is ever
+  added behind a specific capability (mirroring how T-019 added live
+  publisher adapters behind DR-010's frozen interface), this screen needs no
+  redesign — it already displays availability/requirements generically.
+
+revisit_if:
+  - "A specific AI provider gets a real, credentialed, priced live adapter
+    (T-048's own 'future task' seam) — the directory then shows one
+    genuinely available card instead of five unavailable ones; no redesign
+    needed, just real data flowing through the same fields"
+  - "The operator explicitly asks for a genuine multi-vendor catalog with
+    real pricing — that reopens O-3 and NON-NEGOTIABLES §B and needs its own
+    intake, not a quiet extension of this screen"
+
+relates_to: [DR-002, DR-010]
+supersedes: []
+extends: []

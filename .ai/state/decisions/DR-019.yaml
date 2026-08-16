@@ -1,0 +1,145 @@
+id: DR-019
+title: Color grading — ffmpeg filter extension of the existing EDL/render engine, not a new engine
+date: 2026-08-16
+status: accepted
+decision_area: color_grading_engine
+
+prompted_by: >
+  T-060 named "Color room" as deferred because no color-grading engine exists.
+  Operator instruction (2026-08-16): run the full planning pass for T-060's
+  five items. This record answers the one open question a color room needs
+  before a task can be written: what actually performs the grade.
+
+binding_constraints:
+  - "project.md §4 amendment: every capability the rich UI exposes is still a
+    registered operation acting on the same EDL (F-1, DR-002, DR-016) — a
+    richer VIEW onto orchestrated edits, not a frame-accurate compositor with
+    its own render engine or storage format"
+  - "No discrete GPU (Iris Xe, no CUDA) — DR-016, DR-017. Real-time
+    full-resolution grading feedback is not viable; this decision must not
+    invent capability the hardware cannot honestly provide"
+  - "C-7: full transcode of a 10-min source < 15 min — a grading pass is part
+    of that same render, not a second one"
+  - "edl.py's own stated discipline: 'the vocabulary is deliberately small...
+    anything that cannot be rendered has no business being expressible'"
+  - "project.md §8: operator TIME is the binding constraint, not capability —
+    weighs against a bespoke engine even if this machine could run one"
+
+problem_statement: >
+  A color room needs something that takes per-clip adjustment values and
+  produces different pixel output. Three shapes were considered: extend the
+  existing ffmpeg-filter render pipeline (render.py/edl.py, T-041/T-042/T-045)
+  with color fields; add a third-party color-science library; or treat
+  grading as an image-processing problem solved outside ffmpeg entirely.
+
+ruled_out:
+  - option: "A custom GPU-shader colour pipeline (LUTs, 3D colour cubes, real-time node graph)"
+    reason: >
+      Not viable on this hardware (DR-016) — would either silently fall back
+      to unbearably slow CPU shader emulation or require a GPU this machine
+      does not have. Inventing this would repeat exactly the mistake project.md
+      §4's amendment calls out by name: providing capability dishonestly.
+  - option: "A frame-accurate compositor / NLE color engine (e.g. building on OpenFX or a node-based grading model)"
+    reason: >
+      Owns its own colour-space and render pipeline outside the EDL, which is
+      the specific thing project.md §4's amendment forbids: 'not a
+      frame-accurate compositor with its own storage format or render engine.'
+      Also the single most expensive-to-maintain option for a solo operator
+      (project.md §8) for a use case (short screen-recording social clips,
+      C-11) that does not need cinema-grade grading.
+
+candidates:
+  - option: "Extend render.py/edl.py: per-clip grade fields compiled to ffmpeg's eq/colorbalance/colortemperature filters"
+    advantages:
+      - "ffmpeg is already the sole rendering boundary (DR-016) — no new
+        runtime dependency, no new failure mode to operate"
+      - "Directly mirrors how CLIP_EFFECTS (grayscale/sepia/blur/etc., T-041)
+        and TRANSITIONS (T-045) already work: one small, named vocabulary,
+        each entry a known, verified ffmpeg filter invocation — same pattern,
+        not a new one"
+      - "Composable with existing per-clip effects and transitions in the
+        same filter graph, so a render still produces one file in one pass"
+    disadvantages:
+      - "eq/colorbalance/colortemperature are a materially smaller feature
+        set than professional grading (no curves, no scopes-driven
+        secondary/regional colour, no true 3-way lift-gamma-gain) — named
+        here, not discovered later; scoped to what an ffmpeg filter can
+        actually do without a GPU"
+      - "No real-time preview while dragging a slider: proxy re-render on
+        release, same latency profile the timeline room already discloses
+        (T-055 AC-4), not instant grading feedback"
+  - option: "Add a Python colour-science library (e.g. colour-science, OpenColorIO) for LUT-based grading, still CPU-only"
+    advantages:
+      - "Richer colour-space math (true ACES/LUT pipelines) than ffmpeg's built-in filters"
+    disadvantages:
+      - >
+        REAL disadvantage: a new external dependency (NON-NEGOTIABLES §B
+        requires operator approval for this) that still has to hand its
+        output back to ffmpeg to be burned into the render, so it does not
+        remove ffmpeg from the pipeline, it adds a second image-processing
+        stage in front of it — more moving parts for a solo maintainer
+        (project.md §8) for capability (LUT-grade colour science) this
+        project's content (screen recordings, C-11) does not call for.
+      - "No CUDA on this machine (DR-016) — these libraries' GPU acceleration
+        paths are unusable here regardless; the CPU-only path is not
+        meaningfully better than ffmpeg's own filters for this content type"
+  - option: "Build vs buy: skip a real engine, let the Color room UI only preview (no render-time effect)"
+    advantages: ["Cheapest to build"]
+    disadvantages:
+      - >
+        Would be exactly the thing Constitution §6 forbids: a UI control that
+        changes nothing real is a fabrication, not a feature. Ruled out on
+        that basis alone, not on capability grounds — this is not a
+        candidate this project can honestly ship.
+
+decision: >
+  Extend the existing ffmpeg-filter render pipeline: new per-clip fields on
+  Clip (or a small ColorGrade value object attached to a clip) —
+  exposure/brightness, contrast, saturation, and white-balance temperature —
+  each compiling to one known ffmpeg filter (eq, colorbalance,
+  colortemperature) in render.py's existing filter-chain compiler, gated by
+  edl.py's own validate(), an EDL_VERSION bump, and full backward
+  compatibility (an EDL with no grade fields renders identically to today,
+  by defaulting to neutral values in from_dict — no new operation needed,
+  since color fields flow through the existing set-edl operation exactly as
+  effect/transition/speed do today).
+
+rationale: >
+  This is not a new engine, it is four more entries in a vocabulary that
+  already exists and already has this exact shape (CLIP_EFFECTS,
+  TRANSITIONS). The same discipline that caught F-003 (a transition that
+  claimed to render but didn't) applies here from day one: every grade field
+  this decision adds must have a verified ffmpeg invocation before a task
+  claims it works, proven the way T-045 proved dissolve — by measuring real
+  pixel values before/after, not by reading code.
+
+fluency_bias_check: >
+  The instinct for "color grading" is to reach for something that sounds like
+  professional tooling (a colour-science library, a LUT engine) because that
+  is what the word evokes. Checked against the actual constraint (no GPU,
+  screen-recording content, solo maintainer, C-7's render-time budget): the
+  boring option — more ffmpeg filters in the pipeline that already exists —
+  is the correct one, not the fallback.
+
+operator_fit: >
+  Zero new operational burden: no new package to install, no new credential,
+  no new failure mode beyond "ffmpeg filter chain fails", which the existing
+  render error path already surfaces. The cost is entirely in scope
+  (professional-grade colour tools are not being built), disclosed above, not
+  in operability.
+
+reversibility: moderate
+reversibility_note: >
+  Additive fields on Clip with defaulted from_dict — removing them later
+  (or replacing the filter set) touches render.py's filter-chain compiler
+  and edl.py's vocabulary only; no other module depends on grade values, and
+  every already-rendered output stays valid because rendering is a pure
+  function of a frozen, versioned EDL (edl.py's own stated design).
+
+revisit_if:
+  - "A discrete GPU becomes available (revisits DR-016/DR-017's shared premise, not just this record)"
+  - "The operator asks for capability an ffmpeg filter genuinely cannot express (e.g. true secondary/regional colour) — that is a new decision, not scope creep into this one"
+
+relates_to: [DR-002, DR-016, DR-017]
+supersedes: []
+extends: []

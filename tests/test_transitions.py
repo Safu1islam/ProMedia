@@ -235,6 +235,16 @@ def blue_clip(tmp_path_factory) -> Path:
     return _solid_clip(tmp_path_factory, "blue", 3.0, "blue")
 
 
+@pytest.fixture(scope="module")
+def grey_clip(tmp_path_factory) -> Path:
+    """Neutral mid-grey (128/128/128) — the right base for T-064's grading
+    measurements below: every channel starts equal, so a colour shift
+    (white_balance, temperature) or a luminance shift (brightness) shows up
+    as a clean deviation from one known baseline, not confounded by a
+    channel that is already saturated the way red/blue above would be."""
+    return _solid_clip(tmp_path_factory, "gray", 2.0, "grey")
+
+
 def _mean_rgb(path: Path, at_seconds: float) -> tuple[float, float, float]:
     """The average colour of the decoded frame at ``at_seconds``.
 
@@ -360,3 +370,117 @@ def test_every_previously_hard_cut_transition_renders_without_error(tmp_path, re
     result = render.execute(plan, timeout_seconds=120)
     assert result["duration_seconds"] == pytest.approx(5.0, abs=0.3)
     assert result["byte_size"] > 0
+
+
+# --- colour grading (T-064, DR-019) — AC-1 and AC-2, proved against real -----
+# decoded renders, same discipline as the dissolve tests above: "it compiled"
+# is not evidence a grade changed anything, only a decoded frame is. AC-1
+# needs at least one field measured per filter (eq, colorbalance,
+# colortemperature); each gets its own test below. The structural filter-
+# string assertions (which params appear, which don't) live in
+# tests/test_edl.py, which this task also owns — this file supplies the
+# pixel-level proof those string assertions cannot.
+#
+# Every EDL below sets normalise_audio=False, deliberately, not for speed:
+# these clips' audio is anullsrc (pure digital silence), and loudnorm on a
+# fully-silent input was found, while writing these tests, to emit NaN
+# samples that crash the AAC encoder ("Input contains (near) NaN/+-Inf") —
+# reproduced independently of any grade field (a single plain clip with
+# normalise_audio left at its True default fails the same way). That is a
+# pre-existing defect in the untouched normalise_audio/loudnorm path, not
+# something this task's grade filters caused or own; filed as R-019 rather
+# than fixed here, and worked around in these tests the same way a test
+# would avoid any other unrelated known-broken path.
+
+
+@needs_ffmpeg
+def test_neutral_grade_renders_the_source_colour_unchanged_ac2(tmp_path, grey_clip):
+    """AC-2, proved on a real decoded frame rather than the filter string
+    alone: a clip with every grade field at GRADE_NEUTRAL renders the same
+    128/128/128 a pre-T-064 build would have, because no eq/colorbalance/
+    colortemperature filter touches the pixels at all when nothing is
+    graded."""
+    edl = EDL(aspect="landscape_720", clips=[Clip(asset_id="grey", start=0, end=2)],
+              normalise_audio=False)
+    out = tmp_path / "neutral.mp4"
+    plan = render.compile_render(edl, {"grey": grey_clip}, out, quality="fast")
+    assert "eq=" not in plan.filter_graph
+    assert "colorbalance=" not in plan.filter_graph
+    assert "colortemperature=" not in plan.filter_graph
+    render.execute(plan, timeout_seconds=60)
+    r, g, b = _mean_rgb(out, 1.0)
+    assert abs(r - 128) < 8 and abs(g - 128) < 8 and abs(b - 128) < 8, (
+        f"neutral grade should leave a 128/128/128 source untouched, got "
+        f"({r:.1f}, {g:.1f}, {b:.1f})"
+    )
+
+
+@needs_ffmpeg
+def test_brightness_measurably_darkens_the_rendered_frame_ac1_eq(tmp_path, grey_clip):
+    """AC-1 for the eq-backed field group: brightness alone must produce a
+    real, measured pixel difference from the neutral render above, not just
+    a different string in the filter graph."""
+    edl = EDL(aspect="landscape_720",
+              clips=[Clip(asset_id="grey", start=0, end=2, brightness=-0.4)],
+              normalise_audio=False)
+    out = tmp_path / "brightness.mp4"
+    plan = render.compile_render(edl, {"grey": grey_clip}, out, quality="fast")
+    assert "eq=brightness=-0.4" in plan.filter_graph
+    render.execute(plan, timeout_seconds=60)
+    r, g, b = _mean_rgb(out, 1.0)
+    mean_luminance = (r + g + b) / 3
+    assert mean_luminance < 100, (
+        f"brightness=-0.4 should darken a 128/128/128 grey clip measurably; "
+        f"got luminance {mean_luminance:.1f}"
+    )
+
+
+@needs_ffmpeg
+def test_white_balance_measurably_shifts_red_versus_blue_ac1_colorbalance(tmp_path, grey_clip):
+    """AC-1 for the colorbalance-backed field: a warm white_balance must
+    shift red measurably above blue on a source where they started equal —
+    the specific thing colorbalance, not eq or colortemperature, produces."""
+    edl = EDL(aspect="landscape_720",
+              clips=[Clip(asset_id="grey", start=0, end=2, white_balance=0.8)],
+              normalise_audio=False)
+    out = tmp_path / "warm_wb.mp4"
+    plan = render.compile_render(edl, {"grey": grey_clip}, out, quality="fast")
+    assert "colorbalance=" in plan.filter_graph
+    render.execute(plan, timeout_seconds=60)
+    r, g, b = _mean_rgb(out, 1.0)
+    assert r - b > 20, (
+        f"white_balance=0.8 (warm) should push red measurably above blue on "
+        f"a neutral-grey source; got r={r:.1f} b={b:.1f}"
+    )
+
+
+@needs_ffmpeg
+def test_temperature_measurably_shifts_colour_balance_ac1_colortemperature(tmp_path, grey_clip):
+    """AC-1 for the colortemperature-backed field: a low-Kelvin (warm,
+    candlelight-like) render must differ measurably from the 6500K neutral
+    render — the decisive check ffmpeg's own colortemperature filter is
+    built to produce, and distinct from white_balance's colorbalance path
+    above (a different filter, tested here on its own)."""
+    neutral_edl = EDL(aspect="landscape_720", clips=[Clip(asset_id="grey", start=0, end=2)],
+                      normalise_audio=False)
+    warm_edl = EDL(aspect="landscape_720",
+                   clips=[Clip(asset_id="grey", start=0, end=2, temperature=3000.0)],
+                   normalise_audio=False)
+
+    neutral_out = tmp_path / "temp_neutral.mp4"
+    render.execute(
+        render.compile_render(neutral_edl, {"grey": grey_clip}, neutral_out, quality="fast"),
+        timeout_seconds=60,
+    )
+    warm_out = tmp_path / "temp_warm.mp4"
+    plan = render.compile_render(warm_edl, {"grey": grey_clip}, warm_out, quality="fast")
+    assert "colortemperature=temperature=3000" in plan.filter_graph
+    render.execute(plan, timeout_seconds=60)
+
+    nr, ng, nb = _mean_rgb(neutral_out, 1.0)
+    wr, wg, wb = _mean_rgb(warm_out, 1.0)
+    assert (wr - wb) - (nr - nb) > 15, (
+        f"temperature=3000K should warm the render measurably relative to "
+        f"the 6500K neutral baseline; neutral r-b={nr - nb:.1f}, "
+        f"3000K r-b={wr - wb:.1f}"
+    )

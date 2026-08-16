@@ -1,0 +1,139 @@
+id: DR-020
+title: Audio mixing — ffmpeg audio-filter extension of the existing EDL/render engine, not a DAW
+date: 2026-08-16
+status: accepted
+decision_area: audio_mixing_engine
+
+prompted_by: >
+  T-060 named "Audio room" as deferred because no audio-mixing engine exists.
+  Operator instruction (2026-08-16): full planning pass for T-060's five
+  items. Companion record to DR-019 (colour), same reasoning shape applied
+  to sound.
+
+binding_constraints:
+  - "project.md §4 amendment: a richer VIEW onto orchestrated edits acting on
+    the same EDL, not a new render engine (F-1, DR-002, DR-016)"
+  - "edl.py already has AudioTrack (asset_id, volume, loop, fade_in, fade_out,
+    duck) and Clip.volume/Clip.mute (T-041) — a mixing engine extends an
+    existing vocabulary, it does not start from nothing"
+  - "normalise_audio already exists on EDL (loudness normalisation at render
+    time) — the render path already touches audio, this is not new plumbing"
+  - "project.md §8: operator time is the binding constraint, not capability"
+  - "No live monitoring hardware requirement in scope — this project renders
+    a file, it does not run a live audio interface (out of scope by silence,
+    named here so it is not assumed later)"
+
+problem_statement: >
+  "Audio mixing" could mean anything from the two numeric fields already in
+  the EDL (volume, duck) to a full multitrack DAW with live monitoring,
+  automation curves and plugin hosting. The question this record answers is
+  where on that range the Audio room actually lands.
+
+ruled_out:
+  - option: "A real-time multitrack DAW (automation curves, live monitoring, VST/plugin hosting)"
+    reason: >
+      This project renders files from a declarative EDL; it has no audio
+      interface and no live-playback engine to monitor against (C-11: screen
+      recordings, not music production). Building DAW-class tooling here
+      would be the audio equivalent of the compositor DR-019 ruled out for
+      colour — a second engine outside the EDL, forbidden by the same
+      project.md §4 amendment language.
+  - option: "A Python audio library doing sample-level mixing before ffmpeg (e.g. pydub, librosa) instead of ffmpeg's own filters"
+    reason: >
+      pydub itself shells out to ffmpeg for anything beyond trivial WAV
+      concatenation, so it does not remove ffmpeg from the pipeline, only
+      wraps it — an extra dependency and translation layer for no
+      capability ffmpeg's own audio filters lack. librosa is an analysis
+      library (feature extraction), not a mixing/rendering one, and is
+      the wrong tool for producing an output file.
+
+candidates:
+  - option: "Extend AudioTrack + Clip with a small ffmpeg-audio-filter vocabulary: per-track 3-band EQ (equalizer filter), a single compressor toggle (acompressor), keep existing volume/duck/fade"
+    advantages:
+      - "Same pattern as DR-019 and the existing CLIP_EFFECTS/TRANSITIONS
+        vocabulary: named fields, each one verified ffmpeg filter"
+      - "duck (sidechain ducking of music under dialogue, already implemented
+        per AudioTrack's own docstring) is the single highest-value mixing
+        feature for this content type and already exists — this decision
+        adds the second- and third-highest (audibility via EQ, and evening
+        out level swings via a compressor), not a rebuild"
+      - "ffmpeg's showwavespic filter gives a real waveform image for the UI
+        for free — no separate waveform-rendering library needed"
+    disadvantages:
+      - "3-band EQ and a single compressor preset are far short of a
+        professional mix engine (no multiband, no sidechain-keyed EQ, no
+        custom compressor curves) — named directly, scoped to what an
+        operator mixing screen-recording narration under background music
+        actually needs (C-11), not to studio mastering"
+      - "No live audio monitoring while adjusting — same proxy/re-render
+        latency model as every other room (T-055 AC-4's disclosed tradeoff)"
+  - option: "Loudness-target mixing only (rely entirely on the existing normalise_audio / loudnorm path, add no per-track controls)"
+    advantages: ["Least new code; loudnorm already exists"]
+    disadvantages:
+      - >
+        Does not answer what an "Audio room" screen would actually let the
+        operator DO — a screen with nothing to adjust is not a room, it is
+        the render page's normalise_audio checkbox relabelled. Ruled out as
+        under-scoped relative to what T-060 actually asked to be planned.
+  - option: "Build vs buy: an external stem-separation/auto-mix service (e.g. a cloud audio-mixing API)"
+    advantages: ["Could produce a professionally mixed result without building mixing logic here"]
+    disadvantages:
+      - >
+        A new paid external dependency and a new provider integration —
+        the same shape T-048 already built a seam for (AI capability
+        providers) but is explicitly NOT a live adapter yet (every provider
+        there is unavailable by design, O-3). Introducing one here, for
+        audio mixing specifically, without verified pricing (project.md O-3)
+        would violate the same rule T-048 was built to protect. If ever
+        wanted, it is a T-048-style provider addition, not part of this room.
+
+decision: >
+  Extend the ffmpeg-filter render pipeline: AudioTrack gains eq_low/eq_mid/
+  eq_high gain fields and a compressor boolean; Clip's existing volume/mute
+  stay as the dialogue-level controls. Each compiles to one known ffmpeg
+  audio filter (equalizer x3, acompressor) in render.py's audio filter graph,
+  applied alongside the existing normalise_audio/duck/fade path. EDL_VERSION
+  bump, full backward compatibility (missing fields default to unity/off),
+  flows through the existing set-edl operation — no new operation needed.
+  The Audio room UI additionally renders a real waveform per track via
+  ffmpeg's showwavespic filter (no new dependency) rather than a fabricated
+  placeholder image.
+
+rationale: >
+  Mirrors DR-019 exactly, for the same structural reason: this project's EDL
+  vocabulary already has the right shape (small, named, each entry a proven
+  ffmpeg filter) and the right place to grow (AudioTrack, which the T-056
+  agent-workspace diff already treats as a first-class EDL object). Verifying
+  each new field the T-045 way — measure real audio output (ffprobe astats
+  loudness/level before and after), not just read the filter string — is a
+  binding requirement on whichever task implements this, named here so it is
+  not skipped.
+
+fluency_bias_check: >
+  "Audio mixing engine" reads as an invitation to build DAW-like
+  infrastructure; checked against C-11 (screen recordings, not music
+  production) and project.md §8 (operator time), the correct scope is
+  narrower and reuses what already exists in AudioTrack rather than
+  replacing it.
+
+operator_fit: >
+  No new package, no new credential, no new daemon. The only new operational
+  fact is a slightly heavier render-time filter graph, bounded by the
+  existing C-7 budget (15 min for a 10-min source) and verified against it
+  before this is called done.
+
+reversibility: moderate
+reversibility_note: >
+  Additive AudioTrack fields, defaulted on load — reversible the same way
+  DR-019's colour fields are: a filter-chain change in render.py, no
+  dependency on stored renders (each is a frozen output of its own EDL
+  version).
+
+revisit_if:
+  - "Music/podcast-style production actually enters scope (would invalidate
+    C-11's 'screen recordings' premise and justifies revisiting DAW-class tooling)"
+  - "An ffmpeg audio filter genuinely cannot express something requested — new decision, not scope creep here"
+
+relates_to: [DR-002, DR-016, DR-019]
+supersedes: []
+extends: []

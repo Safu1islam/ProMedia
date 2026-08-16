@@ -1,0 +1,125 @@
+id: DR-022
+title: Content calendar — a client-side aggregation view over existing post data, no new backend surface or dependency
+date: 2026-08-16
+status: accepted
+decision_area: content_calendar
+
+prompted_by: >
+  T-060 named a content calendar as deferred: "no ... content-calendar data
+  model" exists. Operator instruction (2026-08-16): full planning pass for
+  T-060's five items.
+
+binding_constraints:
+  - "posts already carries scheduled_at and status (schema.sql, scheduling.py,
+    T-018); list-posts (ops/posts.py) already returns it — a calendar
+    ARRANGES data that already exists, it does not need new data"
+  - "C-10: 1-2 posts/day, peak day 5 — the entire post set at any time is
+    small enough that client-side grouping is not a performance question"
+  - "NON-NEGOTIABLES §B: adding a new external dependency with a non-permissive
+    or unclear licence needs operator approval — a decision to avoid one
+    where the work does not need it is the honest default, not laziness"
+  - "DR-017's own precedent: the timeline (a genuinely harder UI problem than
+    a calendar grid) was hand-built rather than pulling in an off-the-shelf
+    widget, for the same reason applied here"
+
+problem_statement: >
+  Whether a "content calendar" needs any new backend capability at all, or
+  is purely a different arrangement of data every other screen already
+  fetches — and, separately, whether the calendar widget itself should be
+  hand-built or a third-party library.
+
+ruled_out:
+  - option: "A new calendar-view backend operation that pre-groups posts by day/week/month"
+    reason: >
+      list-posts already returns every post with its scheduled_at and
+      status; at C-10's volume (peak 5/day) there is no query-shape problem
+      grouping-in-SQL would solve that grouping-in-the-client does not solve
+      equally well. Adding an operation here would be surface area with no
+      behaviour behind it that the client cannot already produce — the
+      opposite of frontend-brief.md rule 2's actual test ("a screen needing
+      something no operation provides"): this screen needs nothing new.
+  - option: "A calendar UI library (e.g. FullCalendar, vue-cal)"
+    reason: >
+      New external dependency (NON-NEGOTIABLES §B gate) for a grid this
+      project's own volume (C-10) does not stress, and DR-017 already
+      established the operating precedent of hand-building UI in this
+      client rather than adopting a third-party widget, specifically
+      because this project's screens are thin, purpose-built views over an
+      operation registry rather than generic app chrome.
+
+candidates:
+  - option: "A Vue component that fetches list-posts (all statuses) and queue-post/approve-post's existing data, groups client-side by calendar day, renders a hand-built month/week grid"
+    advantages:
+      - "Zero new backend surface — the parity gate's operation count is
+        unaffected, exactly as it should be for a screen that needs nothing
+        new"
+      - "Consistent with the room-bar / proxy-preview visual language DR-017
+        already built, no new dependency to keep updated"
+      - "A missed-window post (C-27: marked missed, never posted late) is
+        just another status the grid already has data for — no special
+        calendar-specific backend logic needed"
+    disadvantages:
+      - "Hand-built grid means month navigation, week/day toggles, etc. are
+        this project's own code to maintain rather than a library's —
+        accepted explicitly as the project.md §8 tradeoff (operator time vs.
+        a dependency), not overlooked"
+      - "If publishing volume ever grew far past C-10's 5/day peak,
+        client-side grouping of the full post history would eventually want
+        a bounded date-range fetch — not a problem at today's scale, named
+        as the revisit trigger below rather than solved pre-emptively"
+  - option: "Build vs buy: reuse the existing /posts (queue) and /publications (history) screens, skip a calendar view entirely"
+    advantages: ["Cheapest — nothing new"]
+    disadvantages:
+      - >
+        Does not answer what T-060 was actually asked to plan. A list sorted
+        by date is not a calendar in the sense the mockup and the operator's
+        naming imply (a day/week/month grid), so this under-delivers on the
+        actual ask rather than genuinely being the same thing in fewer words.
+
+decision: >
+  A new Pro Media v2 screen only — no schema.sql change, no new operation.
+  Fetches list-posts (unfiltered) plus publications (for what already went
+  out), groups by scheduled_at/published date client-side, and renders a
+  hand-built month grid with day cells showing post count/status chips
+  (queued, approved, published, missed). Clicking a day's post opens the
+  existing /posts/{id} approval screen — the calendar is a navigation and
+  overview layer, not a second place decisions get made (T-035's rule:
+  decision context precedes the control, and that control already lives on
+  the approval screen).
+
+rationale: >
+  This is the smallest-scope item of the five precisely because nothing
+  about it is actually missing except a screen. Recording that plainly here
+  is itself the value of the technology-selection pass: it stops a future
+  task from inventing a calendar_events table or a calendar-specific
+  operation that would just be a second, driftable copy of what posts
+  already record.
+
+fluency_bias_check: >
+  The instinct on seeing "calendar" is to reach for a calendar library,
+  because that is the fastest way to get a polished grid. Checked against
+  this project's actual volume (C-10) and its established precedent
+  (DR-017 hand-building the timeline), a library buys polish this project
+  does not need at the cost of a dependency it does not need either.
+
+operator_fit: >
+  No new package, no new credential, no new backend surface to operate or
+  break. Purely additive to the existing rich client build.
+
+reversibility: cheap
+reversibility_note: >
+  A single new Vue view with no backend coupling — deleting or replacing it
+  affects nothing else. If a calendar-specific operation is ever genuinely
+  needed (see revisit trigger), it is additive, not a rewrite of this
+  decision.
+
+revisit_if:
+  - "Publishing volume or history size makes client-side grouping of the
+    full post/publication set a real latency problem against C-1 (p95 <
+    300ms) — add a bounded date-range parameter to list-posts then, not before"
+  - "A second calendar-shaped need appears (e.g. content production
+    scheduling, not just publish scheduling) that this same grid cannot honestly serve"
+
+relates_to: [DR-002, DR-017]
+supersedes: []
+extends: []

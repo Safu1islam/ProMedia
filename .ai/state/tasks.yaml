@@ -2435,7 +2435,7 @@ tasks:
     mode: critical
     owner_role: implementer
     assigned_model_tier: frontier
-    status: in_progress
+    status: complete
     claimed_by: "claude-code-session-ui2"
     depends_on: [T-049]
     blocks: []
@@ -2444,17 +2444,56 @@ tasks:
     acceptance_criteria:
       - id: AC-1
         statement: "An operator can add a media file from the browser and it is refused without a rights declaration."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          RECONCILED 2026-08-16 (T-049CHECK) — the record read NOT_RUN/"not
+          implemented" despite a RELEASED lock note and claude-code-session-
+          ui2's own sessions.yaml handoff both claiming this landed with
+          passing tests; a bookkeeping gap of the T-019/T-037/T-047 shape,
+          not a real one. Verified by direct execution, not by trusting
+          either claim: `python -m pytest tests/test_media_ui.py -v`
+          personally run, 20/20 passed, including
+          test_uploading_without_authorship_is_refused_and_nothing_is_ingested,
+          test_uploading_with_an_empty_authorship_string_is_also_refused,
+          test_uploading_with_a_declaration_ingests_and_redirects_to_the_asset_page,
+          and test_the_refusal_test_can_actually_fail (sabotage-verified —
+          proves the refusal assertion can actually go red, per the frontend
+          brief's own "prove tests can fail" rule).
       - id: AC-2
         statement: "An asset page shows its rights verdict, evidence, provenance state and whether its media is still present."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          RECONCILED 2026-08-16 (T-049CHECK), same run as AC-1.
+          test_asset_page_shows_verdict_evidence_and_sealed_provenance,
+          test_asset_page_reports_media_gone_after_deletion and
+          test_asset_page_before_any_evaluation_shows_the_gaps_honestly all
+          passed — promedia/web/templates/asset.html genuinely renders
+          verdict, evidence, sealed provenance and media-availability state
+          from the `asset` operation's own response.
       - id: AC-3
         statement: "Upload works with JavaScript disabled."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          RECONCILED 2026-08-16 (T-049CHECK), same run as AC-1.
+          test_media_pages_carry_no_script_tags passed — asserted against
+          served HTML, zero <script> tags on the media pages, and the
+          upload path is a plain multipart form POST
+          (promedia/web/templates/media.html), consistent with T-049's own
+          AC-2 no-script evidence for the rest of this surface.
     required_dimensions: [correctness, human_experience, security, data_integrity, testing]
+    independent_review:
+      status: NOT_RUN
+      note: >
+        No independent review (a separate reviewer-role pass — accessibility,
+        security, threat-model reading) has ever been performed for this
+        task, only for T-053/054/055/057/058 (review-0814-ui2) and eight
+        earlier tasks (R-003's resolution: T-018/022/030/033/035/036/037/041).
+        T-050 was never in either batch. This reconciliation (T-049CHECK)
+        independently RE-EXECUTED every acceptance test and confirmed genuine
+        passing status, which is real verification of the implementer's own
+        claim, but it is not a substitute for the review pass Constitution
+        section 7 asks for. Recorded as a live, named gap, not silently
+        closed by this reconciliation.
 
   - id: T-051
     title: "Per-clip editing on the project screen"
@@ -2469,7 +2508,7 @@ tasks:
     mode: standard
     owner_role: implementer
     assigned_model_tier: frontier
-    status: in_progress
+    status: complete
     claimed_by: "claude-code-session-ui2"
     depends_on: [T-049]
     blocks: []
@@ -2478,17 +2517,60 @@ tasks:
     acceptance_criteria:
       - id: AC-1
         statement: "An operator can trim, reorder, change the effect on, and delete a clip without editing JSON."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          RECONCILED 2026-08-16 (T-049CHECK) — same bookkeeping gap as T-050
+          (record read NOT_RUN despite a RELEASED lock note and
+          claude-code-session-ui2's own handoff both claiming this landed
+          with passing tests). Verified by direct execution:
+          `python -m pytest tests/test_editor_ui.py -v` personally run,
+          26/26 passed, including test_adding_a_clip_through_the_new_row,
+          test_trimming_an_existing_clip, test_effect_and_transition_changes_apply,
+          test_removing_a_clip_via_the_checkbox and
+          test_reordering_via_the_position_field — all form-POST based, no
+          JSON textarea touched, per the frontend brief's per-clip build
+          order.
       - id: AC-2
         statement: "Every edit creates a new version with the operator recorded as its author, and the previous version stays readable."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          RECONCILED 2026-08-16 (T-049CHECK), same run as AC-1.
+          test_clip_editing_creates_a_new_version_authored_by_the_operator
+          passed — set-edl's append-only versioning (T-042) is exercised
+          through the clip-row form, `authored_kind` correctly recorded as
+          operator per the frontend brief section 6.
       - id: AC-3
         statement: "A transition that does not render as named is marked as such in the picker, before it is chosen."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          RECONCILED 2026-08-16 (T-049CHECK), same run as AC-1.
+          test_the_transition_picker_marks_known_substitutions passed, and
+          test_the_marking_can_actually_go_missing (sabotage-verified: hides
+          the warning, confirms the test can fail, matching the frontend
+          brief's "prove it can fail" rule) also passed.
+    findings:
+      - >
+        REAL, CURRENTLY-LIVE GAP FOUND WHILE RECONCILING (not fixed here —
+        this task is investigation/records only, out-of-scope code changes
+        are not made from this pass): promedia/web/app.py's
+        project_edit_clips route (this task's own clip-row form handler)
+        reads the project's current EDL and writes it back via set-edl with
+        NO expected_version parameter, the same silent-lost-update window
+        T-055's independent review found and fixed (R-010) in the Vue rich
+        client's editor. R-010's fix made expected_version optional and
+        backward compatible, but nothing wired THIS route to send it, so the
+        exact bug class the review caught and fixed on one surface is still
+        open on this one. Filed as recommendation R-017
+        (.ai/state/recommendations.yaml) rather than fixed unilaterally.
     required_dimensions: [correctness, human_experience, accessibility, testing]
+    independent_review:
+      status: NOT_RUN
+      note: >
+        Same gap as T-050: never independently reviewed by a session other
+        than the implementer. This reconciliation re-executed every
+        acceptance test and additionally found and filed R-017 (a genuine
+        concurrency gap in this route), but that is not a substitute for a
+        full review pass.
 
   - id: T-052
     title: "Dashboard rework — lead with what needs the human"
@@ -2503,7 +2585,7 @@ tasks:
     mode: standard
     owner_role: implementer
     assigned_model_tier: standard
-    status: in_progress
+    status: complete
     claimed_by: "claude-code-session-ui2"
     depends_on: [T-049]
     blocks: []
@@ -2512,13 +2594,75 @@ tasks:
     acceptance_criteria:
       - id: AC-1
         statement: "The dashboard leads with pending approvals and recent renders, and links to projects."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          RECONCILED 2026-08-16 (T-049CHECK) — same bookkeeping gap as
+          T-050/T-051. Verified by direct execution:
+          `python -m pytest tests/test_editor_ui.py -v` personally run,
+          26/26 passed, including
+          test_dashboard_leads_with_pending_posts_and_links_to_projects,
+          test_dashboard_shows_recent_renders and
+          test_dashboard_flags_a_substitution_if_one_is_ever_recorded — the
+          v1 dashboard was genuinely reworked, and the substitution-flagging
+          machinery is sabotage-verified (the flag is force-set on a
+          persisted row and the dashboard is proven to show it, per the
+          frontend brief's F-003/section-6 "never present a substitution as
+          a success" rule).
       - id: AC-2
         statement: "A simulated publication is visibly marked as simulated wherever it appears."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          RECONCILED 2026-08-16 (T-049CHECK), same run as AC-1.
+          test_a_simulated_publication_is_marked_on_posts_and_publications_pages
+          and test_the_simulated_marker_can_actually_go_missing (sabotage-
+          verified: hides the simulated flag, confirms the marker
+          disappears) both passed — F-001's simulated-publish marker is
+          genuinely surfaced on both /posts and /publications. Also verified
+          in the same run: test_posts_page_filters_by_status,
+          test_settings_page_shows_storage_ruleset_and_accounts,
+          test_settings_connect_account_requires_operator,
+          test_settings_connect_account_succeeds_for_operator and
+          test_all_new_pages_carry_no_script_tags all passed — /posts,
+          /publications and /settings (this task's other named scope) are
+          genuinely built, form-based, and operator-authority-gated where
+          F-2 requires it.
+    findings:
+      - >
+        PLANNING QUESTION ANSWERED (T-049CHECK, 2026-08-16), applies to
+        T-050/T-051/T-052 as a set: these three are NOT superseded by
+        T-054/T-055/T-057 and are not safe to retire. They are a
+        DELIBERATELY-KEPT PARALLEL NO-JS FALLBACK per DR-004, formally
+        confirmed in DR-017's own text (.ai/state/decisions/DR-017.yaml,
+        "what_this_supersedes"): "the existing server-rendered pages (/,
+        /projects, /projects/{id}, /media, /posts, /posts/{id},
+        /publications, /settings, /ops) are KEPT, unchanged, as a working
+        no-JS fallback and the emergency-access path if the rich client ever
+        breaks... a richer layer never becomes the ONLY way to do
+        something." This is a binding decision record, not merely a session
+        note — matched independently by claude-code-session-ui2's own
+        sessions.yaml handoff ("Old Jinja2 pages (T-049/050/051/052) kept
+        unchanged as the no-JS fallback per DR-004's extended reasoning").
+        Conclusion: these records should read complete, actively maintained,
+        not abandoned — which this reconciliation now does. The one
+        genuinely open item is a NAMED GAP, not a supersession question: R-017
+        (filed this pass) — T-051's Jinja2 clip editor lacks the
+        expected_version optimistic-concurrency guard T-055's review added
+        to the Vue editor (R-010), so the silent-lost-update class that was
+        found and fixed on one surface is still open on the other, live,
+        parallel one. Going forward, a change to set-edl's concurrency model
+        or to the rights/authority gates should be applied to BOTH surfaces,
+        not just the rich client — F-1 (one implementation, both surfaces
+        thin clients of it) already requires this structurally; this
+        reconciliation is the reminder that "both surfaces" includes the
+        Jinja2 pages, which are easy to forget once a shinier client exists.
     required_dimensions: [correctness, human_experience, accessibility, testing]
+    independent_review:
+      status: NOT_RUN
+      note: >
+        Same gap as T-050/T-051: never independently reviewed by a session
+        other than the implementer. This reconciliation re-executed every
+        acceptance test directly but that is not a substitute for a full
+        review pass.
 
   # -------------------------------------------------------------------------
   # Durability — off-site backup of the permanent set (project.md 5.4).
@@ -4230,7 +4374,8 @@ tasks:
     mode: standard
     owner_role: implementer
     assigned_model_tier: standard
-    status: ready
+    status: complete
+    claimed_by: "claude-code-t059-0816"
     depends_on: [T-053]
     blocks: []
     owned_paths: [promedia/web/frontend/**, tests/test_frontend_api.py, .ai/state/fabrications.yaml]
@@ -4238,9 +4383,226 @@ tasks:
     acceptance_criteria:
       - id: AC-1
         statement: "Every number or status shown traces to a real operation's response; nothing is invented to fill a card the mockup has but this system cannot yet back."
-        result: NOT_RUN
-        evidence: "not implemented"
-    required_dimensions: [correctness, human_experience, fabrication_replacement_plan, testing]
+        result: PASSED
+        evidence: >
+          SocialView.vue already existed as a T-053-scaffold draft (Accounts/
+          Queue/Publications wired to list-accounts/list-posts/publications,
+          Composer/Insights as a stub "not available" card) — this task
+          hardened it rather than building from nothing, and confirms every
+          field it shows traces to a real operation response. Verified live
+          against an ISOLATED scratch database and credential store
+          (PROMEDIA_DATA_DIR + PROMEDIA_CREDENTIAL_STORE + PROMEDIA_CONFIG
+          pinned to a scratchpad; publishing.allow_simulation=true so the
+          publish path could be exercised safely through StubPublisher/F-001
+          with no real credential and no network call), seeded through the
+          real operation layer (connect-account, ingest, attest-declaration,
+          determine-rights, seal-provenance, queue-post, approve-post,
+          publish-post) — not fixtures bypassing it:
+            - Accounts tab: two real accounts rendered (x/promedia_ops
+              'connected', linkedin/promedia-co 'error' — no secret supplied).
+              Tone mapping fixed to three real states (connected=green,
+              error=red, disconnected=amber) rather than the prior two-tone
+              collapse that painted 'disconnected' the same red as 'error'.
+            - Queue tab: real posts rendered with id/status/body, PLUS two
+              genuinely-available fields the prior draft dropped: an Account
+              column (platform/handle, joined client-side from the already-
+              loaded list-accounts response — no new operation, no new field,
+              frontend-brief.md rule 2) and a Scheduled column (post.
+              scheduled_at, already on the row). Verified live: 5 real posts,
+              correct account label 'x/promedia_ops' and real scheduled
+              timestamps on every row.
+            - Publications tab: real publications rendered with a new
+              Platform column (publications.platform, a real schema column
+              the prior draft omitted) alongside the existing platform-post-id/
+              published/SIMULATED pill. Verified live: 2 real publications,
+              platform 'x', platform_post_id containing the honest
+              'SIMULATED-NOT-PUBLISHED-...' sentinel (F-001), red 'SIMULATED
+              — never published' pill rendered.
+            - Composer and Insights tabs: split from one generic stub card
+              into two DISTINCT, specifically-worded honest-gap cards (per
+              the task's own instruction to name each gap, not one blended
+              note) — Composer names the missing cross-platform-variant-
+              preparation operation and points at queue-post as what DOES
+              exist today; Insights names project.md section 4's explicit
+              out-of-scope line and S6, and states plainly that no
+              impressions/engagement/follower data exists anywhere in the
+              database. Verified live: both cards render their full,
+              distinct text, no number or chart of any kind on either tab.
+          Nothing on any of the five tabs is a literal/invented value in the
+          template — grepped SocialView.vue by hand after writing it:
+          every interpolated field is `a.*`, `p.*`, or `pub.*` off a real
+          operation response, or a value computed from two already-loaded
+          real responses (accountLabel()).
+    findings:
+      - >
+        ACCESSIBILITY (not previously covered — T-059's required_dimensions
+        omitted it, corrected below): the tab strip was five plain <button>s
+        with no ARIA tab contract at all (no role, no aria-selected, no
+        roving tabindex, no arrow-key model) — the same class of gap T-053's
+        independent review found and fixed in the top menu bar (R-012).
+        FIXED in this pass: role="tablist"/"tab"/"tabpanel", aria-selected,
+        aria-controls, id-linked tab/panel pairs, and a roving tabindex with
+        ArrowLeft/ArrowRight/Home/End (WAI-ARIA APG tabs pattern). Verified
+        live, not just in source: read the DOM directly (not the accessibility
+        snapshot) and confirmed aria-selected/tabindex flip correctly across
+        all 5 tabs, and that pressing ArrowLeft while focus was on the
+        Insights tab moved BOTH DOM focus and aria-selected to Composer in
+        one step — the keyboard model genuinely works, not just declares
+        itself.
+      - >
+        The connect-account form's three inputs (platform/handle/credential)
+        had placeholder text but no <label>, associated only visually — a
+        real screen-reader gap on a form an operator uses rarely enough to
+        need every affordance. Fixed with .sr-only <label for> elements
+        (existing global class, same pattern used nowhere else in this file
+        before). Verified live via the accessibility tree: combobox/textbox
+        roles now carry their real accessible names ("Platform", "Handle",
+        "Credential (optional to reconnect)").
+      - >
+        connect-account's response carries a `note` field (e.g. "no
+        credential supplied; account recorded but cannot publish") that the
+        prior draft fetched and discarded. Now captured and shown in an info
+        banner after a connect attempt — a real field the operation already
+        returns, not a new one, surfaced rather than silently dropped.
+      - >
+        HONESTY FIX, not part of AC-1 but directly relevant to it: the
+        Settings placeholder screen's SCREENS.settings entry (in the SHARED
+        PanelPlaceholderView.vue, badge label "task") pointed at "T-059" as
+        the task that would resolve it. It would not have — T-059 only ever
+        built the Social screen (accounts/queue/publications), never
+        /settings (storage/backup/capabilities), and leaving that pointer in
+        place after marking T-059 complete would have been a stale claim
+        directing a future reader at a task that cannot deliver what it
+        promises. Corrected to name that accounts now live at Distribute >
+        Social and that no task currently plans a rich-client settings
+        screen, badge changed from "T-059" to "not planned".
+      - >
+        PROCESS DEVIATION, disclosed rather than hidden: this session's own
+        lock on the full promedia/web/frontend/** glob (claimed correctly,
+        before any edit) went stale (heartbeat >20 min old) during a long
+        verification stretch (isolated-server setup, seeding, live browser
+        checks) and was correctly reclaimed by claude-code-t070-0816 (T-070,
+        content calendar) for the narrow slice of files it needed
+        (CalendarView.vue, router.ts, PanelPlaceholderView.vue,
+        tests/test_frontend_api.py). T-070's own lock note records the
+        collision check it ran before reclaiming (git diff showed no overlap
+        with its own edits) and that check holds up: this session's edits to
+        PanelPlaceholderView.vue (the *settings* entry) and SocialView.vue
+        were both still intact, untouched, when this session resumed with a
+        narrower re-claim. No content was lost. Lesson for whoever reads
+        this: heartbeat during long verification stretches, not only between
+        discrete edits.
+      - >
+        BROWSER-PANE CONTENTION, disclosed: live verification ran in a
+        shared Browser-pane environment where another tab (tab-1,
+        http://localhost:8765) was already open from a different, unrelated
+        session, and viewport/tab-focus state churned between some tool
+        calls in ways this session did not cause. Handled by always passing
+        an explicit tabId for every call from that point on, and by
+        confirming via read_network_requests that tab-1 only ever received
+        read-only status/list-posts/locks polling during this session's
+        window (App.vue's routine 20s header poll, not any action this
+        session took) — this session made no request against, and did not
+        click anything in, tab-1. All AC-1 evidence above was captured
+        against tab-2 (127.0.0.1:8766, the isolated scratch server this
+        session started), confirmed by tabId in every tool response quoted.
+    verification:
+      - command: "cd promedia/web/frontend && npm run build"
+        status: PASSED
+        observed: >
+          vue-tsc -b (type-check across the whole app, including the
+          rewritten SocialView.vue) then vite build both succeeded with no
+          errors; SocialView-*.js/css chunks present in the output.
+      - command: "python -m pytest tests/test_frontend_api.py -q"
+        status: PASSED
+        observed: "20 passed (unchanged from T-053/055/056's baseline — this task added no new backend surface, so no new case was needed)"
+      - command: "python -m pytest tests/test_accounts.py tests/test_posts.py -q"
+        status: PASSED
+        observed: "13 passed — the operation-layer coverage the frontend's Accounts/Queue/Publications tabs depend on"
+      - command: "python -m pytest -q (full suite)"
+        status: PASSED
+        observed: >
+          Exit code 0. --collect-only confirms 810 tests total across the
+          suite; the full run's dot output covered 8%/17%/26%/.../100% with
+          no F/E/x markers anywhere and no 'failed'/'error' token in the
+          captured output, run twice (once piped to a file directly) with
+          the same result both times. NOTE, disclosed rather than glossed:
+          this environment's pytest does not print its final 'N passed in
+          Ys' summary line to any capture method tried (plain redirect,
+          PowerShell, background-task capture) — a tooling quirk, not
+          missing evidence; exit code plus the complete, unbroken dot
+          sequence is what PASSED rests on here, not a parsed summary line.
+      - command: "Live browser verification, isolated scratch server (PROMEDIA_DATA_DIR/PROMEDIA_CREDENTIAL_STORE/PROMEDIA_CONFIG pinned to a scratchpad, port 8766, publishing.allow_simulation=true) — NOT the operator's real database"
+        status: PASSED
+        observed: >
+          See AC-1 evidence above for the per-tab detail. Additionally
+          confirmed via read_network_requests that every /api/op/* call
+          made from the Social screen during this session returned 200
+          (list-accounts, list-posts, publications, status, locks) — the
+          only 403s in the console's history predate the operator-token
+          cookie bootstrap (the very first, unauthenticated navigation) and
+          are not from any authenticated interaction this session performed.
+    open_items:
+      - >
+        No Vitest/component-test harness exists for .vue files in this
+        project (T-053's own open_item, still true here) — SocialView.vue's
+        correctness rests on vue-tsc's type-checking plus the live
+        interactive verification above, not a repeatable automated test of
+        the component itself. Consistent with how T-054/T-055/T-057 were
+        each verified; not a new gap this task introduced.
+      - >
+        T-054's own open finding (dashboard storage-pressure banner's
+        'Details' link resolving to the /settings PanelPlaceholderView) is
+        NOT fixed by this task — out of scope for T-059 (dashboard is a
+        different task's owned surface) and left exactly as T-054 recorded
+        it, not silently absorbed here just because this session also
+        touched PanelPlaceholderView.vue for an unrelated entry.
+      - >
+        F-009 (Composer) and F-010 (Insights) are both open-ended
+        (replacement_task: null) because neither has a scoped task yet —
+        matching T-060's own pattern of naming a gap rather than guessing at
+        its shape. A future planning pass (T-060-style) would need to scope
+        cross-platform variant preparation (F-009) before any composer form
+        can be honestly built; F-010 additionally needs project.md section 4
+        amended before it is even in scope, not only a task.
+    required_dimensions: [correctness, human_experience, accessibility, responsiveness, maintainability, documentation, fabrication_replacement_plan, testing]
+    required_dimensions_note: >
+      CORRECTED from the record as originally written
+      [correctness, human_experience, fabrication_replacement_plan, testing].
+      aef/config/routing.yaml's ui_change class requires
+      [correctness, human_experience, accessibility, responsiveness,
+      maintainability, documentation] unconditionally, plus
+      fabrication_replacement_plan via the if_fabrications_introduced
+      escalator (T-059 introduces F-009/F-010) — the same
+      under-recorded-dimensions gap independent review caught on T-053 and
+      T-058 (R-008), fixed here at authoring time instead of waiting for a
+      reviewer to find it. accessibility and responsiveness both have real,
+      executed evidence above (ARIA tabs verified live; the existing
+      .table-wrap/table-layout conventions this file already used are
+      unchanged and were not newly at risk). documentation is covered by
+      this record plus F-009/F-010's registration; maintainability by
+      reusing the exact patterns (tone ternaries, .sr-only labels, PanelScreen
+      card shape) already established in ApprovalsView/DashboardView/
+      AssetView rather than inventing new ones.
+    independent_review:
+      status: NOT_RUN
+      note: >
+        NOT REVIEWED INDEPENDENTLY. Constitution section 7: this
+        implementing session may not be its own sole reviewer, so this
+        stays NOT_RUN rather than PASSED regardless of how much verification
+        happened above. For the next reviewing session: re-verify AC-1 live
+        against a fresh isolated scratch database (this session's own
+        scratch data dir was NOT left behind for reuse — see the handoff);
+        confirm F-009/F-010 are the right classification (kind:
+        honest_absence, following F-004's precedent) rather than something
+        that should have been left unregistered like the ffprobe-absence/
+        T-048-providers notes at the bottom of fabrications.yaml; and check
+        the required_dimensions correction above against routing.yaml
+        directly rather than trusting this note. The two disclosed process
+        items in findings (stale-lock reclaim, browser-pane contention) are
+        both recorded as resolved-without-loss, but an independent read of
+        T-070's lock note and this record together is the honest way to
+        confirm that rather than take one side's word for it.
 
   - id: T-060
     title: "DEFERRED — Color room, Audio room, brand kits, content calendar, model marketplace, true real-time 4K scrubbing"
@@ -4261,23 +4623,84 @@ tasks:
     mode: standard
     owner_role: architect
     assigned_model_tier: frontier
-    status: blocked
+    status: complete
+    claimed_by: "claude-code-t060-planning"
     blocked_reason: >
-      NEEDS_HUMAN — no operation exists for color grading, audio mixing,
-      brand kits, or a content calendar; T-048 (closest analogue for a model
-      marketplace) is unbuilt. Scoping any of these is a planning pass in its
-      own right, not a coding task, and the operator has not prioritised it
-      over T-054..T-059.
+      RESOLVED. Was NEEDS_HUMAN pending operator prioritisation over
+      T-054..T-059 (now all complete) and T-048 (now complete, see
+      HANDOFF-CLOSEOUT-0814 in locks.yaml history — the block on it was
+      mechanical, not real, by the time this pass ran). Operator instruction
+      2026-08-16: "T-060 — Color/Audio rooms, brand kits, calendar,
+      marketplace", then "full planning pass, all five" when asked to
+      confirm scope.
     depends_on: [T-048]
     blocks: []
-    owned_paths: []
-    decisions: [DR-017]
+    owned_paths: [".ai/state/tasks.yaml", ".ai/state/plan.yaml", ".ai/state/decisions/DR-019.yaml", ".ai/state/decisions/DR-020.yaml", ".ai/state/decisions/DR-021.yaml", ".ai/state/decisions/DR-022.yaml", ".ai/state/decisions/DR-023.yaml"]
+    decisions: [DR-017, DR-019, DR-020, DR-021, DR-022, DR-023]
     acceptance_criteria:
       - id: AC-1
         statement: "A planning pass produces real tasks for whichever of these the operator actually wants, each with its own technology decision — not a task that guesses."
-        result: NOT_RUN
-        evidence: "not implemented"
-    required_dimensions: [correctness, documentation]
+        result: PASSED
+        evidence: >
+          Five technology/data-model decisions recorded, one per item, each
+          running protocol 02's full form (constraints first, disqualify,
+          ≥3 candidates with real disadvantages, named fluency bias,
+          operator fit, reversibility): DR-019 (Color room — extends the
+          existing ffmpeg render pipeline with eq/colorbalance/
+          colortemperature clip fields; NOT a GPU pipeline or a colour-
+          science dependency, both ruled out on stated grounds), DR-020
+          (Audio room — extends AudioTrack with EQ/compressor ffmpeg
+          filters and a real showwavespic waveform; NOT a DAW), DR-021
+          (brand kits — new brand_kits SQLite table, applied by COMPILING
+          into a new EDL version via a new ImageOverlay construct, never a
+          live render-time dependency, preserving EDL determinism/F-8),
+          DR-022 (content calendar — no schema or operation change at all;
+          a client-side grouping of existing list-posts/publications data,
+          no calendar library dependency), DR-023 (model marketplace —
+          scoped honestly as a "Capability Directory" projecting T-048's
+          already-built provider registry; a literal live multi-vendor
+          marketplace is explicitly ruled out as violating T-048's own
+          no-purchasing rule, C-31, O-3 and F-9).
+
+          Eight real, sized tasks written from those decisions: T-064/T-065
+          (colour: engine + room), T-066/T-067 (audio: engine + room),
+          T-068/T-069 (brand kits: data model + screen), T-070 (calendar
+          screen, no backend task needed per DR-022), T-071 (capability
+          directory screen, no backend task needed per DR-023). Each has
+          owned_paths, acceptance criteria and a change_class classified
+          against routing.yaml (data_model_change for the two engine
+          extensions and brand-kit backend — critical mode, architect +
+          reviewer + verifier; ui_change for the four screens — standard
+          mode). plan.yaml's N-060 node is split into eight children under
+          a renamed S-V2-ROOMS-2 section; meta.plan_version bumped and the
+          change logged.
+
+          "True real-time 4K scrubbing", also named in T-060's title, is
+          DELIBERATELY NOT planned into a task: DR-016/DR-017 already
+          decided this is architecturally foreclosed on this hardware (no
+          discrete GPU) and substituted with proxy-based preview as a
+          disclosed tradeoff, not a silent downgrade — re-litigating it here
+          would contradict an existing accepted decision rather than close
+          a gap. Named here so its absence from the new tasks reads as a
+          decision, not an oversight.
+    verification:
+      - command: "python aef/tools/aef.py validate"
+        status: PASSED
+        observed: "plan OK — 67 leaves, 67 tasks, all accounted for (was 59/59 before this pass; +8 new leaves, none orphaned or double-claimed)."
+    required_dimensions: [requirements_captured, non_functional_requirements_quantified, technology_decision_recorded, architecture_recorded, project_constitution_written]
+    required_dimensions_note: >
+      Corrected from [correctness, documentation] (mismatched routing.yaml's
+      new_project minimum since the task was first written) while this
+      record was open anyway, matching the R-008 precedent (T-053/T-055/
+      T-058 got the same fix). requirements_captured/technology_decision_
+      recorded/architecture_recorded are satisfied by DR-019..DR-023 and the
+      eight tasks above. non_functional_requirements_quantified is
+      satisfied by each DR's binding_constraints section, drawn from
+      project.md's quantified constraints (C-7, C-10, C-11, F-8, F-9, O-3).
+      project_constitution_written does not apply literally (this is a
+      planning pass inside an existing project, not a new one) — no
+      project.md change was needed or made, and none of the five decisions
+      contradicts it.
 
   - id: T-061
     title: "Fix findings from the T-053/054/055/057/058 independent review (R-008..R-012)"
@@ -4414,6 +4837,489 @@ tasks:
     independent_review:
       status: NOT_RUN
       note: "Constitution section 7 — implemented by this session, not reviewed by another agent."
+
+  # -------------------------------------------------------------------------
+  # T-060's planning pass (2026-08-16, DR-019..DR-023). Eight real, sized
+  # tasks replacing the single deferred placeholder. "True real-time 4K
+  # scrubbing", also named in T-060's old title, is deliberately NOT among
+  # them — DR-016/DR-017 already decided it is architecturally foreclosed on
+  # this hardware and substituted with proxy preview; re-litigating it here
+  # would contradict an accepted decision, not close a gap.
+  # -------------------------------------------------------------------------
+
+  - id: T-064
+    title: "Color grading — EDL vocabulary + render engine (DR-019)"
+    objective: >
+      Give Clip a small, named colour-grade vocabulary — exposure/brightness,
+      contrast, saturation, white-balance temperature — each compiling to one
+      known ffmpeg filter (eq, colorbalance, colortemperature) in render.py's
+      existing filter-chain compiler, exactly the pattern CLIP_EFFECTS and
+      TRANSITIONS already use. EDL_VERSION bump; an EDL with no grade fields
+      must render byte-identically to today (backward compatible, defaulted
+      in from_dict). No new operation — grade fields flow through the
+      existing set-edl operation, same as effect/transition/speed today.
+    change_class: data_model_change
+    mode: critical
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: ready
+    claimed_by: null
+    depends_on: []
+    blocks: [T-065]
+    owned_paths:
+      - promedia/core/media/edl.py
+      - promedia/core/media/render.py
+      - tests/test_edl.py
+      - tests/test_transitions.py
+    decisions: [DR-019]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "A clip with a non-neutral grade value renders measurably different pixel output than the same clip with neutral values, verified by sampling real rendered frames (T-045's discipline: measured, not read from the filter string) — for at least one field per filter (eq, colorbalance, colortemperature)."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "An EDL version written before this change (no grade fields present) loads and renders identically to its pre-change output — proven by re-rendering a fixture from before this task and comparing to a byte-for-byte or pixel-sampled baseline."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-3
+        statement: "An out-of-range grade value is refused by EDL.validate() before any render is attempted, naming the offending clip and field, matching the existing refusal style for effect/speed."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, data_integrity, migration_safety, rollback, performance, backup_recovery, documentation, testing]
+
+  - id: T-065
+    title: "Color room — Pro Media v2 screen (DR-019)"
+    objective: >
+      A crafted room, matching the Edit/Media rooms' visual language (T-055),
+      with sliders for each grade field from T-064, wired to set-edl exactly
+      as the editor's clip rows are. Preview is an explicitly labelled
+      proxy-quality single-frame before/after comparison (extracted via
+      ffmpeg on adjustment, not a live scrub) — same disclosed-tradeoff
+      pattern as T-055 AC-4's "PROGRAM · proxy preview" label.
+    change_class: ui_change
+    mode: standard
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: blocked
+    blocked_reason: "Depends on T-064 (grade fields must exist on the EDL and be renderable before a screen can edit them)."
+    depends_on: [T-064, T-053]
+    blocks: []
+    owned_paths:
+      - promedia/web/frontend/**
+      - tests/test_frontend_api.py
+    decisions: [DR-019]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "Adjusting a grade slider and saving calls set-edl and creates a new EDL version, identically to every other clip-property edit in the Edit room."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "The before/after preview is labelled as proxy-quality, and updates only on an explicit action (not implying real-time scrubbing this hardware cannot do), consistent with T-055 AC-4."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-3
+        statement: "The room works with no changes applied — a clip with all-neutral grade values shows no false 'substitution' or error state."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, human_experience, accessibility, responsiveness, maintainability, testing, documentation]
+
+  - id: T-066
+    title: "Audio mixing — EDL vocabulary + render engine (DR-020)"
+    objective: >
+      Extend AudioTrack with eq_low/eq_mid/eq_high gain fields and a
+      compressor boolean, each compiling to one known ffmpeg audio filter
+      (equalizer x3, acompressor) in render.py's audio filter graph,
+      alongside the existing normalise_audio/duck/fade path. EDL_VERSION
+      bump; full backward compatibility (missing fields default to unity/
+      off). No new operation — flows through set-edl. Also exposes a real
+      per-track waveform via ffmpeg's showwavespic filter for T-067 to render
+      (no new dependency).
+    change_class: data_model_change
+    mode: critical
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: ready
+    claimed_by: null
+    depends_on: []
+    blocks: [T-067]
+    owned_paths:
+      - promedia/core/media/edl.py
+      - promedia/core/media/render.py
+      - tests/test_edl.py
+    decisions: [DR-020]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "An audio track with non-default EQ or compressor settings produces measurably different output than the same track at defaults, verified by real loudness/level measurement (ffprobe astats) before and after — not by reading the filter string."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "An EDL version written before this change (no new AudioTrack fields present) renders identically to its pre-change output."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-3
+        statement: "A waveform image for a given asset can be generated on demand via the new showwavespic-based helper, and is a real rendering of that asset's actual audio, not a placeholder."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, data_integrity, migration_safety, rollback, performance, backup_recovery, documentation, testing]
+
+  - id: T-067
+    title: "Audio room — Pro Media v2 screen (DR-020)"
+    objective: >
+      A crafted room matching the Edit/Color rooms' visual language, with
+      per-track mixer controls (volume fader, mute, duck toggle, 3-band EQ,
+      compressor toggle from T-066) wired to set-edl, and a real waveform
+      display per track (T-066 AC-3) rather than a fabricated placeholder
+      image.
+    change_class: ui_change
+    mode: standard
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: blocked
+    blocked_reason: "Depends on T-066 (mixing fields must exist on the EDL and be renderable before a screen can edit them)."
+    depends_on: [T-066, T-053]
+    blocks: []
+    owned_paths:
+      - promedia/web/frontend/**
+      - tests/test_frontend_api.py
+    decisions: [DR-020]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "Adjusting a mixer control and saving calls set-edl and creates a new EDL version, identically to every other EDL edit."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "The waveform shown for a track is the real rendering of that track's actual asset (verified: two different assets show visibly different waveforms), not a synthetic placeholder."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, human_experience, accessibility, responsiveness, maintainability, testing, documentation]
+
+  - id: T-068
+    title: "Brand kits — data model and operations (DR-021)"
+    objective: >
+      New schema.sql table brand_kits (id, name, logo_asset_id REFERENCES
+      assets, primary_color, secondary_color, font_family, created_by,
+      created_at, updated_at) plus ops/brandkits.py: create-brand-kit,
+      list-brand-kits, update-brand-kit, delete-brand-kit, and
+      apply-brand-kit(project_id, brand_kit_id) which writes a NEW EDL
+      VERSION (never a live render-time dependency on the brand_kits row —
+      DR-021's core constraint). Adds ImageOverlay to edl.py (asset_id,
+      position, size, start/end — mirroring TextOverlay's position-by-name
+      approach), rendered via ffmpeg's overlay filter in render.py. The logo
+      is ingested and rights-declared through the existing ingest path, no
+      special case. apply-brand-kit is agent authority (F-2: drafting an
+      edit is not spending or publishing), matching set-edl.
+    change_class: data_model_change
+    mode: critical
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: blocked
+    claimed_by: "claude-code-t068-0816"
+    claimed_at: "2026-08-16T05:05:00+04:00"
+    blocked_reason: >
+      AC-2/AC-3 (apply-brand-kit + its ImageOverlay) need
+      promedia/core/media/edl.py and promedia/core/media/render.py, both
+      under an active, live file lock held by a concurrent session
+      (claude-code-t064, T-064 colour grading, same paths — R-018/R-019)
+      for the entire duration this session ran. AC-1 and AC-4 — the
+      brand_kits table, its backup classification, and full
+      create/list/update/delete-brand-kit CRUD including the rights-
+      declaration gate — are genuinely complete and independently tested;
+      only apply-brand-kit is outstanding. Whoever picks this up next:
+      confirm the edl.py/render.py lock has actually cleared (check
+      .ai/state/locks.yaml's active list, not just the expiry timestamp)
+      before adding ImageOverlay — do not assume T-064/T-066 finished
+      just because time has passed.
+    depends_on: []
+    blocks: [T-069]
+    owned_paths:
+      - promedia/core/schema.sql
+      - promedia/core/ops/brandkits.py
+      - promedia/core/ops/__init__.py
+      - promedia/core/media/edl.py
+      - promedia/core/media/render.py
+      - promedia/core/backup.py
+      - tests/test_brandkits.py
+      - tests/test_edl.py
+      - tests/test_registry.py
+      - tests/test_ops_forms.py
+    owned_paths_note: >
+      LIVE COLLISION at claim time: promedia/core/media/edl.py,
+      promedia/core/media/render.py and tests/test_edl.py are also owned by
+      T-064 (colour grading) and T-066 (audio mixing), both critical/
+      data_model_change with depends_on: [] — the exact overlap R-018
+      already flagged for T-064/T-066, now a three-way collision (R-019
+      filed to extend it). claude-code-t064 holds an active, non-stale lock
+      on those three paths right now (`aef.py team`: live, not abandoned),
+      so this session claimed only the non-overlapping subset (schema.sql,
+      ops/brandkits.py, ops/__init__.py, backup.py, tests/test_brandkits.py,
+      tests/test_ops_forms.py) and left apply-brand-kit (needs a new
+      ImageOverlay type in edl.py plus a render.py compiler branch) for a
+      follow-up once the lock clears — see AC-2/AC-3 below. test_registry.py
+      is listed in owned_paths but needed no edit: none of the five brand
+      kit operations are operator-authority, so neither
+      test_operator_only_operations_are_the_expected_set nor
+      test_the_backup_export_is_the_only_operator_only_read changes.
+    decisions: [DR-021]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "create/list/update/delete-brand-kit round-trip through SQLite exactly like accounts/projects; the logo reference is a real ingested, rights-declared asset — a brand kit cannot be created pointing at an asset with no rights declaration."
+        result: PASSED
+        evidence: >
+          promedia/core/ops/brandkits.py: create/list/update/delete-brand-kit
+          plus a read-by-id 'brand-kit' op (mirrors 'project'). The gate is
+          _require_rights_declared(): checked against BOTH failure shapes —
+          an asset id that does not exist (NotFound) and a real asset row
+          with no rights_declarations row, the exact shape
+          projects.render()'s own derivative-registration path produces
+          (it writes a rights_verdicts row but no declaration). Proved in
+          tests/test_brandkits.py: 12/12 passed, including
+          test_a_brand_kit_round_trips_through_sqlite,
+          test_a_brand_kit_cannot_point_at_a_nonexistent_asset,
+          test_a_brand_kit_cannot_point_at_an_undeclared_asset (and the
+          identical update-path checks, plus the refused-write-changes-
+          nothing assertions). `python -m pytest tests/test_brandkits.py -q`:
+          12 passed.
+      - id: AC-2
+        statement: "apply-brand-kit writes a new EDL version whose logo overlay renders as a real, measurably-present burned-in watermark at the specified region (T-045's measurement discipline, not a read of the filter string)."
+        result: NOT_RUN
+        evidence: >
+          BLOCKED, not implemented. Needs a new ImageOverlay type in
+          promedia/core/media/edl.py plus a render.py compiler branch (an
+          ffmpeg overlay filter, mirroring TextOverlay's drawtext branch).
+          Both files, plus tests/test_edl.py, were under an active file
+          lock held by a live concurrent session (claude-code-t064, T-064
+          colour grading — same three paths) for this session's entire
+          duration; editing them would violate Constitution rule 3. See
+          blocked_reason above and R-018/R-019.
+      - id: AC-3
+        statement: "Deleting the brand_kits row after apply-brand-kit has run does not change or invalidate the already-produced EDL version or any render made from it — proving the EDL, not the brand kit, is the only thing a render depends on (DR-021's core constraint)."
+        result: NOT_RUN
+        evidence: "BLOCKED — depends on apply-brand-kit (AC-2), not yet implemented. See AC-2."
+      - id: AC-4
+        statement: "The new brand_kits table is classified by backup.classify_tables() (permanent or transient, per project.md 5.4) rather than falling through its guard unclassified, matching the precedent T-042 set for projects/renders."
+        result: PASSED
+        evidence: >
+          promedia/core/backup.py: 'brand_kits' added to PERMANENT_TABLES
+          (small, operator-authored configuration with no other record of
+          itself, same reasoning as accounts/projects; ordered after
+          'assets', its FK target). tests/test_brandkits.py::
+          test_brand_kits_table_is_classified_permanent and
+          test_a_brand_kit_round_trips_through_backup_and_restore both
+          pass. tests/test_backup.py (generic, not owned by this task —
+          test_every_schema_table_is_classified derives from the actual
+          PERMANENT_TABLES/TRANSIENT_TABLES constants) still passes
+          unmodified: `python -m pytest tests/test_backup.py -q` — all
+          passed.
+    verification:
+      - command: "python -m pytest tests/test_brandkits.py -q"
+        status: PASSED
+        observed: "12 passed"
+      - command: >
+          python -m pytest tests/test_ops_forms.py tests/test_registry.py
+          tests/test_parity.py tests/test_backup.py tests/test_restore.py
+          tests/test_hardening.py tests/test_surface_signals.py
+          tests/test_account_locking.py -q
+        status: PASSED
+        observed: >
+          All passed, no failures. Confirms the new operations add no
+          single-surface capability (test_parity.py, test_the_form_routes_
+          add_no_capability), the operator-only-operations set is
+          unaffected (test_registry.py — all five brand kit ops are agent
+          authority), and the generic C-19 locking rule
+          (test_lock_target_follows_the_registry_rule) and GET-must-not-
+          execute probe (test_ops_forms.py) both auto-covered the new
+          operations correctly once seeded with a real brand kit id.
+      - command: "python -m pytest tests/ -q  (run twice, in full)"
+        status: FAILED
+        observed: >
+          100% collected both times; exactly ONE failure, both runs:
+          tests/test_locking.py::test_the_locking_and_creating_sets_are_
+          what_this_task_intended. DISCLOSED, NOT FIXED, matching the exact
+          precedent T-045 set for tests/test_projects.py: this file is not
+          in T-068's owned_paths. The test pins a hardcoded
+          LOCKING_OPERATIONS set against what promedia.core.registry.
+          lock_target() actually derives from the registry; update-brand-
+          kit and delete-brand-kit are new mutating operations that lock an
+          existing entity by id (exactly like approve-post or set-edl), so
+          they are correctly picked up by the DERIVED set and correctly
+          absent from the OLD hardcoded one. The two generic, non-pinned
+          tests in the same file that assert the underlying RULE rather
+          than a fixed list — test_lock_target_follows_the_registry_rule
+          and test_read_only_operations_never_lock — both pass unmodified,
+          which is what actually matters for C-19 correctness. Fixing the
+          pin (adding the two names to LOCKING_OPERATIONS) is a one-line
+          change but sits in a file this task does not own; reported here
+          rather than silently edited.
+    required_dimensions: [correctness, data_integrity, migration_safety, rollback, performance, backup_recovery, documentation, testing]
+    independent_review:
+      status: NOT_RUN
+      note: >
+        Constitution section 7: this session may not be the sole reviewer
+        of its own implementation. Needs an architect or reviewer lens on
+        two things in particular: (1) whether AC-1's rights-declaration
+        gate (existence of a rights_declarations row, not a verdict check)
+        is the right strength for DR-021, or should also require the
+        logo's effective_verdict to not be BLOCKED at create time rather
+        than deferring that entirely to apply-brand-kit's eventual render
+        gate; (2) the file-lock collision handling itself — whether
+        deferring AC-2/AC-3 was the right call versus waiting for the lock,
+        and whether R-019's proposed remedy (sequence T-064/T-066/T-068, or
+        split file ownership) is the right fix for the underlying planning
+        gap.
+
+  - id: T-069
+    title: "Brand kits — Pro Media v2 screen (DR-021)"
+    objective: >
+      A crafted screen to create/edit brand kits (name, logo upload via the
+      existing media-import flow, colour pickers, font selection) and apply
+      one to a project (calls apply-brand-kit, T-068), showing the resulting
+      EDL version attributed correctly (authored_kind) per frontend-brief.md
+      §6.
+    change_class: ui_change
+    mode: standard
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: blocked
+    blocked_reason: "Depends on T-068 (brand kit CRUD and apply-brand-kit must exist before a screen can call them)."
+    depends_on: [T-068, T-053]
+    blocks: []
+    owned_paths:
+      - promedia/web/frontend/**
+      - tests/test_frontend_api.py
+    decisions: [DR-021]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "Creating a brand kit requires the logo to go through the SAME rights-declaration-at-import path every other asset uses — the form cannot be submitted with an undeclared logo (frontend-brief.md's binding rule: never build a path that acquires media without a declaration)."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "Applying a brand kit to a project creates a new EDL version visible in that project's version history, correctly attributed."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, human_experience, accessibility, responsiveness, maintainability, testing, documentation]
+
+  - id: T-070
+    title: "Content calendar — Pro Media v2 screen (DR-022)"
+    objective: >
+      A hand-built month grid (no calendar library — DR-022) fetching
+      list-posts and publications, grouping client-side by scheduled/
+      published date, with status chips (queued, approved, published,
+      missed per C-27). No new backend operation. Clicking a day's post
+      opens the existing /posts/{id} approval screen rather than duplicating
+      its decision controls (T-035's rule: decision context precedes the
+      control, in one place).
+    change_class: ui_change
+    mode: standard
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: complete
+    claimed_by: "claude-code-t070-0816"
+    depends_on: [T-053]
+    blocks: []
+    owned_paths:
+      - promedia/web/frontend/**
+      - tests/test_frontend_api.py
+    owned_paths_note: >
+      Narrowed in practice to the files this screen actually needed: a new
+      CalendarView.vue, router.ts (point /calendar at it), the now-dead
+      "calendar" entry removed from PanelPlaceholderView's SCREENS map, and
+      one new test in test_frontend_api.py. See locks.yaml's T-070 entry for
+      why the claim was scoped this narrowly (a stale T-059 lock held the
+      wider promedia/web/frontend/** glob at claim time).
+    decisions: [DR-022]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "The grid shows real posts from list-posts/publications grouped onto their actual scheduled/published dates — no sample or placeholder data."
+        result: PASSED
+        evidence: >
+          Live-verified against an ISOLATED scratch database (PROMEDIA_DATA_DIR
+          + PROMEDIA_CREDENTIAL_STORE pinned to a scratchpad, never the
+          operator's real data), seeded through the real operation layer
+          (ingest/attest-declaration/determine-rights/seal-provenance/
+          queue-post/approve-post/publish-post — the same path any real post
+          takes, publish using the F-001 simulated publisher since no real
+          credential exists here) with one post in each of
+          queued/approved/published/missed/rejected plus one with no
+          scheduled_at at all. Read via the app's own real list-posts/
+          publications calls (no mock). The rendered grid placed every dated
+          post on its actual day (accessibility-tree dump confirmed exact
+          post ids, statuses and times on the correct grid cells) and the
+          unscheduled one in its own disclosed section rather than being
+          silently dropped.
+      - id: AC-2
+        statement: "A missed post (C-27: marked missed, never posted late) is visibly distinguished from a queued or published one on its calendar day."
+        result: PASSED
+        evidence: >
+          Same live scratch run: the missed post renders a red "missed" pill
+          distinct from the other five statuses' own tones (grey/blue/amber/
+          green), confirmed both in the accessibility tree ("Open post ...,
+          missed, at 01:22") and by CSS class (tone-red on that entry's pill
+          vs. tone-green on the published one, tone-blue on approved).
+      - id: AC-3
+        statement: "Opening a post from the calendar navigates to the existing /posts/{id} screen; no approve/publish control exists on the calendar screen itself."
+        result: PASSED
+        evidence: >
+          read_page (filter: interactive) on the live calendar screen listed
+          only month-nav buttons and six "Open post ..." entries — zero
+          approve/publish/reject controls anywhere on the screen. Clicking
+          the missed post's entry navigated to the existing PostView at
+          /posts/post_4cdeafd52a43443f and rendered that screen's own
+          decision context (rights verdict, provenance, status), proving the
+          calendar is pure navigation, not a second decision surface.
+    verification:
+      - "npm run build (vue-tsc -b && vite build): clean, no type errors."
+      - "python -m pytest tests/test_frontend_api.py: 21 passed (20 pre-existing + 1 new, test_studio_calendar_route_serves_the_same_shell)."
+      - "python -m pytest (full suite): failures confirmed pre-existing/unrelated — test_restore.py (backup/restore, ffmpeg contention from concurrent agent processes) and test_transitions.py (colour grading, T-064's own in-progress work on promedia/core/media/**) — grepped both files for any reference to frontend/router/CalendarView/PanelPlaceholderView paths and found none."
+      - "Live browser verification (Claude_Browser tools) against an isolated scratch server, per AC evidence above: grid grouping, missed-status distinction, click-through to /posts/{id}, month prev/next/Today navigation (DOM-confirmed month label changes September <-> August), September (no posts) correctly renders empty while the Unscheduled section persists across months."
+    independent_review:
+      status: NOT_RUN
+      note: >
+        Constitution section 7 — implemented by this session; not yet
+        reviewed by another. No BLOCKING defect is known. One thing worth a
+        reviewer's eye: DR-022 explicitly deferred a bounded date-range
+        fetch until volume makes client-side grouping of the full post
+        history a real latency concern (C-1) — not a problem at today's
+        C-10 scale, but worth confirming a reviewer agrees this is a
+        revisit-trigger rather than a day-one gap.
+    required_dimensions: [correctness, human_experience, accessibility, responsiveness, maintainability, testing, documentation]
+
+  - id: T-071
+    title: "Model marketplace — Capability Directory screen (DR-023)"
+    objective: >
+      A crafted screen projecting T-048's existing operations
+      (list-capabilities, capability-requirements, estimate-capability-cost,
+      spend-status, spend-history, run-capability): one card per AI
+      capability kind, showing availability, exactly what's missing, an
+      UNKNOWN-unless-verified cost, and the C-31 spend ledger. No new
+      backend operation. Not labelled "marketplace" in the UI itself — see
+      DR-023 for why. No purchase, checkout, subscribe, or payment control
+      anywhere on this screen.
+    change_class: ui_change
+    mode: standard
+    owner_role: implementer
+    assigned_model_tier: frontier
+    status: ready
+    claimed_by: null
+    depends_on: [T-053]
+    blocks: []
+    owned_paths:
+      - promedia/web/frontend/**
+      - tests/test_frontend_api.py
+    decisions: [DR-023]
+    acceptance_criteria:
+      - id: AC-1
+        statement: "Every capability kind (transcription/text/speech/image/video) shows its real availability and requirements() output — today, all correctly show unavailable with what's missing, not a fabricated 'coming soon' state."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-2
+        statement: "The spend ledger panel shows real spend-status/spend-history data against the C-31 ceiling, not sample figures."
+        result: NOT_RUN
+        evidence: "not implemented"
+      - id: AC-3
+        statement: "Grepping promedia/web/frontend/** for this screen finds no purchase, checkout, subscribe, add-to-cart, or payment-form control anywhere — verified as part of this task's own evidence, not assumed."
+        result: NOT_RUN
+        evidence: "not implemented"
+    required_dimensions: [correctness, human_experience, accessibility, responsiveness, maintainability, testing, documentation]
 
 # ---------------------------------------------------------------------------
 # Independent review (protocol 06 stage 7). Reviewer role, separate agent and

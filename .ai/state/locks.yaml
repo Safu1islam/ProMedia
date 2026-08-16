@@ -2,7 +2,337 @@
 # Schema: aef/schemas/lock.schema.yaml
 
 locks:
+active:
+  - path: "promedia/core/media/edl.py, promedia/core/media/render.py, tests/test_edl.py, tests/test_transitions.py"
+    task_id: "T-064"
+    agent: "claude-code-t064"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-16T05:00:00+04:00"
+    expires_at: "2026-08-16T09:00:00+04:00"
+    note: >
+      CLAIMED BEFORE THE WORK, exactly T-064's own owned_paths (color
+      grading: EDL vocabulary + render engine, DR-019). No promedia/core/ops/**
+      or schema.sql path claimed — no new operation is needed, grade fields
+      flow through the existing set-edl operation exactly as effect/
+      transition/speed do today, per DR-019's decision.
 history:
+  - path: "promedia/core/schema.sql, promedia/core/ops/brandkits.py, promedia/core/ops/__init__.py, promedia/core/backup.py, tests/test_brandkits.py, tests/test_ops_forms.py, .ai/state/tasks.yaml, .ai/state/recommendations.yaml"
+    task_id: "T-068"
+    agent: "claude-code-t068-0816"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-16T05:05:00+04:00"
+    expires_at: "2026-08-16T09:05:00+04:00"
+    released_at: "2026-08-16T05:45:00+04:00"
+    note: >
+      RELEASED. Brand kits data model (DR-021), the deliverable half: the
+      brand_kits table, backup.py classification (AC-4 PASSED), and
+      create/list/update/delete-brand-kit CRUD including the AC-1
+      rights-declaration gate (AC-1 PASSED) — tests/test_brandkits.py
+      12/12, full evidence in tasks.yaml.
+
+      NOT done: apply-brand-kit / AC-2 / AC-3. Needs an ImageOverlay type
+      in promedia/core/media/edl.py plus a render.py compiler branch;
+      claude-code-t064 held an active, live (non-stale) lock on exactly
+      those two files plus tests/test_edl.py for this session's entire
+      duration (T-064, colour grading, same paths — see the still-active
+      entry above). Editing a path another live session owns is
+      Constitution rule 3, so that half is deferred rather than worked
+      around, and T-068's status in tasks.yaml is 'blocked', not
+      'complete'. R-018 (T-064/T-066's own collision) extended with R-019
+      to name this three-way overlap.
+
+      independent_review left NOT_RUN by design (Constitution section 7).
+      Whoever resumes T-068: re-check .ai/state/locks.yaml's ACTIVE list
+      (not just an expiry timestamp) before touching edl.py/render.py —
+      T-064 and/or T-066 may still hold it.
+
+      Original claim note preserved below:
+
+      CLAIMED BEFORE THE WORK. Brand kits data model (DR-021): brand_kits
+      table, backup classification, and the four CRUD operations
+      (create/list/update/delete-brand-kit).
+
+      DELIBERATELY NOT claiming T-068's own owned_paths
+      promedia/core/media/edl.py, promedia/core/media/render.py or
+      tests/test_edl.py: `aef.py team` shows claude-code-t064 as a LIVE
+      (not stale) session, and the active lock above shows it holding
+      exactly those three paths right now (expires 09:00, T-064/DR-019
+      colour grading) — a real three-way collision with T-066 also, per
+      R-018. apply-brand-kit needs a new ImageOverlay type in edl.py plus a
+      compiler branch in render.py, both inside that locked surface, so
+      that half of this task is BLOCKED, not implemented, until the lock
+      clears. Recorded as such in tasks.yaml (AC-2/AC-3 NOT_RUN/BLOCKED)
+      rather than silently worked around by editing a locked file or by
+      hand-building an EDL dict that bypasses edl.py's own model. R-018
+      extended to name T-068 alongside T-064/T-066.
+
+      What IS deliverable without those three files: the brand_kits table,
+      its backup.py classification (AC-4), and full create/list/update/
+      delete-brand-kit CRUD including the AC-1 rights-declaration gate on
+      the logo asset — none of that needs edl.py or render.py at all.
+  - path: "promedia/web/frontend/src/views/CalendarView.vue, promedia/web/frontend/src/router.ts, promedia/web/frontend/src/views/PanelPlaceholderView.vue, tests/test_frontend_api.py"
+    task_id: "T-070"
+    agent: "claude-code-t070-0816"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-16T01:15:00+04:00"
+    expires_at: "2026-08-16T05:15:00+04:00"
+    released_at: "2026-08-16T01:50:00+04:00"
+    note: >
+      RELEASED. T-070 complete — see its full record in tasks.yaml (all
+      three ACs PASSED with live-verified evidence against an isolated
+      scratch database). independent_review left NOT_RUN by design
+      (Constitution section 7 — not this session's call to make on its own
+      work). Original claim note preserved below:
+      CLAIMED BEFORE THE WORK. Content calendar screen (DR-022): a new
+      CalendarView.vue fetching list-posts/publications and grouping
+      client-side by day, no new backend operation. router.ts is touched to
+      point /calendar at it instead of PanelPlaceholderView; the "calendar"
+      entry in PanelPlaceholderView's SCREENS map becomes dead once that
+      lands and is removed in the same change. tests/test_frontend_api.py
+      claimed for whatever test coverage this screen needs (likely none
+      beyond the existing generic /studio/* deep-path shell test, since
+      DR-022 adds no backend surface); narrowed to a subset of T-070's
+      broader owned_paths (promedia/web/frontend/**) rather than the whole
+      glob, deliberately, to avoid contending with any other frontend work.
+
+      Narrowed from the whole promedia/web/frontend/** glob T-059 held: at
+      claim time T-059's own lock on that full glob (below, in history) was
+      TTL-active but its session (claude-code-t059-0816) had a 28+ minute
+      stale heartbeat with zero live sessions reported by `aef.py team`
+      ("may be abandoned"). Checked for actual content collision before
+      reclaiming rather than trusting the tool alone: `git diff` on T-059's
+      two uncommitted files (SocialView.vue, PanelPlaceholderView.vue)
+      shows only a one-line note-text change to PanelPlaceholderView's
+      *settings* entry — untouched by this claim's edit to its *calendar*
+      entry — and SocialView.vue is not touched by this task at all. Two
+      other genuinely live sessions (claude-code-t064, claude-code-t066)
+      were checked too: neither owns any promedia/web/** path. T-059's
+      stale lock is moved to history below, not deleted, so its own claimed
+      scope stays on record for whoever resumes it.
+  - path: "promedia/web/frontend/src/views/SocialView.vue, .ai/state/tasks.yaml"
+    task_id: "T-059"
+    agent: "claude-code-t059-0816"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-16T01:20:00+04:00"
+    expires_at: "2026-08-16T03:20:00+04:00"
+    released_at: "2026-08-16T01:25:00+04:00"
+    note: >
+      RELEASED. This session's re-claim of its own remaining scope
+      (SocialView.vue, plus tasks.yaml to write the completion record) after
+      claude-code-t070-0816 correctly reclaimed the rest of the original
+      promedia/web/frontend/** glob from a stale heartbeat (see the entry
+      below for what that reclaim checked). No further collision found on
+      release: re-read SocialView.vue and .ai/state/tasks.yaml immediately
+      before each write and again after, both clean. T-059 is now `complete`
+      in tasks.yaml with independent_review left NOT_RUN per Constitution
+      section 7 (this session may not be its own sole reviewer) — see that
+      record for full AC-1 evidence, verification commands actually run, and
+      the two disclosed process items (the stale-lock reclaim above, and
+      shared Browser-pane tab contention during live verification, neither
+      of which lost or touched anything outside this task's own scope).
+  - path: "promedia/web/frontend/**, tests/test_frontend_api.py, .ai/state/fabrications.yaml"
+    task_id: "T-059"
+    agent: "claude-code-t059-0816"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-16T01:00:00+04:00"
+    expires_at: "2026-08-16T05:00:00+04:00"
+    released_at: "2026-08-16T01:15:00+04:00"
+    note: >
+      RECLAIMED, NOT RELEASED BY THE AGENT — its session never sent an end
+      handoff. Moved to history because `aef.py team` reported it stale
+      (28+ min dead heartbeat, 0 live sessions holding it) while
+      claude-code-t070-0816 needed a narrow slice of this same glob for
+      T-070. See T-070's active entry above for the collision check
+      performed before reclaiming. T-059 itself (social integration
+      composer/insights gaps) remains genuinely unfinished — this reclaim
+      covers only the calendar-screen files T-070 touches, not the rest of
+      T-059's scope, which is still open for whoever picks it up next.
+
+      Original note preserved below:
+
+      CLAIMED BEFORE THE WORK, exactly T-059's own owned_paths. Social
+      integration (accounts, publish queue, publications) with honest gaps
+      for composer/insights. NOT claiming .ai/state/tasks.yaml here even
+      though a completion record must land there eventually: at claim time
+      claude-code-t060-planning holds an ACTIVE lock on tasks.yaml (planning
+      pass for T-060, expires 2026-08-16T04:00+04:00). This session will
+      write its own tasks.yaml completion record as a separate, later,
+      surgical claim once that lock is released or expired, re-reading the
+      file immediately before writing per Constitution rule 3 — not
+      contending for it now. No promedia/core/** path is claimed: T-059's
+      objective is presentation only (existing accounts/list-posts/
+      publications operations), and if that turns out false during
+      implementation this note will be corrected before any such file is
+      touched.
+  - path: ".ai/state/tasks.yaml, .ai/state/recommendations.yaml"
+    task_id: "T-049CHECK"
+    agent: "claude-code-t049check-0816"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-16T00:47:00+04:00"
+    released_at: "2026-08-16T00:56:00+04:00"
+    note: >
+      RELEASED. Reconciliation task: T-050/T-051/T-052 (Jinja2 media
+      library, per-clip editor, dashboard rework) had every acceptance
+      criterion still reading NOT_RUN/"not implemented" in tasks.yaml,
+      directly contradicting the RELEASED T-050..T-058 lock note above (see
+      its own "all complete with evidence in tasks.yaml") and
+      claude-code-session-ui2's sessions.yaml handoff ("landed with passing
+      tests") — a bookkeeping gap of the T-019/T-037/T-047 shape.
+
+      GROUND TRUTH ESTABLISHED BY EXECUTION, not by trusting either claim:
+      `python -m pytest tests/test_media_ui.py tests/test_editor_ui.py -v`
+      personally run, 46/46 passed (20 + 26), each individually mapped to
+      its own acceptance criterion in the reconciled tasks.yaml records. Full
+      suite also run clean: 787 passed, exit 0. All 8 acceptance criteria
+      across the three tasks updated NOT_RUN -> PASSED with real evidence;
+      status updated in_progress -> complete on all three.
+
+      PLANNING QUESTION ANSWERED: (b) — these are a DELIBERATELY-KEPT
+      parallel no-JS fallback per DR-004, formally confirmed in DR-017's own
+      "what_this_supersedes" text ("the existing server-rendered pages ...
+      are KEPT, unchanged, as a working no-JS fallback"), not superseded by
+      T-054/T-055/T-057 and not safe to retire. Recorded directly in each
+      task's own findings/independent_review blocks so the next agent does
+      not redo this investigation.
+
+      ONE NAMED GAP found and filed as R-017 (not fixed — out of this
+      task's scope): T-051's Jinja2 clip editor (promedia/web/app.py
+      project_edit_clips) calls set-edl with no expected_version, so the
+      silent-lost-update bug T-055's review found and fixed (R-010) on the
+      Vue editor is still open on this parallel surface.
+
+      Also disclosed: independent_review left NOT_RUN (honest, not
+      fabricated PASSED) on all three — this reconciliation re-executed the
+      acceptance tests directly but performed no full reviewer-lens pass
+      (accessibility/security/threat-model), which T-050/051/052 have never
+      had from anyone but the implementer.
+
+      LOCK CONTENTION HANDLED PER CONSTITUTION RULE 3: claude-code-t060-
+      planning held an active, live (heartbeating) lock on the whole of
+      tasks.yaml at claim time. This session did NOT contend for it —
+      claimed only recommendations.yaml first, did the investigation and
+      filed R-017, then polled (Monitor) until T-060's lock was confirmed
+      released and moved to history before claiming tasks.yaml and making
+      three surgical edits (T-050/T-051/T-052 blocks only). Re-read before
+      and after every write; no collision. `aef.py validate`: 67 leaves, 67
+      tasks, all accounted for, after the edits.
+  - path: ".ai/state/tasks.yaml, .ai/state/plan.yaml, .ai/state/decisions/DR-019.yaml, .ai/state/decisions/DR-020.yaml, .ai/state/decisions/DR-021.yaml, .ai/state/decisions/DR-022.yaml, .ai/state/decisions/DR-023.yaml"
+    task_id: "T-060"
+    agent: "claude-code-t060-planning"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-16T00:00:00+04:00"
+    released_at: "2026-08-16T02:00:00+04:00"
+    note: >
+      RELEASED EARLY (expires_at was 04:00; work finished sooner). CLAIMED
+      BEFORE THE WORK. T-060 is a planning pass, not a code task
+      (owner_role: architect, change_class: new_project) — operator chose
+      "full planning pass, all five" when asked to confirm scope on T-060's
+      five deferred items (Color room, Audio room, brand kits, content
+      calendar, model marketplace). T-048 (T-060's one dependency) was
+      confirmed complete via the HANDOFF-CLOSEOUT-0814 record below, so the
+      block was mechanical, not real. No promedia/** path was claimed or
+      touched — this pass wrote decisions and task records only, no
+      implementation.
+
+      DONE: five decision records (DR-019 colour grading, DR-020 audio
+      mixing, DR-021 brand kits, DR-022 content calendar, DR-023 model
+      marketplace), each running protocol 02's full form — binding
+      constraints from project.md first, ruled-out options with reasons,
+      >=3 candidates each with a real disadvantage, a named fluency-bias
+      check, operator fit, reversibility. Two structural findings worth
+      surfacing for whoever reads this next: (1) colour and audio need no
+      new engine at all — both extend the existing ffmpeg render pipeline
+      (render.py/edl.py) with more filter-backed EDL fields, the same
+      pattern CLIP_EFFECTS and TRANSITIONS already use; (2) content
+      calendar and "model marketplace" need NO new backend operation
+      whatsoever — calendar is a client-side grouping of data list-posts/
+      publications already return, and "marketplace" was scoped honestly as
+      a read-mostly directory over T-048's already-complete provider
+      registry, explicitly NOT a live multi-vendor catalog (which T-048's
+      own no-purchasing rule, C-31, O-3 and F-9 all forbid).
+
+      Eight new tasks written from those decisions (T-064..T-071), each
+      sized to protocol 04's rule (completable and verifiable
+      independently), classified against routing.yaml (data_model_change/
+      critical for the three engine-or-schema tasks — T-064, T-066, T-068 —
+      ui_change/standard for the five screens — T-065, T-067, T-069, T-070,
+      T-071), with real acceptance criteria and owned_paths. plan.yaml
+      gained section S-V2-ROOMS-2 (8 leaves) under the existing Pro Media
+      v2 section; plan_version 2 -> 3, logged in meta.replan_note. T-060
+      itself marked complete with full evidence, required_dimensions
+      corrected to match routing.yaml's new_project minimum (was
+      [correctness, documentation], a pre-existing mismatch found while
+      this record was open — same class of fix R-008 made on T-053/055/058).
+
+      "True real-time 4K scrubbing" (T-060's own old title named it too)
+      deliberately produced NO task: DR-016/DR-017 already decided it is
+      architecturally foreclosed on this hardware (no discrete GPU) and
+      substituted with proxy preview as a disclosed tradeoff — reopening it
+      here would have contradicted an accepted decision, not closed a gap,
+      so it stayed closed. Named explicitly in T-060's evidence and in
+      S-V2-ROOMS-2's own note so the absence reads as a decision, not an
+      oversight.
+
+      VERIFIED: `python aef/tools/aef.py validate` — plan OK, 67 leaves, 67
+      tasks, all accounted for (was 59/59 before this pass). `doctor` clean,
+      both readers agree on every state file. `assign --auto --dry-run` — 0
+      changes needed against the hand-assigned agents already in plan.yaml
+      (5 implementer, 3 frontend-agent, matching the split between
+      engine/schema work and screen work).
+
+      Nothing implemented. Every one of the eight new tasks' acceptance
+      criteria is NOT_RUN by design — this session wrote the plan, not the
+      code, per T-060's own owner_role (architect) and Constitution §7 (an
+      architect planning a task is not the implementer OR reviewer of it).
+
+      Two OTHER sessions were live and correctly deferred their own
+      tasks.yaml writes to this lock while it was held
+      (claude-code-t049check-0816, claude-code-t059-0816, both visible
+      above in `active:` at release time) — their notes were read before
+      writing this one and neither touches a path this task claimed.
+  - path: ".ai/state/recommendations.yaml"
+    task_id: "R-002"
+    agent: "claude-code-r002-0816"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-16T00:45:00+04:00"
+    released_at: "2026-08-16T00:55:00+04:00"
+    note: >
+      RELEASED. CLAIMED BEFORE THE WORK. Checking whether R-002 (critical,
+      pending) is genuinely resolved by project.md's 2026-08-14 section 4
+      amendment (DR-017) and F-9 reconfirmation, and adding a scoping note to
+      R-005 (still pending, deliberately not fixed — its remedy touches
+      aef/tools/aefkit/, which is READ-ONLY to this session). Not claiming any
+      promedia/** or aef/** path; recommendations.yaml only.
+
+      R-002: read project.md's current section 4/10 text side by side with
+      the recommendation's four named concerns, then checked each against the
+      real code rather than trusting the amendment's own prose. Video-editor
+      line: resolved by a genuine Amendment (Constitution section 2), on
+      record in sessions.yaml. F-9/"ID-based multi-user access": resolved —
+      grepped promedia/core/principal.py (PrincipalKind is only
+      "operator"|"agent", no third kind) and promedia/web/frontend/src/App.vue
+      (presence avatars sourced from the C-19 lock table, i.e. agents, not a
+      human-user table); no tenant/organisation/per-user-role model exists
+      anywhere in promedia/. C-13: grepped promedia/config.py
+      (ceiling_bytes=107374182400, unchanged) and storage.py/acquire.py — the
+      100 GB ceiling is still actively enforced, nothing shipped relaxes it.
+      C-17: never actually contradicted — no second human exists anywhere in
+      the data model; the original recommendation conflated C-17 (humans) with
+      C-18 (agents, already 4-concurrent by design). Marked accepted with a
+      full resolution block, became_decision: DR-017 (the amendment that
+      resolved it). No project.md edit made or needed by this session.
+
+      R-005: confirmed its recommended fix still touches only
+      aef/tools/aefkit/ and .ai/state/tasks.yaml, i.e. still genuinely
+      READ-ONLY-blocked for a project-level session. Added a `note:` field
+      (status left `pending`, no resolution fabricated) explaining it needs an
+      AEF-0.x.0 framework-versioning pseudo-task, not a ProMedia task, so a
+      future session does not waste time trying to patch it from inside a
+      normal task.
+
+      Verified after edit: recommendations.yaml still parses (PyYAML), still
+      16 recommendations, no other entry touched; `aef.py validate` clean (59
+      leaves, 59 tasks).
   - path: "promedia/core/projects.py, promedia/core/rights.py, tests/test_render_rights.py, tests/test_projects.py, tests/test_render_storage.py, tests/test_editor_ui.py"
     task_id: "T-044"
     agent: "claude-code-t044"
