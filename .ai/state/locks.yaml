@@ -3,19 +3,802 @@
 
 locks:
 active:
-  - path: "promedia/core/media/edl.py, promedia/core/media/render.py, tests/test_edl.py, tests/test_transitions.py"
+  - path: "promedia/core/ops/backup.py, tests/test_backup.py, .ai/state/tasks.yaml (T-038's block only)"
+    task_id: "T-038"
+    agent: "t038-session"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-17T01:05:00+04:00"
+    released_at: "2026-08-17T01:12:00+04:00"
+    note: >
+      RELEASED. Second addendum to the T-038 claim above: an independently
+      dispatched review subagent (general-purpose, given the constitution +
+      reviewer role, unaware of claude-code-t039-0817's own concurrent
+      review of the same task) converged on the same no-BLOCKING verdict
+      and found two IMPORTANT, non-blocking gaps — one matching
+      claude-code-t039-0817's own finding (T2's happy-path-only test
+      coverage), one new (manifest append missing the OSError->NotFound
+      handling the function's docstring promises). Both fixed: backup.py's
+      manifest write wrapped in try/except; two regression tests added
+      (test_send_offsite_manifest_write_failure_is_a_clear_error,
+      test_send_offsite_raises_if_the_destination_copy_fails_verification).
+      tests/test_backup.py re-run: 40/40 passing. Full suite re-run started
+      before this write; result to follow in the session-end note. Checked
+      before writing: re-read tasks.yaml and locks.yaml immediately before
+      this edit for concurrent changes outside T-038's own blocks — none
+      found this time.
+  - path: "tests/test_registry.py, .ai/state/tasks.yaml (T-038's block only)"
+    task_id: "T-038"
+    agent: "t038-session"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-17T00:46:00+04:00"
+    released_at: "2026-08-17T00:48:00+04:00"
+    note: >
+      RELEASED. Addendum to the T-038 claim above: the first full-suite run
+      caught two deliberate inventory-pin failures in test_registry.py
+      (test_operator_only_operations_are_the_expected_set and
+      test_the_backup_export_is_the_only_operator_only_read) that enumerate
+      operator-authority operations by name — send-offsite needed to be
+      added to both, with its own justifying paragraph, per the pin's own
+      stated purpose. Renamed the second test to
+      test_the_operator_only_reads_are_the_expected_set since
+      export-permanent-set is no longer the only one. Full suite re-run in
+      progress at release time; result to be recorded on session end.
+  - path: "promedia/core/ops/backup.py, tests/test_backup.py, .ai/state/tasks.yaml (T-038's block and the new OD-9 entry only), .ai/state/locks.yaml"
+    task_id: "T-038"
+    agent: "t038-session"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-17T00:28:00+04:00"
+    released_at: "2026-08-17T00:45:00+04:00"
+    note: >
+      RELEASED. Implemented `send-offsite` (OD-9: external/removable drive)
+      per DR-024. 27/27 tests passing in tests/test_backup.py (10 new tests
+      plus 1 credential-canary test added; 16 pre-existing unchanged).
+      T-038 moved to status: in_review, not complete — Constitution §7, the
+      implementing session may not be its own sole reviewer. No other path
+      outside this claim was touched. Checked before writing: re-read
+      tasks.yaml and locks.yaml immediately before this edit — both had
+      been concurrently modified by session claude-code-t069-0817 elsewhere
+      in the file (T-049/other-task content, unrelated to T-038), no
+      collision with this claim's scope.
+  - path: ".ai/state/tasks.yaml (T-049's independent_review block only), .ai/state/locks.yaml, tests/test_editor_ui.py"
+    task_id: "T-049-REVIEW"
+    agent: "claude-code-t049review-0817"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-17T00:00:00+04:00"
+    released_at: "2026-08-17T00:30:00+04:00"
+    note: >
+      RELEASED. T-049's independent review is now PASSED, no blocking
+      finding — full evidence, including the sabotage-and-revert proof for
+      the one new test this pass added, is in tasks.yaml's T-049
+      independent_review block, not duplicated here. Status moved
+      in_progress -> complete. `aef.py validate` clean after this write (67
+      leaves, 67 tasks). Checked on release: re-read both tasks.yaml and this
+      file immediately before writing and again after — no concurrent
+      session's active lock (T-069, T-065, T-065-resume) overlapped this
+      one's narrow path set; no collision. Original claim note, unmodified,
+      follows:
+
+      CLAIMED BEFORE THE WORK. Independent review of T-049 (Constitution
+      section 7 — the implementing session, claude-code-session-ui, may not
+      be its own sole reviewer; T-049's own record shows independent_review
+      status NOT_RUN despite all three of its acceptance criteria reading
+      PASSED via the 2026-08-16 T-049CHECK reconciliation). NOT the
+      implementer of any of this code. Adding one permanent regression test
+      to tests/test_editor_ui.py for the one genuine gap found (see tasks.yaml
+      for detail): the /renders/{id}/file route T-049 shipped has never
+      actually been hit by an automated test, despite test_editor_ui.py's own
+      docstring claiming that gap was closed. Nothing else in promedia/web/**
+      touched. Narrowed relative to T-049's full owned_paths glob
+      (promedia/web/**) — no other file in that tree is edited by this pass.
+  - path: "promedia/web/frontend/src/views/BrandKitView.vue (new), promedia/web/frontend/src/api.ts, promedia/web/frontend/src/router.ts, promedia/web/frontend/src/views/PanelPlaceholderView.vue, tests/test_frontend_api.py, .ai/state/tasks.yaml (T-069's own block only), .claude/launch.json"
+    task_id: "T-069"
+    agent: "claude-code-t069-0817"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-17T01:00:00+04:00"
+    released_at: "2026-08-17T01:45:00+04:00"
+    note: >
+      RELEASED. T-069 complete: both ACs PASSED with live end-to-end browser
+      evidence against an isolated scratch server (create a declared logo →
+      brand kit → apply to a real project → new EDL version correctly
+      attributed in the existing, untouched EditorView.vue history, plus
+      delete-safety confirmed live) — full walkthrough in tasks.yaml's T-069
+      record. `npm run build` clean (0 type errors); test_frontend_api.py
+      29/29; test_ops_forms.py/test_parity.py clean (no new backend
+      surface). One unrelated failure disclosed, not fixed
+      (test_registry.py's operator-only-operations pin drifted against a
+      concurrent session's new 'send-offsite' operation in backup.py, a file
+      this task never touched) — confirmed fixed since by that other
+      session (t038-session, see its own entry below) before this lock
+      released. independent_review left NOT_RUN by design (Constitution
+      s7). `aef.py validate`/`doctor` clean after this write (67 leaves, 67
+      tasks). Scratch server stopped cleanly; its data dir lives under this
+      session's own scratchpad, never the operator's real data.
+
+      EXTENDED to .claude/launch.json: adding a new named config
+      ("promedia-t069-scratch") for live-browser verification against an
+      isolated scratch data dir (PROMEDIA_DATA_DIR/PROMEDIA_CREDENTIAL_STORE
+      pinned under the session scratchpad, never the operator's real data —
+      same isolation T-070/T-071 used for their own live-browser evidence),
+      additive only, no existing config entry touched. Original claim note,
+      unmodified, follows:
+
+      CLAIMED BEFORE THE WORK. T-069 (Pro Media v2 brand kit screen, DR-021)
+      is now genuinely unblocked: depends_on [T-068, T-053], both `complete`
+      with independent_review PASSED (T-068 as of this same session's prior
+      review, moments ago — see tasks.yaml and locks.yaml history).
+
+      NARROWED to exactly the files this screen needs, NOT T-069's own
+      owned_paths (the whole promedia/web/frontend/** glob): a new
+      BrandKitView.vue (create/list/delete a brand kit, apply one to a
+      project), api.ts (thin wrappers for the five brand-kit operations),
+      router.ts (point the existing /brand route — currently
+      PanelPlaceholderView — at the new view, same pattern T-070/T-071 used
+      for /calendar and /generation), and PanelPlaceholderView.vue (remove
+      the now-dead 'brand' entry from its SCREENS map). Deliberately NOT
+      touching EditorView.vue: AC-2's "visible in that project's version
+      history, correctly attributed" is already true today with zero
+      changes there — apply-brand-kit writes through the existing set_edl,
+      and EditorView.vue already renders every version's authored_kind
+      (confirmed by reading it, line ~613) — so this task does not need a
+      file `claude-code-t065-0816`'s active lock below (stale, 21.9+ min
+      dead heartbeat per `aef.py team`, but not yet reclaimed by its own
+      `claude-code-t065-resume-0817`, currently idle) still names.
+
+      .ai/state/tasks.yaml ADDED TO THE CLAIM, narrowed to T-069's own block
+      only: T-065's active lock below also claims this file, for ITS own
+      T-065 record and a projects.py capabilities() addition — checked for a
+      real overlap, not just the label: different task id, different lines.
+      Re-reading tasks.yaml immediately before and after every write to this
+      file for the rest of this session, and retrying if it has moved.
+  - path: ".ai/state/tasks.yaml (T-068's independent_review block only), .ai/state/locks.yaml"
+    task_id: "T-068-REVIEW"
+    agent: "claude-code-t068review-0817"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-17T00:15:00+04:00"
+    released_at: "2026-08-17T00:50:00+04:00"
+    note: >
+      RELEASED. T-068's independent review is now PASSED, no blocking
+      finding, one minor disclosed gap (ImageOverlay.start allows a negative
+      value validate() doesn't reject, harmless in practice) — full evidence
+      including the sabotage-and-revert proof is in tasks.yaml's T-068
+      independent_review block, not duplicated here. T-069 (Pro Media v2
+      brand kit screen) is now genuinely unblocked, both mechanically and on
+      review, but its own status/blocked_reason is left for whoever claims
+      it next. `aef.py validate`/`doctor` clean after this write (67 leaves,
+      67 tasks). Checked on release: re-read tasks.yaml immediately before
+      writing and again after — claude-code-t065-0816's active lock on this
+      same file never touched T-068's block; no collision. Original claim
+      note, unmodified, follows:
+
+      CLAIMED BEFORE THE WORK. Independent review of T-068 (Constitution
+      section 7 — the implementer, claude-code-t068-finish2-0816, may not be
+      its own sole reviewer, and its own independent_review block explicitly
+      asks for exactly this pass). NOT the implementer of any of this code:
+      read edl.py's ImageOverlay/validate(), render.py's overlay compiler
+      branch, and brandkits.py's apply-brand-kit fresh, then re-ran the tests
+      myself rather than trusting the 113-passed/915-passed claim on sight —
+      reproduced independently: 288 passed across test_brandkits.py/
+      test_edl.py/test_media.py/test_locking.py/test_ops_forms.py/
+      test_transitions.py, full suite green (see tasks.yaml's review block
+      for the exact commands and a sabotage-and-revert proof that the AC-2/
+      AC-1 pixel-measurement tests are real, not vacuous).
+
+      Narrowed to exactly T-068's independent_review block in tasks.yaml,
+      plus this file for the lock/bookkeeping tidy below — NOT any of
+      T-068's owned_paths (edl.py, render.py, brandkits.py, the test files):
+      all unmodified after the sabotage-and-revert cycle (hash-confirmed
+      identical before/after, see tasks.yaml). claude-code-t065-0816 holds
+      an active, genuinely-live (just extended its own claim moments ago)
+      lock on tasks.yaml too, for its own T-065 record and an EditorView.vue/
+      projects.py capabilities() addition — checked for a real overlap, not
+      just the lock label: T-065's own notes name the lines it intends to
+      touch (capabilities(), test_projects.py, its own eventual T-065
+      record), nowhere near T-068's block (a different task id, ~5300 lines
+      into the file); re-reading tasks.yaml immediately before and after
+      this write to catch an actual collision rather than assuming the
+      label alone is enough, and retrying the write if the file has moved
+      under it.
+
+      Also fixing a bookkeeping gap while this file is open anyway (the same
+      shape T-019/T-037/T-047 hit before, and T-068's own history below
+      names it too): T-067's and T-068's lock entries both already carried
+      released_at but were left sitting under active: instead of being moved
+      to history: — relocated below, content byte-for-byte unchanged,
+      nothing about either release reinterpreted.
+history:
+  - path: ".ai/state/tasks.yaml (T-038's independent_review block, and T-039's whole block), .ai/state/locks.yaml, promedia/core/ops/backup.py, promedia/config.py, tests/test_backup.py, tests/test_registry.py, docs/HUMAN-ACTIONS.md"
+    task_id: "T-038-REVIEW / T-039"
+    agent: "claude-code-t039-0817"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-17T00:52:00+04:00"
+    released_at: "2026-08-17T01:35:00+04:00"
+    note: >
+      RELEASED. T-038's independent review is PASSED and recorded (this
+      session's own review plus t038-session's own concurrently-dispatched
+      second review, both converging on no-blocking-defect and reconciled
+      cleanly by t038-session itself in tasks.yaml — see its own note there,
+      not duplicated here).
+
+      A SECOND CONCURRENT-EDIT DEFECT, distinct from the one below: after
+      t038-session's "SECOND REVIEW" addendum landed inside T-038's
+      independent_review.note, `aef.py validate`/`doctor` (run by this
+      session as part of its own closeout, not by t038-session) failed —
+      tasks.yaml was invalid YAML. Root cause found by inspection: the
+      addendum's paragraph was written at 6-space indent, matching
+      `independent_review:`'s own key level rather than continuing 8 spaces
+      deep inside the `note: >` folded scalar it was meant to extend: YAML
+      folded scalars end at the first line whose indentation drops back to
+      the introducing key's level, so "SECOND REVIEW (t038-session..." was
+      parsed as a new mapping key — and failed immediately, since it is
+      prose, not `key: value`. This broke tasks.yaml for EVERY reader,
+      not just this task's own record. Fixed by re-indenting exactly that
+      block (+2 spaces throughout, preserving its own internal nested-list
+      structure unchanged) so it continues the same folded scalar; content
+      itself was not altered, only re-indented. Re-verified: `python -c
+      "yaml.safe_load(...)"` parses; `aef.py validate` — 67/67 leaves; `aef.py
+      doctor` — all five state files agree between readers. Disclosed here
+      because it happened during this session's own claim window and this
+      session is the one that found and fixed it, not because it was this
+      session's own authoring mistake.
+
+      T-039 implemented: backup-tick (operator
+      authority, local export + off-site staleness escalation) and
+      backup-status (agent authority, read-only), both AC-1/AC-2 self-verified
+      PASSED with real tests (40 in tests/test_backup.py combined with
+      t038-session's own 2) plus a live end-to-end CLI smoke test against an
+      isolated scratch dir. Full suite green three times across this
+      session. T-039 left at status in_review, independent_review NOT_RUN
+      by design (Constitution §7) — full record in tasks.yaml.
+
+      REAL CONCURRENT-EDIT EVENT, disclosed for whoever reads this next:
+      while this claim was active, t038-session (still genuinely live,
+      unaware of this claim covering the same two files) separately claimed
+      and edited promedia/core/ops/backup.py and tests/test_backup.py
+      (01:05–01:12, its own lock entry elsewhere in this file) to fix two
+      findings its own independently-dispatched review subagent found —
+      one of which matched this session's own review finding exactly. This
+      was a genuine Constitution-rule-3 near-miss (a path both sessions had
+      claimed, edited by both without the second checking the first's
+      active claim) that happened to resolve safely only because the two
+      sessions' edits landed in non-overlapping regions of both files —
+      verified after the fact by re-reading both files in full and
+      confirming no corruption, duplication, or lost content, then
+      re-running the full suite (40/40 in test_backup.py, full suite exit 0
+      three times). Not a process this session's own discipline prevented;
+      recorded honestly as luck plus t038-session's own careful, additive
+      editing style, not as a control that worked. Worth a reviewer's
+      attention: this project's locking convention is advisory (nothing
+      enforces a real file lock at the OS/git level), and two genuinely live
+      sessions did not check each other's active claims before writing to
+      the same files within the same ~15-minute window.
+
+      Original claim note, unmodified, follows:
+      CLAIMED BEFORE THE WORK. Independent review of T-038 (Constitution
+      section 7 — t038-session, the implementer, may not be its own sole
+      reviewer; T-038's own record shows independent_review status NOT_RUN
+      despite AC-1 PASSED). NOT the implementer of any of this code.
+      t038-session is a genuinely LIVE session right now (`aef.py team`:
+      idle, heartbeat fresh) with no active lock held — its own last note
+      says "independent review dispatched", so this claim is disclosed
+      publicly here to avoid a duplicate review landing at the same time;
+      if that turns out to collide, this session's write will re-check
+      before saving. Narrowed to exactly T-038's independent_review block in
+      tasks.yaml, not any of its owned_paths (promedia/core/ops/backup.py,
+      tests/test_backup.py, tests/test_registry.py) — none of those are
+      touched by this review.
+
+      DISCLOSED PROCESS DEVIATION during the review's sabotage-and-revert
+      proof (relaxing send-offsite's authority to "agent" to confirm
+      test_an_agent_cannot_send_offsite is real, not vacuous — it failed as
+      expected): reverted with `git checkout --`, which restored HEAD
+      (ff96c4a) rather than the pre-sabotage WORKING TREE, because
+      promedia/core/ops/backup.py carried real uncommitted T-038 work (the
+      whole send_offsite function) that `git status` had already shown as
+      modified before this session touched anything. That transiently
+      discarded send_offsite entirely. Caught immediately via a SHA-256
+      hash taken before the sabotage edit
+      (525546d97ee61f740bd724505d4e33b5c7202ae8ff73a7a3952177c03bb9f077);
+      the post-revert hash did not match, which is what caught it. Fixed by
+      reconstructing the file byte-for-byte from this same session's own
+      prior Read of the full file (captured before any edit), verified by
+      recomputing the hash: identical
+      (525546d9...) before and after. No data was permanently lost — nothing
+      was committed or pushed in between — but the near-miss is recorded
+      here rather than quietly worked around, per Constitution rule 7.
+      Lesson applied for the rest of this session: never use `git checkout
+      --` to undo a sabotage edit in a file with pre-existing uncommitted
+      content; reconstruct from a Read captured immediately before the edit,
+      or `git stash`/diff-and-reverse instead.
+
+      EXTENDED, once the review's own verdict was ready to record: to
+      .ai/state/tasks.yaml's T-039 block and T-039's owned_paths
+      (promedia/core/ops/backup.py, docs/HUMAN-ACTIONS.md) plus two files
+      NOT in T-039's own owned_paths list, added here with the reason —
+      promedia/config.py (protocol 05 forbids a hardcoded staleness
+      threshold; a new `backup` config section is the only place it can
+      live) and tests/test_backup.py (T-039's own owned_paths omit a test
+      file entirely, which every other task in this project's history has
+      corrected by extending its claim rather than shipping untested code —
+      same pattern T-066/T-068/T-069 all used). No other session holds any
+      of these paths (checked via `aef.py team` immediately before this
+      extension; t038-session remains idle with no active lock).
+
+      FURTHER EXTENDED to tests/test_registry.py, not in T-039's owned_paths
+      either: adding backup-tick (operator authority, no-mutate) fired the
+      exact same two inventory pins T-038's own send-offsite addition fired
+      (test_operator_only_operations_are_the_expected_set and
+      test_the_operator_only_reads_are_the_expected_set) — expected, since
+      that is what those pins exist to catch. t038-session's own now-released
+      lock covered this same file for the identical reason; no live session
+      holds it now (re-checked via `aef.py team` before this edit).
+  - path: "promedia/web/frontend/src/views/EditorView.vue, promedia/core/projects.py, tests/test_projects.py, .ai/state/tasks.yaml"
+    task_id: "T-065"
+    agent: "claude-code-t065-0816"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-16T23:55:00+04:00"
+    expires_at: "2026-08-17T03:55:00+04:00"
+    released_at: "2026-08-17T00:35:00+04:00"
+    note: >
+      RELEASED. T-065 complete — see tasks.yaml for the full record (all 3
+      ACs PASSED: real end-to-end grade round-trip through set-edl, clean
+      `npm run build` with the shipped bundle confirmed to contain the new
+      code, full suite 0 failures). Disclosed: this session's own heartbeat
+      lapsed mid-task and briefly read stale, spinning up a
+      claude-code-t065-resume-0817 session expecting to redo the work —
+      caught and re-heartbeated before any file collision happened; that
+      session has nothing left to resume. No interactive browser
+      verification was possible (no browser-automation tool available this
+      session) — disclosed in the task record rather than claimed.
+      independent_review left NOT_RUN by design (Constitution section 7).
+
+      UPDATE (resuming session, same id, browser tooling now available):
+      the "no interactive browser verification was possible" gap above is
+      closed — live-verified against an isolated scratch server (port 8767,
+      never the operator's real data): slider drag -> Save -> real
+      `POST /api/op/set-edl -> 200` -> v2->v3 -> History row; Render ->
+      real `POST /api/op/render-project -> 200` -> PROGRAM monitor updated;
+      Reset to neutral -> badge/disabled state round-tripped correctly. Full
+      detail in tasks.yaml's T-065 record (AC-1/AC-2/AC-3 evidence blocks
+      and the new verification entry), not duplicated here. Also ended the
+      phantom `claude-code-t065-resume-0817` session this note already
+      predicted would spin up finding nothing to do. No file was reclaimed
+      or edited outside T-065's own already-released paths; this is an
+      append-only addendum to an already-`released` history entry, checked
+      against the current live session (`claude-code-t039-0817`, T-038-
+      REVIEW/T-039, holds locks.yaml narrowed to its own bookkeeping) for a
+      real content collision before writing — none found, different lines,
+      different task.
+
+      EXTENDED to EditorView.vue: `aef.py team` now shows T-067, T-068 and
+      T-071 all released (checked their own release notes in this file
+      directly, not just their absence from `aef.py team` — T-067's release
+      note explicitly flags that it restructured EditorView.vue's template
+      into per-room `<template v-if>` blocks, so this session re-reads the
+      file fresh rather than assuming its old shape). No other live session
+      holds any promedia/web/frontend/** path. Proceeding to add the Color
+      room panel. Original claim note for the backend half, unmodified,
+      follows:
+
+      CLAIMED BEFORE THE WORK. T-065 (Color room screen, DR-019) is
+      mechanically unblocked: depends_on [T-064, T-053], both `complete`.
+      tasks.yaml's `blocked`/blocked_reason is stale and will be corrected in
+      a later, separate claim on tasks.yaml once real progress exists to
+      record — not bundled into this claim.
+
+      NARROWED to exactly these two files, NOT T-065's own owned_paths
+      (promedia/web/frontend/**, tests/test_frontend_api.py): `aef.py team`
+      shows claude-code-t067-0816 genuinely LIVE and `working` right now on
+      T-067 (Audio room), with a real uncommitted diff on EXACTLY
+      promedia/web/frontend/src/views/EditorView.vue and promedia/web/app.py
+      (its own active lock above, acquired first, names this exact
+      collision risk by session id). Color and Audio are both tabs inside
+      that SAME EditorView.vue, so editing it concurrently is a real risk,
+      not hypothetical — deferring that half of T-065 until T-067 releases
+      rather than contending for a live file (Constitution rule 3).
+
+      What IS doable without EditorView.vue: DR-019's decision doesn't
+      expose GRADE_RANGES/GRADE_NEUTRAL to the frontend anywhere today —
+      effects/transitions/qualities are all served via the existing
+      `media-capabilities` operation (promedia/core/projects.py
+      capabilities()) so the UI never hand-duplicates the server's own
+      vocabulary, and grade fields are the one exception. Adding
+      `grade_ranges`/`grade_neutral` to that same dict is a small, additive,
+      read-only change (no new operation, no schema change) that the actual
+      slider UI will need the moment it's built, and touches neither
+      edl.py/render.py (T-068's active lock, unrelated) nor any frontend
+      path (today's real collision). tests/test_projects.py claimed for the
+      one assertion this needs, extending the existing
+      test_capabilities_reports_what_cannot_be_generated rather than adding
+      a parallel test.
+  - path: "promedia/web/frontend/src/views/EditorView.vue, promedia/web/app.py, tests/test_frontend_api.py"
+    task_id: "T-067"
+    agent: "claude-code-t067-0816"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-16T16:00:00+04:00"
+    expires_at: "2026-08-16T20:00:00+04:00"
+    released_at: "2026-08-17T00:15:00+04:00"
+    note: >
+      RELOCATED FROM active: TO history: BY claude-code-t068review-0817
+      (T-068-REVIEW lock above), byte-for-byte unchanged — this entry already
+      carried released_at but had been left under active: (the same
+      bookkeeping gap named repeatedly elsewhere in this file, e.g. T-019/
+      T-037/T-047). Original content, verbatim, follows:
+
+      RELEASED. T-067 complete — see tasks.yaml for the full record (AC-1/
+      AC-2 PASSED with live-verified evidence against an isolated scratch
+      server, plus a self-added AC-3 disclosing R-021's duck gap in the UI
+      rather than papering over it). tests/test_frontend_api.py 28/28; full
+      suite run twice, exit 0 both times, 908 collected; `npm run build`
+      clean. independent_review left NOT_RUN by design (Constitution s7).
+
+      T-065's own active lock above (claude-code-t065-0816) already found
+      and correctly deferred around this lock while it was active — checked
+      on release: its claimed paths (projects.py, test_projects.py,
+      tasks.yaml) do not overlap this lock's paths, confirmed by re-reading
+      EditorView.vue/app.py immediately before this release and finding only
+      this task's own content. Whoever resumes T-065 next: this lock is now
+      clear, but re-read EditorView.vue for real before editing — T-067
+      restructured its template (room content moved into per-room
+      `<template v-if>` blocks, render-row hoisted above them) rather than
+      only appending, so the file's shape changed, not just its length.
+
+      Original claim note, unmodified, follows:
+
+      CLAIMED BEFORE THE WORK. T-067 (Audio room, DR-020) is mechanically
+      unblocked: depends_on [T-066, T-053], and both are `complete` in
+      tasks.yaml (T-066's own lock history below shows it RELEASED with all
+      3 ACs PASSED). tasks.yaml's blocked_reason was stale and is corrected
+      in the same pass as this claim.
+
+      NARROWED from T-067's own owned_paths (the whole promedia/web/frontend/**
+      glob) to exactly the two files this task actually touches, deliberately
+      NOT the full glob: `aef.py team` shows TWO other genuinely live sessions
+      right now — claude-code-t071-0816, which holds an ACTIVE lock on that
+      exact full glob for T-071 (Capability Directory, a different file,
+      CapabilityDirectoryView.vue, /generation route — confirmed non-
+      overlapping by reading its own claim note) — and claude-code-t065-0816
+      (frontend-agent), which has no lock yet but whose id names T-065 (Color
+      room, DR-019), the ONE task most likely to want this exact file next:
+      `git status` right now shows every promedia/web/frontend/** path clean
+      (no uncommitted diff anywhere in that tree), so T-065 has not started
+      editing yet, but the Color and Audio rooms both live as tabs inside the
+      SAME EditorView.vue this task edits — a real, named collision risk
+      (same shape as R-018/R-019 on the backend), not a hypothetical one.
+      Narrowing to EditorView.vue/app.py/test_frontend_api.py only (not
+      router.ts, menu.ts, or any other view) keeps this claim to the smallest
+      set that could actually collide, and re-checking `git diff` on
+      EditorView.vue before every write for the rest of this session, not
+      just at claim time.
+
+      promedia/web/app.py ADDED TO THE CLAIM, not in T-067's original
+      owned_paths: AC-2 needs a REAL per-track waveform image, and
+      render.render_waveform() (T-066, already in the tree, no dependency)
+      has no caller anywhere — reachable from neither surface yet. A GET
+      file-serving route is the established pattern this repo already uses
+      for binary output (media_file, render_file, both in app.py, both GET,
+      both outside the /api/op/{name} JSON registry) — a new `waveform-file`
+      *operation* would be the wrong shape for the same reason those two
+      aren't operations either. edl.py/render.py themselves are NOT claimed:
+      render_waveform already exists and needs no change; they are also under
+      T-068's own active lock below (recently reconfirmed still live-owned)
+      and would be a real collision if touched.
+  - path: "promedia/core/media/edl.py, promedia/core/media/render.py, promedia/core/ops/brandkits.py, tests/test_edl.py, tests/test_media.py, tests/test_brandkits.py, tests/test_transitions.py, tests/test_locking.py, tests/test_ops_forms.py, .ai/state/tasks.yaml, .ai/state/recommendations.yaml"
+    task_id: "T-068"
+    agent: "claude-code-t068-finish2-0816"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-16T23:55:00+04:00"
+    expires_at: "2026-08-17T03:55:00+04:00"
+    released_at: "2026-08-17T00:35:00+04:00"
+    note: >
+      RELOCATED FROM active: TO history: BY claude-code-t068review-0817
+      (T-068-REVIEW lock above), byte-for-byte unchanged — same bookkeeping
+      gap as T-067's entry above. Original content, verbatim, follows:
+
+      RELEASED. T-068 now complete: AC-2/AC-3 verified PASSED (see
+      tasks.yaml's T-068 record for full evidence — 113 passed across
+      test_brandkits.py/test_edl.py/test_transitions.py, full suite 915
+      passed / 0 failed). Added a note to R-018/R-019 in
+      recommendations.yaml: all three of T-064/T-066/T-068 landed without
+      real data loss, but by reactive lock-checking, not because the
+      underlying planning gap (sibling engine tasks sharing owned_paths
+      with no depends_on) was actually fixed — left `pending`, not
+      resolved. independent_review left NOT_RUN by design (Constitution
+      section 7 — this session verified inherited code by execution, which
+      is not the same as an independent reviewer's lens; see the extended
+      note in T-068's own independent_review block for the third open
+      question this raises). T-069 (brand kit screen) is now mechanically
+      unblocked but its own status/blocked_reason was deliberately left
+      untouched — outside this claim's owned_paths. Original claim note,
+      unmodified, follows:
+      CLAIMED BEFORE FURTHER WORK, reclaiming from a STALE predecessor.
+      `aef.py team` confirmed claude-code-t068-finish-0816 dead (761.9 min
+      since its last heartbeat, frozen at the moment it started — it never
+      heartbeat again after claiming this lock), well past both its own
+      expires_at (15:15) and any reasonable liveness window. Checked the
+      three other genuinely live sessions at claim time (claude-code-t071-0816
+      idle on promedia/web/frontend/**, claude-code-t065-0816 idle/unclaimed,
+      claude-code-t067-0816 working on EditorView.vue/app.py/
+      tests/test_frontend_api.py for T-067) — none owns any path in this
+      claim; no real collision.
+
+      FOUND, NOT ASSUMED: the dead session did not leave nothing behind. The
+      working tree already contains a complete-looking implementation —
+      ImageOverlay in edl.py (EDL_VERSION 3->4), an overlay compiler branch
+      in render.py, apply-brand-kit in ops/brandkits.py, and matching tests
+      in tests/test_brandkits.py (structural: EDL version/fields round-trip,
+      AC-3's byte-identical-after-delete proof) and tests/test_transitions.py
+      (AC-2's real measurement: a real ffmpeg render decoded and pixel-
+      sampled at the named corner, and a second test proving the time-window
+      bounds are honoured — the T-045 discipline the task's own AC-2 wording
+      demands, not a read of the filter string). tests/test_locking.py and
+      tests/test_ops_forms.py already carry the LOCKING_OPERATIONS/probe
+      entries these operations need. NOT independently written by this
+      session — inherited, then verified by execution before being trusted:
+      `python -m pytest tests/test_brandkits.py tests/test_edl.py
+      tests/test_transitions.py` — 113 passed, 0 failed. tests/test_media.py
+      needed no change (brand kits render through the same compile_render
+      path T-064/T-066 already proved there; no new real-encode fixture was
+      needed beyond what test_transitions.py already added).
+
+      tests/test_transitions.py was NOT in the dead session's own declared
+      lock path list (edl.py, render.py, ops/brandkits.py, test_edl.py,
+      test_media.py, test_brandkits.py, test_locking.py, test_ops_forms.py,
+      recommendations.yaml) despite carrying real, substantial AC-2 test
+      additions — a real process deviation by that session, disclosed here
+      rather than silently inherited; added to this claim since this session
+      now owns verifying and finishing that file's content.
+
+      .ai/state/tasks.yaml ADDED TO THE CLAIM, not in the dead session's own
+      path list: T-068's own status/AC-2/AC-3 must move from
+      blocked/NOT_RUN once the inherited work is verified, and no other
+      session holds this file right now (confirmed by re-reading immediately
+      before this write).
+  - path: "promedia/web/frontend/**, tests/test_frontend_api.py"
+    task_id: "T-071"
+    agent: "claude-code-t071-0816"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-16T15:30:00+04:00"
+    expires_at: "2026-08-16T19:30:00+04:00"
+    released_at: "2026-08-17T00:15:00+04:00"
+    note: >
+      RELEASED. T-071 (Capability Directory screen, DR-023) complete: all 3
+      ACs PASSED with live-browser evidence against the real dev server
+      (list-capabilities/estimate-capability-cost/spend-status/spend-history
+      data rendered real, run-capability's "Try it" button live-verified to
+      fire a real request and show the real structural refusal). No new
+      backend operation, per DR-023. Narrowed in practice to
+      CapabilityDirectoryView.vue (new), api.ts, router.ts,
+      PanelPlaceholderView.vue (generation entry removed, now dead), and
+      tests/test_frontend_api.py (two new tests, including an AC-3 grep
+      discipline test mirroring test_providers.py's for T-048).
+
+      Checked for collision before releasing: other concurrent sessions
+      (T-065/claude-code-t065-0816, T-067) confirmed in their own claim
+      notes above that this glob-vs-narrower-claim was non-overlapping with
+      their work (EditorView.vue, app.py, projects.py) — full suite run
+      after this task's own changes landed shows 0 failures, including
+      their concurrently-landed tests.
+
+      Full test suite this session ran, twice: python -m pytest
+      tests/test_frontend_api.py (23 passed) and the full python -m pytest
+      (exit 0, all passed). npm run build clean.
+
+      independent_review left NOT_RUN by design (Constitution section 7) —
+      see tasks.yaml's own T-071 record for the two things worth a
+      reviewer's eye, including whether the "Try it" button is a reasonable
+      reading of the task objective or scope creep beyond the three binding
+      ACs.
+  - path: "promedia/core/media/edl.py, promedia/core/media/render.py, promedia/core/ops/brandkits.py, tests/test_edl.py, tests/test_media.py, tests/test_brandkits.py, tests/test_locking.py, tests/test_ops_forms.py, .ai/state/recommendations.yaml"
+    task_id: "T-068"
+    agent: "claude-code-t068-finish-0816"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-16T11:15:00+04:00"
+    expires_at: "2026-08-16T15:15:00+04:00"
+    released_at: "2026-08-16T23:55:00+04:00"
+    note: >
+      RECLAIMED AS STALE, NOT RELEASED BY THE AGENT — its session never sent
+      an end handoff and its heartbeat froze at the moment it claimed this
+      lock (11:15), never updating again; `aef.py team` measured 761.9 min
+      dead at reclaim time. See the active entry above (now held by
+      claude-code-t068-finish2-0816) for what the reclaim checked and what
+      this session left behind, uncommitted but real: ImageOverlay + a
+      render.py compiler branch + apply-brand-kit, independently verified by
+      test execution before being trusted, not merely inherited on faith.
+      Original note preserved below:
+
+      STILL ACTIVE FOR ITS REMAINING PATHS. `.ai/state/tasks.yaml` was
+      split out of this claim and reclaimed by claude-code-t059review-0816
+      (stale heartbeat, 0 live sessions per `aef.py team`) for a narrow,
+      unrelated edit — T-059's own `review:`/`independent_review:` blocks
+      only, now released back to history (see above). Checked for
+      collision before that split happened: none found. Original note for
+      this lock, unmodified, follows:
+
+      CLAIMED BEFORE THE WORK. Finishing T-068's deferred half (AC-2/AC-3,
+      apply-brand-kit): checked .ai/state/locks.yaml's active list per the
+      standing instruction left by every prior session on this file — empty
+      at claim time, and `git status`/the working tree show T-064 (colour
+      grading) and T-066 (audio mixing) both already RELEASED, with their
+      EDL_VERSION 2/3 work sitting uncommitted but complete in edl.py/
+      render.py. Adding ImageOverlay (asset_id, position, size, margin,
+      start/end) to edl.py, EDL_VERSION 3->4; a render.py compiler branch
+      (ffmpeg overlay filter, image input via -loop 1, scaled and composited
+      after text overlays); apply-brand-kit in ops/brandkits.py calling the
+      existing set_edl with expected_version, per the plan T-068's own
+      lock-history note left. test_locking.py/test_ops_forms.py claimed for
+      the same reason every prior brand-kit session claimed them: new
+      params/operations need a probe value and (if it locks by id) a
+      LOCKING_OPERATIONS entry, or their generic pinned tests silently stop
+      covering the new surface.
+  - path: ".ai/state/tasks.yaml"
+    task_id: "T-059-REVIEW"
+    agent: "claude-code-t059review-0816"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-16T12:10:00+04:00"
+    released_at: "2026-08-16T12:55:00+04:00"
+    note: >
+      RELEASED. Independent review of T-059 complete: PASSED, one minor
+      non-blocking finding (an off-by-one test count in the record's own
+      evidence, not a code defect). Full findings and the live-verification
+      detail are in T-059's own `independent_review:` block in tasks.yaml —
+      not duplicated here.
+
+      Reclaimed this path out of a STALE T-068 lock rather than an empty
+      active list (T-068's session showed 0 live sessions / 20.5+ min dead
+      heartbeat in `aef.py team` at claim time). Checked for collision before
+      writing: `git diff --stat -- .ai/state/tasks.yaml` showed T-068's own
+      224 insertions landing elsewhere in the file; T-059's block was still
+      at its pre-T-068 line number, untouched. T-068's lock is restored to
+      active for its remaining (unclaimed-by-this-task) paths immediately
+      below, exactly as found, with only the note updated to record the
+      split — not overwritten. No promedia/** path was touched or claimed by
+      this review at any point; a reviewer records, it does not fix.
+  - path: "tests/test_locking.py"
+    task_id: "R-018-followup"
+    agent: "claude-code-t064-followup"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-16T10:45:00+04:00"
+    expires_at: "2026-08-16T11:15:00+04:00"
+    released_at: "2026-08-16T10:55:00+04:00"
+    note: >
+      RELEASED. CLAIMED BEFORE THE WORK. Operator asked to "fix" after a
+      full-suite run surfaced two failures. This is the one safe to touch
+      immediately: test_the_locking_and_creating_sets_are_what_this_task_
+      intended pins LOCKING_OPERATIONS against the live registry, and
+      T-068's update-brand-kit/delete-brand-kit (both entity="brand_kit" +
+      brand_kit_id, the exact shape LOCKING_OPERATIONS exists to catch)
+      were never added when they landed. Fixed: both added to
+      LOCKING_OPERATIONS, plus create-brand-kit added to CREATING_OPERATIONS
+      for the same documentation-completeness reason (mutates, no id yet —
+      confirmed via lock_target(op, {}) is None). tests/test_locking.py
+      13/13 passed after the fix; full suite re-run clean, 0 failures.
+
+      NOT claimed: promedia/core/media/edl.py or render.py —
+      claude-code-t066-0816b held an ACTIVE, live lock on exactly those two
+      files (plus test_edl.py, test_media.py) for T-066 at claim time, so
+      R-020 (the loudnorm/NaN bug, which lives in render.py) was
+      deliberately NOT touched by this session to avoid a real collision
+      with genuinely concurrent work. Still open for whoever picks it up
+      once T-066 releases those paths.
+
+      ALSO INVESTIGATED, not fixed: the same full-suite run's second
+      failure, tests/test_media_ui.py::test_the_uploaded_file_on_disk_is_
+      not_left_behind ("a staging directory was left behind after upload").
+      Reproduced 0/2 in isolation (both `pytest tests/test_media_ui.py` and
+      the single test alone passed clean) — looks like cross-test or
+      cross-session temp-directory pollution during a full-suite run with
+      other live sessions on the same machine, not a defect in the upload
+      code itself. Not filed as a recommendation: not reproducible enough
+      yet to point at a real cause. Worth re-checking if it recurs.
+  - path: "promedia/core/media/edl.py, promedia/core/media/render.py, tests/test_edl.py, tests/test_media.py"
+    task_id: "T-066"
+    agent: "claude-code-t066-0816b"
+    model: "claude-sonnet-5"
+    acquired_at: "2026-08-16T10:35:00+04:00"
+    expires_at: "2026-08-16T14:35:00+04:00"
+    released_at: "2026-08-16T11:05:00+04:00"
+    note: >
+      RELEASED. Audio mixing (DR-020): AudioTrack gained eq_low/eq_mid/
+      eq_high (dB gain, ffmpeg equalizer x3) and compressor (bool,
+      acompressor), EDL_VERSION 2->3, fully backward compatible
+      (AUDIO_MIX_NEUTRAL defaults in from_dict, mirroring T-064's
+      GRADE_NEUTRAL exactly). render.render_waveform() added (ffmpeg
+      showwavespic, no new dependency). All three ACs PASSED with real
+      ffmpeg-measured evidence (ffprobe astats before/after, real PNG
+      waveforms proven to differ between sources) — see tasks.yaml's T-066
+      record for the full evidence and numbers. 52/52 in test_edl.py (9 new),
+      25/25 in test_media.py (7 new, all real-ffmpeg). Full suite: exit code
+      0 excluding one PRE-EXISTING failure (test_locking.py's brand-kit
+      pin, last touched in ff96c4a before this session, nothing to do with
+      this task's owned_paths — confirmed by git log before excluding it).
+
+      CLAIMED BEFORE THE WORK, after waiting out T-064's lock on these exact
+      paths (R-018: T-064/T-066 shared owned_paths with no depends_on — see
+      that recommendation). Verified directly, not assumed, that T-066 was
+      still genuinely unimplemented at claim time despite ff96c4a's commit
+      message reading as though DR-020 (audio) landed alongside DR-019
+      (colour): AudioTrack in the committed edl.py had none of eq_low/
+      eq_mid/eq_high/compressor, and tasks.yaml's own T-066 record still
+      carried status: ready with all three ACs NOT_RUN — the commit message
+      over-stated what happened, but the state files were not stale, so
+      this was not a T-064-style bookkeeping gap, just a proceed-as-planned
+      implementation. Recorded as an open_item on T-066 rather than
+      corrected in git history.
+
+      tests/test_media.py ADDED TO THE CLAIM, not in T-066's original
+      owned_paths (edl.py, render.py, tests/test_edl.py only): AC-1 and AC-3
+      both require REAL ffmpeg execution and REAL ffprobe/astats measurement
+      ("not by reading the filter string" / "not a placeholder"), and this
+      repo's own convention (test_edl.py's module docstring) is that
+      structural/no-ffmpeg tests live in test_edl.py while real-tool,
+      real-encode tests live in test_media.py — T-064 followed the same
+      pattern with tests/test_transitions.py for its own real-render proof.
+      ffmpeg.py is deliberately NOT claimed: the astats measurement needed for
+      AC-1 is written as a test-only helper in test_media.py, not a new
+      production function, since nothing in promedia/ needs it outside this
+      proof. promedia/core/ops/** is deliberately NOT claimed: DR-020/T-066
+      flows through the EXISTING set-edl operation, no new operation is
+      registered (T-041/T-045 engine-then-room precedent; T-067 is the room).
+
+      FOUND, NOT FIXED (filed as R-021): AudioTrack's `duck` and `fade_out`
+      fields have existed since T-041 and DR-020's own text calls duck
+      "already implemented", but render.py has never actually applied
+      either — only fade_in is wired up. Orthogonal to this task's owned
+      EQ/compressor fields, so left as a recommendation rather than fixed
+      inside this claim.
+
+      independent_review left NOT_RUN by design (Constitution section 7 —
+      an implementer is not its own reviewer). A live sibling session
+      (claude-code-t064-followup, see the active entry above) correctly
+      deferred R-020 (the loudnorm/NaN bug in this same render.py) rather
+      than risk a collision with this task's active lock — checked at
+      release time, no overlap found.
+  - path: "promedia/core/media/edl.py, promedia/core/media/render.py, tests/test_edl.py, tests/test_transitions.py, .ai/state/tasks.yaml, .ai/state/recommendations.yaml"
     task_id: "T-064"
     agent: "claude-code-t064"
     model: "claude-sonnet-5"
     acquired_at: "2026-08-16T05:00:00+04:00"
-    expires_at: "2026-08-16T09:00:00+04:00"
+    expires_at: "2026-08-16T11:30:00+04:00"
+    released_at: "2026-08-16T10:10:00+04:00"
     note: >
-      CLAIMED BEFORE THE WORK, exactly T-064's own owned_paths (color
-      grading: EDL vocabulary + render engine, DR-019). No promedia/core/ops/**
-      or schema.sql path claimed — no new operation is needed, grade fields
-      flow through the existing set-edl operation exactly as effect/
-      transition/speed do today, per DR-019's decision.
-history:
+      RELEASED. Colour grading (DR-019): Clip gained a five-field grade
+      vocabulary (brightness/contrast/saturation -> eq, white_balance ->
+      colorbalance, temperature -> colortemperature), EDL_VERSION 1->2,
+      fully backward compatible (GRADE_NEUTRAL defaults in from_dict). All
+      three ACs PASSED with real-ffmpeg measured evidence, not read from the
+      filter string — see tasks.yaml's T-064 record for the full detail.
+      68/68 in the two owned test files; 118/118 regression across every
+      other EDL/Clip consumer (test_projects, test_editor_ui,
+      test_frontend_api, test_render_rights, test_render_storage); full
+      suite 1 failure, confirmed unrelated (T-068's own LOCKING_OPERATIONS
+      pin, not touching any path this task owns).
+
+      CLAIMED BEFORE THE WORK, exactly T-064's own owned_paths. No
+      promedia/core/ops/** or schema.sql path claimed — no new operation is
+      needed, grade fields flow through the existing set-edl operation
+      exactly as effect/transition/speed do today, per DR-019's decision.
+
+      EXTENDED to tasks.yaml and recommendations.yaml, and TTL renewed past
+      its original 09:00 expiry (this session was live and heartbeating the
+      whole time — `aef.py team` confirmed it, not stale — the expiry was
+      just short): the implementation and its tests were finished and
+      verified BEFORE the code, working tree state, and .ai/state/* were
+      independently committed as ff96c4a by the operator directly, ahead of
+      this session writing its own completion record. That left a real
+      bookkeeping gap of the T-019/T-037/T-041 shape — status still `ready`,
+      every AC still NOT_RUN in tasks.yaml, despite the committed code and
+      passing tests — closed by this claim's own write. `git diff` on the
+      four owned files against HEAD was empty at claim time (working tree
+      already matched the committed content byte-for-byte); no
+      re-implementation was done or needed, only the state-file record.
+
+      recommendations.yaml claimed for one new finding, filed as R-020:
+      ffmpeg's loudnorm filter emits NaN and crashes the AAC encoder on
+      fully-silent (anullsrc) audio, reproduced independently of grading (a
+      plain clip with normalise_audio at its True default fails the same
+      way) — pre-existing in render.py's untouched normalise_audio path
+      (T-041), not fixed here, worked around in this task's own real-render
+      tests via normalise_audio=False.
   - path: "promedia/core/schema.sql, promedia/core/ops/brandkits.py, promedia/core/ops/__init__.py, promedia/core/backup.py, tests/test_brandkits.py, tests/test_ops_forms.py, .ai/state/tasks.yaml, .ai/state/recommendations.yaml"
     task_id: "T-068"
     agent: "claude-code-t068-0816"

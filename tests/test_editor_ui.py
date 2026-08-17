@@ -76,6 +76,37 @@ def test_project_json_edl_route_still_works(env, media_file):
     assert current["edl"]["clips"][0]["asset_id"] == asset_id
 
 
+def test_renders_file_route_serves_a_real_video(env, real_media):
+    """T-049 independent review (2026-08-17): this module's own docstring
+    claims '/renders/{id}/file' test coverage was added alongside /projects
+    and /projects/{id}, but nothing in the repo ever actually called the
+    route — T-049's record says it was 'verified against the running server
+    by hand' at implementation time and left there. This closes that gap for
+    real, with a real ffmpeg render, not a placeholder."""
+    from promedia.core.media import ffmpeg
+    if not ffmpeg.available():
+        pytest.skip("ffmpeg not installed on this machine")
+
+    cfg, ctx, store = env
+    asset_id = ingest_as_agent(ctx, real_media)
+    attest(ctx, asset_id)
+    project_id = _create_project(agent_client(cfg, store, follow_redirects=False))
+    invoke(ctx, "set-edl", {
+        "project_id": project_id,
+        "edl": {"aspect": "landscape",
+                "clips": [{"asset_id": asset_id, "start": 0, "end": 1}]},
+    })
+    result = invoke(ctx, "render-project", {"project_id": project_id})
+    render_id = result["render_id"]
+
+    response = agent_client(cfg, store).get(f"/renders/{render_id}/file")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("video/")
+    body = response.content
+    assert len(body) > 0
+    assert b"ftyp" in body[:64]  # a real MP4 box header, not a stub
+
+
 # --- the cross-origin fix (finding, fixed while touching this file) ------------
 
 

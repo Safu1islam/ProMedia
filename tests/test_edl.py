@@ -23,11 +23,15 @@ from promedia.core.media.edl import (
     EDL,
     AudioTrack,
     Clip,
+    ImageOverlay,
     TextOverlay,
 )
 from promedia.errors import ValidationError
 
-SRC = {"a": Path("/media/a.mp4"), "b": Path("/media/b.mp4"), "music": Path("/media/m.mp3")}
+SRC = {
+    "a": Path("/media/a.mp4"), "b": Path("/media/b.mp4"), "music": Path("/media/m.mp3"),
+    "logo": Path("/media/logo.png"),
+}
 OUT = Path("/out/final.mp4")
 
 
@@ -261,6 +265,99 @@ def test_background_audio_is_mixed_without_extending_the_video():
     assert "afade=t=in" in plan.filter_graph
 
 
+# --- audio mixing (T-066, DR-020) --------------------------------------------
+
+
+def test_a_track_at_default_mix_settings_emits_no_mix_filter():
+    """AC-2 at the compilation level: neutral EQ + compressor off must not
+    add anything to the graph beyond what existed before T-066."""
+    plan = render.compile_render(
+        EDL(clips=[Clip(asset_id="a", end=2)],
+            audio=[AudioTrack(asset_id="music")]),
+        SRC, OUT,
+    )
+    assert "equalizer=" not in plan.filter_graph
+    assert "acompressor" not in plan.filter_graph
+
+
+def test_a_pre_t066_edl_dict_compiles_identically_to_an_explicit_neutral_track():
+    """The literal AC-2 statement: an EDL dict with none of the new AudioTrack
+    keys present (as every EDL written before this change looks) must produce
+    the exact same graph as one that names the neutral values explicitly."""
+    old_style = {
+        "version": 2, "aspect": "landscape",
+        "clips": [{"asset_id": "a", "end": 2}],
+        "audio": [{"asset_id": "music", "volume": 0.3}],
+    }
+    old_edl = EDL.from_dict(old_style)
+    new_edl = EDL(clips=[Clip(asset_id="a", end=2)],
+                  audio=[AudioTrack(asset_id="music", volume=0.3)])
+    old_plan = render.compile_render(old_edl, SRC, OUT)
+    new_plan = render.compile_render(new_edl, SRC, OUT)
+    assert old_plan.filter_graph == new_plan.filter_graph
+
+
+@pytest.mark.parametrize("field,value", [
+    ("eq_low", 6.0), ("eq_mid", -4.0), ("eq_high", 8.0),
+])
+def test_each_eq_band_emits_its_own_equalizer_filter(field, value):
+    plan = render.compile_render(
+        EDL(clips=[Clip(asset_id="a", end=2)],
+            audio=[AudioTrack(asset_id="music", **{field: value})]),
+        SRC, OUT,
+    )
+    freq = render.AUDIO_EQ_BANDS[field][0]
+    assert f"equalizer=f={freq}" in plan.filter_graph
+    assert f"g={value:g}" in plan.filter_graph
+    # Adjusting one band must not touch the other two.
+    other_freqs = [f for name, (f, _) in render.AUDIO_EQ_BANDS.items() if name != field]
+    for other in other_freqs:
+        # ':' after the frequency, so eq_low's '100' cannot false-positive
+        # match inside eq_mid's '1000'.
+        assert f"equalizer=f={other}:" not in plan.filter_graph
+
+
+def test_compressor_toggle_emits_acompressor():
+    off = render.compile_render(
+        EDL(clips=[Clip(asset_id="a", end=2)], audio=[AudioTrack(asset_id="music")]),
+        SRC, OUT,
+    )
+    on = render.compile_render(
+        EDL(clips=[Clip(asset_id="a", end=2)],
+            audio=[AudioTrack(asset_id="music", compressor=True)]),
+        SRC, OUT,
+    )
+    assert "acompressor" not in off.filter_graph
+    assert render.COMPRESSOR_FILTER in on.filter_graph
+
+
+def test_eq_is_applied_before_the_compressor():
+    """Shape the tone, then control the dynamics — not the other way round."""
+    plan = render.compile_render(
+        EDL(clips=[Clip(asset_id="a", end=2)],
+            audio=[AudioTrack(asset_id="music", eq_low=5.0, compressor=True)]),
+        SRC, OUT,
+    )
+    assert plan.filter_graph.index("equalizer=") < plan.filter_graph.index("acompressor")
+
+
+def test_out_of_range_eq_gain_is_refused():
+    with pytest.raises(ValidationError) as excinfo:
+        EDL(clips=[Clip(asset_id="a", end=2)],
+            audio=[AudioTrack(asset_id="music", eq_mid=30.0)]).validate()
+    text = str(excinfo.value)
+    assert "eq_mid" in text and "audio[0]" in text
+
+
+def test_mix_fields_round_trip_and_report_in_summary():
+    edl = EDL(clips=[Clip(asset_id="a", end=2)],
+              audio=[AudioTrack(asset_id="music", eq_high=3.0, compressor=True),
+                     AudioTrack(asset_id="vo")])
+    restored = EDL.from_dict(edl.to_dict())
+    assert restored.to_dict() == edl.to_dict()
+    assert edl.summary()["mixed_tracks"] == 1
+
+
 def test_loudness_normalisation_is_on_by_default_and_can_be_turned_off():
     assert "loudnorm" in render.compile_render(simple(), SRC, OUT).filter_graph
     off = render.compile_render(simple(normalise_audio=False), SRC, OUT)
@@ -357,3 +454,168 @@ def test_temperature_compiles_to_colortemperature():
     assert "colortemperature=temperature=3200" in plan.filter_graph
     assert "eq=" not in plan.filter_graph
     assert "colorbalance=" not in plan.filter_graph
+
+
+# --- image overlays / brand kits (T-068, DR-021) ------------------------------
+#
+# Structural only, same split as grading/audio-mixing above. The real-render,
+# decoded-pixel proof that a logo actually appears where asked lives in
+# tests/test_transitions.py (AC-2), next to the _mean_rgb helper it needs.
+
+
+def test_an_edl_written_before_image_overlays_existed_loads_with_none():
+    """AC-2's document-level half: a v3 EDL (T-068 bumped EDL_VERSION to 4)
+    with no `image_overlays` key at all — exactly what every EDL on disk
+    before this task looked like — must load with an empty list, not an
+    error, and must render identically (no overlay filter emitted)."""
+    raw = {
+        "version": 3,
+        "aspect": "landscape",
+        "clips": [{"asset_id": "a", "start": 0, "end": 5}],
+        "text": [], "audio": [], "subtitle_asset_id": None, "normalise_audio": True,
+    }
+    restored = EDL.from_dict(raw)
+    assert restored.image_overlays == []
+    plan = render.compile_render(restored, SRC, OUT)
+    assert "overlay=" not in plan.filter_graph
+
+
+def test_an_edl_with_no_image_overlays_emits_no_overlay_filter():
+    plan = render.compile_render(simple(), SRC, OUT)
+    assert "overlay=" not in plan.filter_graph
+    assert "[img" not in plan.filter_graph
+
+
+def test_asset_ids_includes_image_overlay_assets():
+    """Same reasoning as test_asset_ids_covers_video_audio_and_subtitles: this
+    is what makes projects.render()'s existing rights gate cover the logo for
+    free (T-068's plan note), with no edit needed to projects.py."""
+    edl = EDL(
+        clips=[Clip(asset_id="a")],
+        audio=[AudioTrack(asset_id="music")],
+        image_overlays=[ImageOverlay(asset_id="logo")],
+        subtitle_asset_id="subs",
+    )
+    assert edl.asset_ids() == ["a", "music", "logo", "subs"]
+
+
+def test_an_image_overlay_round_trips_through_json():
+    edl = EDL(
+        clips=[Clip(asset_id="a", end=2)],
+        image_overlays=[
+            ImageOverlay(asset_id="logo", position="top_left", size=0.2, margin=10,
+                         start=1.0, end=4.0)
+        ],
+    )
+    restored = EDL.from_dict(edl.to_dict())
+    overlay = restored.image_overlays[0]
+    assert overlay.asset_id == "logo"
+    assert overlay.position == "top_left"
+    assert overlay.size == 0.2
+    assert overlay.margin == 10
+    assert overlay.start == 1.0
+    assert overlay.end == 4.0
+
+
+@pytest.mark.parametrize(
+    "bad, message",
+    [
+        ({"asset_id": "logo", "position": "middle"}, "position"),
+        ({"asset_id": "logo", "end": 1, "start": 2}, "end"),
+        ({"asset_id": "logo", "size": 0.0}, "size"),
+        ({"asset_id": "logo", "size": 1.5}, "size"),
+        ({"asset_id": "logo", "margin": -1}, "margin"),
+    ],
+)
+def test_unrenderable_image_overlays_are_refused(bad, message):
+    edl = EDL(clips=[Clip(asset_id="a", end=2)], image_overlays=[ImageOverlay(**bad)])
+    with pytest.raises(ValidationError) as excinfo:
+        edl.validate()
+    assert message in str(excinfo.value)
+
+
+def test_an_image_overlay_adds_a_loop_1_input_and_a_scaled_overlay_filter():
+    plan = render.compile_render(
+        EDL(clips=[Clip(asset_id="a", end=2)],
+            image_overlays=[ImageOverlay(asset_id="logo", position="bottom_right",
+                                          size=0.1, margin=5)]),
+        SRC, OUT,
+    )
+    assert "-loop" in plan.args
+    assert plan.args[plan.args.index("-loop") + 1] == "1"
+    # scale target is a fraction of the EDL's own resolution (1920 here, the
+    # default 'landscape' aspect), rounded to an even pixel width.
+    assert "scale=192:-2,format=rgba" in plan.filter_graph
+    assert "overlay=x=main_w-w-5:y=main_h-h-5:shortest=1" in plan.filter_graph
+
+
+def test_image_overlay_position_expressions_use_the_named_corner():
+    cases = {
+        "top_left": "x=3:y=3",
+        "top_right": "x=main_w-w-3:y=3",
+        "bottom_left": "x=3:y=main_h-h-3",
+        "bottom_right": "x=main_w-w-3:y=main_h-h-3",
+        "center": "x=(main_w-w)/2:y=(main_h-h)/2",
+    }
+    for position, expected in cases.items():
+        plan = render.compile_render(
+            EDL(clips=[Clip(asset_id="a", end=2)],
+                image_overlays=[ImageOverlay(asset_id="logo", position=position, margin=3)]),
+            SRC, OUT,
+        )
+        assert f"overlay={expected}:shortest=1" in plan.filter_graph
+
+
+def test_an_image_overlay_with_a_time_window_gets_an_enable_expression():
+    plan = render.compile_render(
+        EDL(clips=[Clip(asset_id="a", end=5)],
+            image_overlays=[ImageOverlay(asset_id="logo", start=1.0, end=3.0)]),
+        SRC, OUT,
+    )
+    assert "enable='between(t,1,3)'" in plan.filter_graph
+
+
+def test_an_image_overlay_with_no_time_window_gets_no_enable_expression():
+    plan = render.compile_render(
+        EDL(clips=[Clip(asset_id="a", end=2)],
+            image_overlays=[ImageOverlay(asset_id="logo")]),
+        SRC, OUT,
+    )
+    assert "enable=" not in plan.filter_graph
+
+
+def test_multiple_image_overlays_chain_in_order():
+    plan = render.compile_render(
+        EDL(clips=[Clip(asset_id="a", end=2)],
+            image_overlays=[
+                ImageOverlay(asset_id="logo", position="top_left"),
+                ImageOverlay(asset_id="logo", position="bottom_right"),
+            ]),
+        SRC, OUT,
+    )
+    assert "[img0]" in plan.filter_graph
+    assert "[img1]" in plan.filter_graph
+    assert plan.filter_graph.index("[vimg0]") < plan.filter_graph.index("[vimg1]")
+    assert plan.args.count("-loop") == 2
+
+
+def test_image_overlays_come_after_text_overlays_in_the_chain():
+    """The logo sits visually on top of captions — always identifiable — not
+    the other way round."""
+    plan = render.compile_render(
+        EDL(clips=[Clip(asset_id="a", end=2)],
+            text=[TextOverlay(text="hello")],
+            image_overlays=[ImageOverlay(asset_id="logo")]),
+        SRC, OUT,
+        workspace=Path("/tmp/wk"),
+    )
+    assert plan.filter_graph.index("drawtext=") < plan.filter_graph.index("[img0]")
+
+
+def test_image_overlays_do_not_disturb_a_render_with_none():
+    """An EDL with no image overlays must compile byte-identically to the
+    pre-T-068 shape — pinning this the same way T-064/T-066 pinned their own
+    'neutral' no-op case."""
+    with_none = render.compile_render(simple(), SRC, OUT).filter_graph
+    also_with_none = render.compile_render(EDL(clips=simple().clips, image_overlays=[]), SRC, OUT).filter_graph
+    assert with_none == also_with_none

@@ -8,6 +8,31 @@
 # a crashed process cannot record its own death.
 
 sessions:
+  - id: "claude-code-t059review-0816"
+    agent: "reviewer-agent"
+    model: "claude-sonnet-5"
+    main_engineer: false
+    task: "T-059"
+    activity: "Independent review of T-059 (Social integration)"
+    status: "ended"
+    started_at: "2026-08-16T12:10:00+04:00"
+    heartbeat_at: "2026-08-16T12:55:00+04:00"
+    handoff:
+      ended_at: "2026-08-16T12:55:00+04:00"
+      outcome: "completed"
+      changed: "Independent review of T-059 (Constitution section 7 — the implementing session may not be its own sole reviewer). Verdict: PASSED with one minor, non-blocking finding. Re-ran the targeted test suites myself (34 passed, not re-stated from the record) and the frontend build myself (clean); read SocialView.vue and the PanelPlaceholderView.vue diff directly. Live-verified AC-1 on a FRESH isolated scratch database seeded through the real CLI/ operation layer — not the implementer's own scratch data, which was correctly not left behind for reuse. Confirmed live: real account tone mapping, real Queue Account/Scheduled columns, real Publications Platform column and SIMULATED sentinel/pill, two genuinely distinct honest-gap cards on Composer/Insights with no fabricated numbers, all /api/op/* calls 200, and the ARIA keyboard tab model genuinely moving focus+selection together (dispatched a real KeyboardEvent, not just read the source). F-009/F-010 checked against F-004's precedent shape — correctly classified.\n"
+      remaining: "One minor, non-blocking finding: the record's own evidence claims \"20 passed\" for tests/test_frontend_api.py; this review's independent count is 21. Does not change the PASSED verdict (still fully green either way) but was not reproducible as originally stated — most likely explanation is concurrent-session drift on a heavily-touched file, not confirmed. Full findings are in T-059's own independent_review block in tasks.yaml, not duplicated here.\n"
+      risks: "This review's own browser-automation click/key tools initially did not register clicks on SocialView's tab buttons despite landing on the correct element — diagnosed as an automation-harness quirk (confirmed via direct DOM .click()/KeyboardEvent dispatch, which worked instantly and correctly every time), not a defect in T-059's code. Recorded in the review so it isn't mistaken for a regression by whoever reads it next. Did not independently re-run the full 810-test suite this pass — disclosed as a scope limit, not silently assumed clean.\n"
+      next: "None outstanding for T-059 itself. R-018/R-019 (T-064/T-066/T-068 path collisions) remain open and unrelated to this review."
+      evidence:
+        - "python -m pytest tests/test_frontend_api.py tests/test_accounts.py tests/test_posts.py -q: 34 passed, 0 failed (independently re-run)"
+        - "npm run build (promedia/web/frontend): vue-tsc -b clean, vite build succeeded"
+        - "Live browser verification, isolated scratch server (PROMEDIA_DATA_DIR/PROMEDIA_CONFIG/PROMEDIA_CREDENTIAL_STORE pinned to a scratchpad, port 8770) — not the operator's real database"
+        - "aef.py validate: 67/67 plan leaves accounted for"
+      references:
+        - "T-059"
+        - "F-009"
+        - "F-010"
   - id: "me-0413"
     agent: "architect"
     vendor: "anthropic"
@@ -349,9 +374,13 @@ sessions:
   - id: "claude-code-t064"
     agent: "implementer"
     main_engineer: false
-    status: "idle"
+    status: "ended"
     started_at: "2026-08-16T01:13:44+04:00"
-    heartbeat_at: "2026-08-16T01:13:44+04:00"
+    heartbeat_at: "2026-08-16T10:26:10+04:00"
+    handoff:
+      ended_at: "2026-08-16T10:26:10+04:00"
+      outcome: "completed"
+      next: "T-064 complete: color grading (DR-019), all 3 ACs PASSED with real-ffmpeg measured evidence. Bookkeeping reconciled after the operator's direct commit (ff96c4a) landed the code ahead of this session's own tasks.yaml write -- same class of gap as T-019/T-037/T-041. Filed R-020 (loudnorm/silent-audio NaN crash, pre-existing, unrelated to grading). T-065 (Color room UI) is now unblocked. Next candidates: T-065, or an independent review of T-064 (Constitution s7, still NOT_RUN), or T-066 (audio mixing, DR-020) which remains genuinely unimplemented despite the commit message mentioning it."
   - id: "claude-code-t070-0816"
     agent: "frontend-agent"
     vendor: "anthropic"
@@ -378,9 +407,13 @@ sessions:
   - id: "claude-code-t066-0816"
     agent: "implementer"
     main_engineer: false
-    status: "idle"
+    status: "ended"
     started_at: "2026-08-16T01:14:22+04:00"
-    heartbeat_at: "2026-08-16T01:14:22+04:00"
+    heartbeat_at: "2026-08-16T10:29:51+04:00"
+    handoff:
+      ended_at: "2026-08-16T10:29:51+04:00"
+      outcome: "completed"
+      next: "Waited on T-064's lock (edl.py/render.py/test_edl.py), which released while this session was idle. Restarting as claude-code-t066-0816b to implement T-066 for real."
   - id: "claude-code-t068-0816"
     agent: "implementer"
     model: "claude-sonnet-5"
@@ -393,50 +426,10 @@ sessions:
     handoff:
       ended_at: "2026-08-16T05:45:00+04:00"
       outcome: "partial"
-      changed: >
-        T-068's CRUD half: promedia/core/schema.sql (brand_kits table),
-        promedia/core/backup.py (PERMANENT classification), new
-        promedia/core/ops/brandkits.py (create/list/update/delete-brand-kit
-        plus a read-by-id 'brand-kit' op), registered in ops/__init__.py.
-        New tests/test_brandkits.py (12 tests). tests/test_ops_forms.py
-        extended to seed a real brand kit and probe the five new
-        operations' params so its generic AC-1/AC-3 coverage stays real
-        rather than silently stopping at the new surface.
-      remaining: >
-        apply-brand-kit (AC-2/AC-3): a new ImageOverlay type in
-        promedia/core/media/edl.py, a compiler branch in
-        promedia/core/media/render.py (ffmpeg overlay filter, mirrors
-        TextOverlay/drawtext), and the operation itself in
-        ops/brandkits.py calling projects_layer.set_edl(). Blocked for
-        this whole session by claude-code-t064's live lock on exactly
-        those files (T-064, colour grading — same three paths). Next
-        session: check .ai/state/locks.yaml's ACTIVE list for real before
-        touching edl.py/render.py.
-      risks: >
-        R-018/R-019: T-064, T-066 and T-068 all own
-        edl.py/render.py/test_edl.py with no depends_on between them — a
-        genuine three-way collision the planning pass (T-060) left
-        unresolved. Whichever of the three lands first should hold the
-        lock for its whole session; the other two should keep doing what
-        this session did (implement everything else, leave the EDL-
-        vocabulary half honestly NOT_RUN) rather than editing a locked
-        file.
-      next: >
-        Once edl.py/render.py are free: add ImageOverlay (asset_id,
-        position, size, start/end — five named corner/centre positions,
-        e.g. top_left/top_right/bottom_left/bottom_right/center, unlike
-        TextOverlay's top/center/bottom, because a logo's natural
-        placement is a corner) to EDL, extend asset_ids() to include image
-        overlay asset ids (this is what makes projects.render()'s existing
-        rights gate and source resolution cover the logo for free, with NO
-        edit needed to projects.py), add the overlay/scale filter branch
-        to render.compile_render, then implement apply-brand-kit in
-        ops/brandkits.py (read current_version, append an ImageOverlay,
-        call projects_layer.set_edl with expected_version). Test with the
-        same measurement discipline test_transitions.py already
-        established: a solid-colour background clip and a solid-colour
-        logo image, decode a frame, and assert the overlay region's colour
-        differs from the background — not just that compilation succeeded.
+      changed: "T-068's CRUD half: promedia/core/schema.sql (brand_kits table), promedia/core/backup.py (PERMANENT classification), new promedia/core/ops/brandkits.py (create/list/update/delete-brand-kit plus a read-by-id 'brand-kit' op), registered in ops/__init__.py. New tests/test_brandkits.py (12 tests). tests/test_ops_forms.py extended to seed a real brand kit and probe the five new operations' params so its generic AC-1/AC-3 coverage stays real rather than silently stopping at the new surface.\n"
+      remaining: "apply-brand-kit (AC-2/AC-3): a new ImageOverlay type in promedia/core/media/edl.py, a compiler branch in promedia/core/media/render.py (ffmpeg overlay filter, mirrors TextOverlay/drawtext), and the operation itself in ops/brandkits.py calling projects_layer.set_edl(). Blocked for this whole session by claude-code-t064's live lock on exactly those files (T-064, colour grading — same three paths). Next session: check .ai/state/locks.yaml's ACTIVE list for real before touching edl.py/render.py.\n"
+      risks: "R-018/R-019: T-064, T-066 and T-068 all own edl.py/render.py/test_edl.py with no depends_on between them — a genuine three-way collision the planning pass (T-060) left unresolved. Whichever of the three lands first should hold the lock for its whole session; the other two should keep doing what this session did (implement everything else, leave the EDL- vocabulary half honestly NOT_RUN) rather than editing a locked file.\n"
+      next: "Once edl.py/render.py are free: add ImageOverlay (asset_id, position, size, start/end — five named corner/centre positions, e.g. top_left/top_right/bottom_left/bottom_right/center, unlike TextOverlay's top/center/bottom, because a logo's natural placement is a corner) to EDL, extend asset_ids() to include image overlay asset ids (this is what makes projects.render()'s existing rights gate and source resolution cover the logo for free, with NO edit needed to projects.py), add the overlay/scale filter branch to render.compile_render, then implement apply-brand-kit in ops/brandkits.py (read current_version, append an ImageOverlay, call projects_layer.set_edl with expected_version). Test with the same measurement discipline test_transitions.py already established: a solid-colour background clip and a solid-colour logo image, decode a frame, and assert the overlay region's colour differs from the background — not just that compilation succeeded.\n"
       evidence:
         - "tests/test_brandkits.py: 12 passed"
         - "tests/test_ops_forms.py + test_registry.py + test_parity.py + test_backup.py + test_restore.py + test_hardening.py + test_surface_signals.py + test_account_locking.py: all passed"
@@ -448,3 +441,167 @@ sessions:
         - "DR-021"
         - "R-018"
         - "R-019"
+  - id: "claude-code-t066-0816b"
+    agent: "implementer"
+    main_engineer: false
+    task: "T-066"
+    status: "ended"
+    started_at: "2026-08-16T10:29:51+04:00"
+    heartbeat_at: "2026-08-16T11:02:49+04:00"
+    handoff:
+      ended_at: "2026-08-16T11:02:49+04:00"
+      outcome: "completed"
+      next: "T-066 (audio mixing engine, DR-020) complete: AudioTrack gained eq_low/eq_mid/eq_high/compressor, EDL_VERSION 2->3, render.render_waveform() added. All 3 ACs PASSED with real ffmpeg-measured evidence (astats + real waveform PNGs), full test_edl.py/test_media.py green (52+25), full suite exit 0 excluding one pre-existing unrelated failure. T-067 (Audio room UI) is now unblocked on this dependency (still depends_on T-053 too). Filed R-021 (duck/fade_out never wired into render.py despite existing since T-041 -- found while implementing, not fixed, orthogonal to this task). independent_review left NOT_RUN by design -- needs a second reviewer before T-067 or anyone else builds further on this."
+  - id: "claude-code-t064-followup"
+    agent: "implementer"
+    main_engineer: false
+    status: "ended"
+    started_at: "2026-08-16T10:58:54+04:00"
+    heartbeat_at: "2026-08-16T11:04:15+04:00"
+    handoff:
+      ended_at: "2026-08-16T11:04:15+04:00"
+      outcome: "completed"
+      next: "Fixed test_locking.py's stale LOCKING_OPERATIONS/CREATING_OPERATIONS pins (T-068's update-brand-kit/delete-brand-kit/create-brand-kit were missing). Full suite now clean. R-020 (loudnorm/NaN) still open and deliberately untouched -- render.py is actively locked by claude-code-t066-0816b (T-066) right now. test_media_ui.py's staging-dir failure investigated but not reproducible in isolation -- likely full-suite cross-session flake, not filed."
+  - id: "claude-code-t068-finish-0816"
+    agent: "implementer"
+    model: "claude-sonnet-5"
+    main_engineer: false
+    task: "T-068"
+    activity: "Finishing T-068 (brand kits, DR-021): apply-brand-kit / AC-2 / AC-3 -- ImageOverlay in edl.py, a render.py compiler branch, and the operation itself"
+    status: "working"
+    started_at: "2026-08-16T11:15:00+04:00"
+    heartbeat_at: "2026-08-16T11:15:00+04:00"
+  - id: "claude-code-t071-0816"
+    agent: "implementer"
+    main_engineer: false
+    status: "ended"
+    started_at: "2026-08-16T23:48:23+04:00"
+    heartbeat_at: "2026-08-17T00:05:12+04:00"
+    handoff:
+      ended_at: "2026-08-17T00:05:12+04:00"
+      outcome: "completed"
+      next: "T-071 (Capability Directory screen, DR-023) complete: all 3 ACs PASSED with live-browser evidence. New CapabilityDirectoryView.vue at /generation, six api.ts wrappers, PanelPlaceholderView's dead generation entry removed. tests/test_frontend_api.py +2 (route pin + AC-3 grep discipline). Full suite 0 failures, npm build clean. independent_review NOT_RUN by design -- needs a separate session per Constitution 7. Worth a reviewer's eye: whether the run-capability 'Try it' button is in-scope (see tasks.yaml T-071 note)."
+  - id: "claude-code-t065-0816"
+    agent: "frontend-agent"
+    main_engineer: false
+    status: "ended"
+    started_at: "2026-08-16T23:51:56+04:00"
+    heartbeat_at: "2026-08-17T00:56:06+04:00"
+    task: "T-065"
+    activity: "Resuming T-065: the Color room panel (EditorView.vue) and grade_ranges/grade_neutral capability fields (projects.py) are already drafted, uncommitted, in the working tree. Verifying against real tests/live app before recording tasks.yaml evidence."
+    handoff:
+      ended_at: "2026-08-17T00:56:06+04:00"
+      outcome: "completed"
+      next: "T-065 (Color room, DR-019) is now fully complete: all 3 ACs PASSED, with real live-browser verification against an isolated scratch server closing the one disclosed gap left by the earlier half of this session (slider->save->set-edl->v2->v3, Render->render-project->PROGRAM monitor updated, Reset-to-neutral round-tripped). Full suite validated via junit-xml (923 passed, 0 failed) after a transient unrelated 2-failure stdout run (test_registry.py/send-offsite, owned by T-038, resolved by that concurrent session before this one finished). npm build clean, aef.py validate clean (67/67). independent_review still NOT_RUN by design (Constitution s7) -- needs a separate session; worth a second opinion on AC-2's scope decision (reusing the existing Render mechanism) and a dedicated screen-reader/keyboard-only pass neither half of this session performed. Nothing else outstanding for T-065."
+  - id: "claude-code-t067-0816"
+    agent: "implementer"
+    model: "claude-sonnet-5"
+    main_engineer: false
+    task: "T-067"
+    activity: "Verified T-067 live (isolated scratch server): waveform loads, EQ slider edit -> Save -> set-edl -> v2->v3, mute round-trip. Writing completion record."
+    status: "ended"
+    started_at: "2026-08-16T23:54:12+04:00"
+    heartbeat_at: "2026-08-17T00:16:07+04:00"
+    handoff:
+      ended_at: "2026-08-17T00:16:07+04:00"
+      outcome: "completed"
+      changed: "T-067 (Audio room, DR-020): per-track mixer UI added to EditorView.vue (volume fader, mute, duck toggle w/ R-021 caveat, 3-band EQ, compressor) wired to the existing set-edl save path, plus a new GET /waveform/{asset_id}/file route (app.py) serving T-066's render_waveform, cached to disk. AC-1/AC-2 PASSED with live-verified evidence; self-added AC-3 disclosing R-021 in the UI rather than shipping a silently-inert control."
+      remaining: "R-021 (duck/fade_out not applied at render) still open. T-065 (Color room) will very likely edit this same EditorView.vue next -- left a note for it in both the lock history and T-067's tasks.yaml open_items."
+      risks: "None known blocking. independent_review left NOT_RUN by design (Constitution s7)."
+      next: "Independent review of T-067, or T-065 (Color room) which is mechanically unblocked and has a live session already assigned."
+      evidence:
+        - "tests/test_frontend_api.py: 28 passed"
+        - "full suite run twice: exit 0, 908 collected, 0 failed"
+        - "npm run build: vue-tsc -b clean, vite build succeeded"
+        - "live browser verification against isolated scratch server/database"
+      references:
+        - "T-067"
+        - "DR-020"
+        - "R-021"
+  - id: "claude-code-t068-finish2-0816"
+    agent: "implementer"
+    main_engineer: false
+    task: "T-068"
+    status: "ended"
+    started_at: "2026-08-16T23:56:07+04:00"
+    heartbeat_at: "2026-08-17T00:12:17+04:00"
+    handoff:
+      ended_at: "2026-08-17T00:12:17+04:00"
+      outcome: "completed"
+      next: "T-068 complete: AC-2/AC-3 (apply-brand-kit + ImageOverlay) verified PASSED by executing inherited code from a dead predecessor session, not by trusting its notes. 113 passed (test_brandkits/test_edl/test_transitions), full suite 915 passed / 0 failed. Lock released. R-018/R-019 annotated (pending, not resolved -- the sibling-task file-collision planning gap is still real, T-064/T-066/T-068 landed safely by luck/reactive-checking not by a fix). T-069 (brand kit screen) is now mechanically unblocked -- not touched, outside this claim. independent_review still NOT_RUN (Constitution s7) with a third open question added for whoever reviews: this session verified by execution, which is not a substitute for an independent reviewer's lens on code someone else wrote."
+  - id: "claude-code-t068review-0817"
+    agent: "implementer"
+    main_engineer: false
+    status: "ended"
+    started_at: "2026-08-17T00:16:07+04:00"
+    heartbeat_at: "2026-08-17T00:20:12+04:00"
+    handoff:
+      ended_at: "2026-08-17T00:20:12+04:00"
+      outcome: "completed"
+      next: "T-068 independent review PASSED (no blocking finding). T-069 (Pro Media v2 brand kit screen) is now unblocked both mechanically and on review. R-018/R-019 left pending, unchanged. Nothing else claimed or touched."
+  - id: "claude-code-t065-resume-0817"
+    agent: "frontend-agent"
+    main_engineer: false
+    status: "ended"
+    started_at: "2026-08-17T00:23:33+04:00"
+    heartbeat_at: "2026-08-17T00:30:55+04:00"
+    task: "T-065"
+    activity: "Resuming T-065: verifying the already-drafted Color room implementation (EditorView.vue, capabilities grade_ranges/grade_neutral) against real tests before recording it"
+    handoff:
+      ended_at: "2026-08-17T00:30:55+04:00"
+      outcome: "completed"
+      next: "Superseded — continuing as claude-code-t065-0816, which already holds the real active lock on EditorView.vue/projects.py/test_projects.py/tasks.yaml for T-065. Splitting into two session ids for the same task was a bookkeeping mistake, corrected immediately rather than left to drift."
+  - id: "t038-session"
+    agent: "implementer"
+    main_engineer: false
+    status: "ended"
+    started_at: "2026-08-17T00:24:48+04:00"
+    heartbeat_at: "2026-08-17T01:27:16+04:00"
+    activity: "Applied both reviewers' fixes (manifest OSError handling + negative-path corruption test); confirming full suite"
+    handoff:
+      ended_at: "2026-08-17T01:27:16+04:00"
+      outcome: "completed"
+      next: "T-038 complete: send-offsite implemented (OD-9: external/removable drive), DR-024 recorded, two independent reviews both PASSED (no blocking), 40/40 tests in test_backup.py, full suite clean. T-039 (scheduling/staleness) already picked up by claude-code-t039-0817 in the same files. Nothing further needed on T-038 unless OD-9 is revisited toward a third-party destination (see DR-024 revisit_if)."
+  - id: "claude-code-t069-0817"
+    agent: "frontend-agent"
+    main_engineer: false
+    status: "ended"
+    started_at: "2026-08-17T00:28:34+04:00"
+    heartbeat_at: "2026-08-17T00:43:58+04:00"
+    handoff:
+      ended_at: "2026-08-17T00:43:58+04:00"
+      outcome: "completed"
+      next: "T-069 (brand kit screen) complete, both ACs PASSED with live browser evidence. independent_review still NOT_RUN (Constitution s7) -- next session can review, or pick up T-069's two disclosed scope cuts (inline logo replacement, size/margin/start/end overrides in the apply UI) as a follow-up if wanted. tests/test_registry.py's pin drift (send-offsite) was unrelated and already fixed by t038-session."
+  - id: "claude-code-t049review-0817"
+    agent: "reviewer-agent"
+    model: "claude-sonnet-5"
+    main_engineer: false
+    task: "T-049"
+    activity: "Independent review of T-049 (Editing UI - preview, EDL editing, render review)"
+    status: "ended"
+    started_at: "2026-08-17T00:28:51+04:00"
+    heartbeat_at: "2026-08-17T00:31:48+04:00"
+    handoff:
+      ended_at: "2026-08-17T00:31:48+04:00"
+      outcome: "completed"
+      next: "T-050/T-051/T-052 still each need their own independent review pass (Constitution section 7) - reconciliation (T-049CHECK) is not review. R-017 (T-051 concurrency gap) remains open and unrelated to this review."
+  - id: "claude-code-t039-0817"
+    agent: "implementer"
+    main_engineer: false
+    task: "T-039"
+    activity: "T-039 implemented (backup-tick/backup-status), tests green; full suite running; writing tasks.yaml record"
+    status: "ended"
+    started_at: "2026-08-17T00:54:31+04:00"
+    heartbeat_at: "2026-08-17T01:44:56+04:00"
+    handoff:
+      ended_at: "2026-08-17T01:44:56+04:00"
+      outcome: "completed"
+      next: "T-038 independently reviewed (PASSED, no blocking defect) and moved to complete. T-039 implemented (backup-tick + backup-status) and left at status in_review, independent_review NOT_RUN by design (Constitution s7) - needs a separate reviewing session before it moves to complete. Full detail in tasks.yaml's own T-038/T-039 records. Two real process incidents this session found and fixed, both disclosed in locks.yaml: (1) this session's own near-miss reverting a sabotage edit with git checkout -- instead of reconstructing from a prior Read, caught via SHA-256 hash mismatch and fully recovered before anything was lost; (2) a genuine YAML-breaking indentation bug in tasks.yaml introduced by t038-session's own concurrent SECOND REVIEW addendum (a folded-scalar continuation written at the wrong indent level), which broke aef.py validate/doctor for every reader until this session found and fixed it. Also disclosed: t038-session and this session both held overlapping, uncoordinated claims on promedia/core/ops/backup.py and tests/test_backup.py for about 15 minutes: this project's locking convention is advisory only (no OS/git-level enforcement), and the two sessions' edits happened to land in non-overlapping regions rather than because either session's own check caught the other -- worth the project raising a recommendation about strengthening the convention. Next: independent review of T-039 (backup-tick/backup-status); T-040 (restore drill) is next in the dependency chain and is now mechanically unblocked (T-037, T-038 both complete)."
+  - id: "claude-code-t039review-0817"
+    agent: "reviewer-agent"
+    main_engineer: false
+    task: "T-039"
+    activity: "Independent review of T-039 (backup scheduling/staleness)"
+    status: "working"
+    started_at: "2026-08-17T10:16:46+04:00"
+    heartbeat_at: "2026-08-17T10:16:46+04:00"

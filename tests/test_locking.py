@@ -70,6 +70,14 @@ LOCKING_OPERATIONS = {
     # the render, because a delete racing a concurrent edit or render of the
     # SAME project is the hazard C-19 exists to close.
     "delete-render",
+    # T-068. Both mutate an EXISTING brand_kit by id — the exact shape this
+    # set exists to catch (entity="brand_kit" + a brand_kit_id param).
+    "update-brand-kit",
+    "delete-brand-kit",
+    # T-068 AC-2/AC-3. entity="project" + a project_id param, same shape as
+    # set-edl right above (and for the same reason: it writes a new EDL
+    # version through set_edl itself).
+    "apply-brand-kit",
 }
 
 # Mutating operations that CREATE their entity. There is no id to lock because
@@ -80,7 +88,7 @@ LOCKING_OPERATIONS = {
 # T-023 a reconnect preserves the account id, so it writes an EXISTING row. It
 # now locks on its natural key instead — see NATURAL_KEY_OPERATIONS and
 # tests/test_account_locking.py.
-CREATING_OPERATIONS = {"ingest", "queue-post", "create-project"}
+CREATING_OPERATIONS = {"ingest", "queue-post", "create-project", "create-brand-kit"}
 
 # Mutating operations that write an entity that may already exist but were not
 # handed its id. They lock on a declared natural key (Operation.lock_by).

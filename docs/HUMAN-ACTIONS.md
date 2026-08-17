@@ -82,7 +82,86 @@ python -m promedia schedule-status --json
 
 ---
 
-## 2. Supply platform credentials (T-019, fabrication F-001)
+## 2. Register the backup tick with Windows Task Scheduler (T-039, DR-009)
+
+**Status: REQUIRED for scheduled backups. Not done by any agent.**
+
+DR-009's reasoning applies a second time here (T-018 registered the publish
+tick the same way): Windows Task Scheduler supervises the process and it
+survives reboot, so this reuses that mechanism rather than inventing a
+second scheduler.
+
+Without it, the permanent set is exported only when you run `backup-tick` or
+`export-permanent-set` by hand — which is exactly the silent failure mode
+T-039 exists to close: "the job stops and everything looks normal until a
+restore is needed."
+
+### What the task runs
+
+```
+python -m promedia backup-tick --json
+```
+
+Run it from the repository directory. It is idempotent — the local snapshot
+it writes is overwritten in place, never accumulated, so an overlapping or
+re-run tick leaves exactly one file.
+
+### What it does, and what it deliberately does not do
+
+Each run writes a fresh local snapshot (no drive needed — safe to automate)
+and checks the audit log for the last successful `send-offsite` transport,
+escalating (an audit entry, surfaced by `backup-status`) if either is stale
+past its configured threshold (`backup.local_export_overdue_hours`,
+`backup.offsite_overdue_days` in `promedia.toml`).
+
+**It does NOT send anything off-site by itself.** OD-9 chose a removable
+drive, and its mount point is not stable across sessions — an unattended
+tick has no destination it could safely assume, so off-site transport stays
+a deliberate, manual action:
+
+```
+python -m promedia send-offsite --destination <drive path> --json
+```
+
+Plug in the drive and run that yourself on whatever cadence you choose
+(`backup.offsite_overdue_days` defaults to 14 — see `promedia.toml` to
+change it). `backup-tick`'s job is to make it visible when that has not
+happened recently enough, not to force it.
+
+### The operator token
+
+Same as `publish-tick`: `backup-tick` requires operator authority, because it
+writes the entire audit log and publication history to disk, even at a fixed
+local path. Supply the token through the environment, on the scheduled task
+itself rather than system-wide:
+
+```
+PROMEDIA_OPERATOR_TOKEN=<your token>
+```
+
+> **Do not put the token in the task's Arguments field** — same reasoning as
+> `publish-tick`'s own warning above.
+
+### Suggested settings
+
+| Setting | Value | Why |
+|---|---|---|
+| Trigger | Daily | `backup.local_export_overdue_hours` defaults to 26h — headroom over a 24h cadence, the same relationship publish-tick's trigger keeps against its own tolerance |
+| Run whether user is logged on or not | **No** — run only when logged on | Same DPAPI credential binding as publish-tick (T-022) |
+| Run with highest privileges | No | It needs no privilege it does not already have |
+| Stop if runs longer than | 15 minutes | A wedged export should be killed, not stacked; export is normally seconds at this project's data scale |
+| If task is already running | Do not start a new instance | Belt and braces — the tick is idempotent either way |
+
+Check freshness without writing anything (no operator token needed — agent
+authority):
+
+```
+python -m promedia backup-status --json
+```
+
+---
+
+## 3. Supply platform credentials (T-019, fabrication F-001)
 
 **Status: DEFERRED by operator decision (OD-4). Publishing is simulated.**
 
@@ -97,7 +176,7 @@ from model memory and must not be guessed.
 
 ---
 
-## 3. Independent human-experience review (OD-5)
+## 4. Independent human-experience review (OD-5)
 
 **Status: OPEN. This is what closes the review shortfall in OD-6.**
 

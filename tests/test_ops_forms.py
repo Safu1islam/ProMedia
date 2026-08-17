@@ -422,6 +422,17 @@ def _valid_query_for(op, seeded):
         "primary_color": "#112233",
         "secondary_color": "#445566",
         "font_family": "Inter",
+        # T-068 AC-2/AC-3. apply-brand-kit's own params, would genuinely
+        # succeed against the seeded project/brand kit — same reasoning as
+        # every other entry here. "start"/"end" here are the ImageOverlay's
+        # visibility window, not a clip's — this dict is keyed by PARAM NAME
+        # across every operation, and no other operation declares either
+        # name, so there is no collision to worry about.
+        "position": "bottom_right",
+        "size": "0.15",
+        "margin": "24",
+        "start": "0",
+        "end": "20",
     })
     query = {}
     for p in op.params:

@@ -442,6 +442,14 @@ def test_capabilities_reports_what_cannot_be_generated(env):
     # T-045 landed — asserting the empty list directly instead, so a future
     # regression that reintroduces a substitution is caught here too.
     assert caps["known_substitutions"] == []
+    # T-065: the Color room reads its slider bounds/defaults from here rather
+    # than hardcoding GRADE_RANGES/GRADE_NEUTRAL a second time in the
+    # frontend — asserted against edl.py's own constants, not a copy of the
+    # numbers, so the two cannot drift without this test catching it.
+    from promedia.core.media.edl import GRADE_NEUTRAL, GRADE_RANGES
+
+    assert caps["grade_neutral"] == GRADE_NEUTRAL
+    assert {name: tuple(bounds) for name, bounds in caps["grade_ranges"].items()} == GRADE_RANGES
 
 
 def test_every_advertised_transition_is_either_implemented_or_reported(env):

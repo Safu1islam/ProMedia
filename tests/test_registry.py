@@ -105,6 +105,23 @@ def test_operator_only_operations_are_the_expected_set():
     tests/test_providers.py; reverted, spend.py SHA-256
     4ed1eebd63d06d48413f0e120a6b4e6c65c4864e0564a6232d9ba89c8a4e2e0d confirmed
     identical pre/post.
+
+    send-offsite joined the set in T-038 (OD-9), same reasoning as
+    export-permanent-set below: it moves the entire audit log and publication
+    history to a destination outside this machine, which is a power an agent
+    does not get by default just because reading any one entity is agent
+    authority.
+
+    backup-tick joined the set in T-039, same reasoning again: it calls
+    backup.build() and writes the whole permanent set to a file, even though
+    the destination this time is fixed rather than caller-chosen or off-site.
+    A fixed path does not make the collected content any less sensitive — it
+    is still the entire audit log and publication history landing on disk —
+    so it is operator authority for the same reason export-permanent-set is,
+    not agent authority just because a human did not have to type the path.
+    backup-status is deliberately NOT here: it reads the audit log's existing
+    send-offsite entries and a snapshot file's own metadata, the same shape
+    schedule-status already established as an agent-authority read.
     """
     ops = load_operations()
     operator_ops = {name for name, op in ops.items() if op.authority == "operator"}
@@ -117,26 +134,36 @@ def test_operator_only_operations_are_the_expected_set():
         "publish-tick",
         "export-permanent-set",
         "restore-permanent-set",
+        "send-offsite",
         "record-spend",
         "run-capability",
+        "backup-tick",
     }
 
 
-def test_the_backup_export_is_the_only_operator_only_read():
-    """Why one read-only operation needs the human, when no other does.
+def test_the_operator_only_reads_are_the_expected_set():
+    """Why these read-only operations need the human, when no other does.
 
-    export-permanent-set mutates nothing, so by the ordinary rule it would be
-    agent authority like every other read. It is not, because it collects the
-    ENTIRE audit log and publication history into one portable file at a path
-    the caller chooses. 'An agent may read the audit log' and 'an agent may
-    write the whole of it anywhere' are different powers, and the authority flag
-    is the only thing between them.
+    export-permanent-set and send-offsite both mutate nothing, so by the
+    ordinary rule either would be agent authority like every other read.
+    Neither is, because each moves the ENTIRE audit log and publication
+    history somewhere — export-permanent-set to a file path the caller
+    chooses, send-offsite on to an off-site destination. 'An agent may read
+    the audit log' and 'an agent may write the whole of it anywhere, or send
+    it off this machine' are different powers, and the authority flag is the
+    only thing between them.
 
-    Asserted as a rule rather than a name so that a second operator-only read
-    added later has to justify itself here.
+    backup-tick (T-039) is the third: it writes that same whole-audit-log
+    artefact to a fixed local path on a schedule. The path not being
+    caller-chosen does not narrow what left the audit log and landed on
+    disk, so it belongs in this set for the same reason as the other two,
+    not a lesser one.
+
+    Asserted as a rule rather than a name so that a further operator-only
+    read added later has to justify itself here.
     """
     ops = load_operations()
     operator_reads = {
         name for name, op in ops.items() if op.authority == "operator" and not op.mutates
     }
-    assert operator_reads == {"export-permanent-set"}
+    assert operator_reads == {"export-permanent-set", "send-offsite", "backup-tick"}

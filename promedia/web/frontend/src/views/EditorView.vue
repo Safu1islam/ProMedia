@@ -24,8 +24,47 @@ const capabilities = ref<any>(null);
 // round-trip per change, which a real client can afford and a form cannot.
 const clips = ref<any[]>([]);
 const selectedClipIndex = ref<number | null>(null);
+// Same "local until Save" rule as `clips` above, same reason — one EDL,
+// edited from whichever room is open, committed together by one Save
+// action (T-067, DR-020's own decision: audio is an EDL field extension,
+// not a second document with its own save flow).
+const audioTracks = ref<any[]>([]);
+// "Mute" has no field of its own on AudioTrack (DR-020 named volume/duck/
+// EQ/compressor, not a persisted mute flag) — implemented here as volume 0
+// with the pre-mute value remembered locally so un-muting restores it,
+// the same convention most mixers use for a control that is really just a
+// volume shortcut. Keyed by index; add/removeAudioTrack keep it in sync.
+const mutedVolumes = ref<Record<number, number>>({});
 const activeRoom = ref("Edit");
 const roomNote = ref<string | null>(null);
+// Which task actually owns each not-yet-built room, so the note is
+// accurate rather than pointing everything at the one umbrella task
+// (T-060) that planned all of them. Empty now that Color (T-065) has
+// landed; the rest have no task yet, per T-060's own planning record.
+const ROOM_TASK: Record<string, string> = {};
+// Colour grade vocabulary (T-064/T-065, DR-019). Bounds and neutral values
+// come from media-capabilities (grade_ranges/grade_neutral) rather than
+// being duplicated here, so a change to edl.py's GRADE_RANGES cannot drift
+// silently from what the slider allows — labels/step/precision are
+// presentation only and have no server-side counterpart to drift from.
+const GRADE_FIELDS: { name: "brightness" | "contrast" | "saturation" | "white_balance" | "temperature"; label: string; step: number; decimals: number }[] = [
+  { name: "brightness", label: "Brightness", step: 0.01, decimals: 2 },
+  { name: "contrast", label: "Contrast", step: 0.01, decimals: 2 },
+  { name: "saturation", label: "Saturation", step: 0.01, decimals: 2 },
+  { name: "white_balance", label: "White balance", step: 0.01, decimals: 2 },
+  { name: "temperature", label: "Temperature (K)", step: 50, decimals: 0 },
+];
+const AUDIO_EQ_BANDS: { field: "eq_low" | "eq_mid" | "eq_high"; label: string }[] = [
+  { field: "eq_low", label: "Low" },
+  { field: "eq_mid", label: "Mid" },
+  { field: "eq_high", label: "High" },
+];
+// Mirrors edl.py's AUDIO_EQ_GAIN_RANGE exactly (kept in sync by hand — the
+// same convention this file already uses for clip.speed's 0.1-10 range and
+// transition_duration, neither of which comes from media-capabilities
+// either). EDL.validate() is the real enforcement; this only keeps the
+// slider from inviting a value the server would refuse.
+const AUDIO_EQ_RANGE: [number, number] = [-24, 24];
 
 function assetName(assetId: string): string {
   return assets.value.find((a) => a.id === assetId)?.original_filename ?? assetId;
@@ -65,7 +104,14 @@ async function load() {
     renders.value = out.renders;
     assets.value = assetList.assets;
     capabilities.value = caps;
-    clips.value = proj.edl.clips.map((c: any) => ({ ...c }));
+    // The server's own Clip.to_dict() always emits all five grade keys
+    // (T-064), so this default only matters for a clip added locally via
+    // addClip() and not yet round-tripped through set-edl — same reason
+    // addClip() below spreads the same defaults in.
+    const gradeDefaults = caps.grade_neutral ?? {};
+    clips.value = proj.edl.clips.map((c: any) => ({ ...gradeDefaults, ...c }));
+    audioTracks.value = (proj.edl.audio ?? []).map((a: any) => ({ ...a }));
+    mutedVolumes.value = {};
     selectedClipIndex.value = clips.value.length ? 0 : null;
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : "could not reach the server";
@@ -75,14 +121,18 @@ async function load() {
 }
 onMounted(load);
 
-const dirty = computed(() => JSON.stringify(clips.value) !== JSON.stringify(project.value?.edl.clips ?? []));
+const dirty = computed(
+  () =>
+    JSON.stringify(clips.value) !== JSON.stringify(project.value?.edl.clips ?? []) ||
+    JSON.stringify(audioTracks.value) !== JSON.stringify(project.value?.edl.audio ?? []),
+);
 
-// Unsaved clip edits are held only in this component's local `clips` ref
-// (see the comment above it) until "Save as new version" runs — so leaving
-// the room, whether by an in-app navigation or closing/reloading the tab,
-// silently discarded them. Neither is hypothetical: the timeline, the room
-// tabs and the top nav all route away from here without passing through
-// saveVersion.
+// Unsaved edits (clips OR audio tracks) are held only in this component's
+// local `clips`/`audioTracks` refs until "Save as new version" runs — so
+// leaving the room, whether by an in-app navigation or closing/reloading
+// the tab, silently discarded them. Neither is hypothetical: the timeline,
+// the room tabs and the top nav all route away from here without passing
+// through saveVersion.
 function onBeforeUnload(e: BeforeUnloadEvent) {
   if (!dirty.value) return;
   e.preventDefault();
@@ -90,7 +140,7 @@ function onBeforeUnload(e: BeforeUnloadEvent) {
 }
 onBeforeRouteLeave(() => {
   if (!dirty.value) return true;
-  return window.confirm("You have unsaved clip changes. Leave without saving as a new version?");
+  return window.confirm("You have unsaved changes. Leave without saving as a new version?");
 });
 onMounted(() => window.addEventListener("beforeunload", onBeforeUnload));
 onUnmounted(() => window.removeEventListener("beforeunload", onBeforeUnload));
@@ -119,8 +169,54 @@ function addClip() {
     transition_duration: 0.5,
     volume: 1,
     mute: false,
+    ...(capabilities.value?.grade_neutral ?? {}),
   });
   selectedClipIndex.value = clips.value.length - 1;
+}
+
+// AudioTrack defaults mirror the dataclass's own field defaults (edl.py) —
+// same convention addClip() above already follows for Clip.
+function addAudioTrack() {
+  if (!assets.value.length) return;
+  audioTracks.value.push({
+    asset_id: assets.value[0].id,
+    start: 0,
+    volume: 0.35,
+    loop: false,
+    fade_in: 0,
+    fade_out: 0,
+    duck: true,
+    eq_low: 0,
+    eq_mid: 0,
+    eq_high: 0,
+    compressor: false,
+  });
+}
+function removeAudioTrack(i: number) {
+  audioTracks.value.splice(i, 1);
+  const next: Record<number, number> = {};
+  for (const [k, v] of Object.entries(mutedVolumes.value)) {
+    const idx = Number(k);
+    if (idx < i) next[idx] = v;
+    else if (idx > i) next[idx - 1] = v;
+    // idx === i: the muted track itself was removed, nothing to carry over.
+  }
+  mutedVolumes.value = next;
+}
+function isMuted(i: number): boolean {
+  return mutedVolumes.value[i] !== undefined;
+}
+function toggleMute(i: number) {
+  const t = audioTracks.value[i];
+  if (isMuted(i)) {
+    t.volume = mutedVolumes.value[i];
+    const next = { ...mutedVolumes.value };
+    delete next[i];
+    mutedVolumes.value = next;
+  } else {
+    mutedVolumes.value = { ...mutedVolumes.value, [i]: t.volume };
+    t.volume = 0;
+  }
 }
 
 async function saveVersion() {
@@ -131,7 +227,7 @@ async function saveVersion() {
   saving.value = true;
   error.value = null;
   try {
-    const edl = { ...project.value.edl, clips: clips.value };
+    const edl = { ...project.value.edl, clips: clips.value, audio: audioTracks.value };
     // expected_version pins this write to the version the local `clips`
     // copy was actually loaded from (R-010): without it, an agent and this
     // tab editing the same project's EDL in the minutes this room can stay
@@ -171,14 +267,34 @@ const latestRender = computed(() => renders.value[0] ?? null);
 const sourceAssetId = computed(() =>
   selectedClipIndex.value !== null ? clips.value[selectedClipIndex.value]?.asset_id : null,
 );
+const selectedClip = computed(() =>
+  selectedClipIndex.value !== null ? clips.value[selectedClipIndex.value] ?? null : null,
+);
+
+function gradeRange(name: string): [number, number] {
+  return (capabilities.value?.grade_ranges?.[name] as [number, number] | undefined) ?? [0, 1];
+}
+// A clip counts as "graded" the moment any one field differs from neutral —
+// drives the timeline-style badge (AC-3: neutral must show nothing, not a
+// false positive) rather than a hand-maintained field list that could drift
+// from GRADE_NEUTRAL's own keys.
+function isGraded(c: any): boolean {
+  const neutral = capabilities.value?.grade_neutral;
+  if (!neutral) return false;
+  return Object.keys(neutral).some((k) => c[k] !== neutral[k]);
+}
+function resetGrade() {
+  if (!selectedClip.value || !capabilities.value?.grade_neutral) return;
+  Object.assign(selectedClip.value, capabilities.value.grade_neutral);
+}
 
 function pickRoom(name: string) {
-  if (name === "Edit") {
+  if (name === "Edit" || name === "Audio" || name === "Color") {
     activeRoom.value = name;
     roomNote.value = null;
     return;
   }
-  roomNote.value = `${name} room is not built yet — see task T-060.`;
+  roomNote.value = `${name} room is not built yet — see task ${ROOM_TASK[name] ?? "T-060"}.`;
 }
 </script>
 
@@ -203,6 +319,19 @@ function pickRoom(name: string) {
       <div v-if="roomNote" class="room-note">{{ roomNote }}</div>
 
       <div class="workarea">
+        <div class="render-row">
+          <select v-model="quality">
+            <option value="">default quality</option>
+            <option v-for="q in capabilities?.qualities ?? []" :key="q" :value="q">{{ q }}</option>
+          </select>
+          <button class="btn primary" :disabled="rendering || !clips.length" @click="render">
+            {{ rendering ? "Rendering…" : "Render" }}
+          </button>
+          <span v-if="!clips.length" class="muted">Add at least one clip below.</span>
+          <span v-if="dirty" class="muted warn">Unsaved changes — save a version before rendering to include them.</span>
+        </div>
+
+        <template v-if="activeRoom === 'Edit'">
         <div class="monitors">
           <div class="monitor">
             <div class="monitor-label mono">SOURCE</div>
@@ -234,18 +363,6 @@ function pickRoom(name: string) {
               </ul>
             </div>
           </div>
-        </div>
-
-        <div class="render-row">
-          <select v-model="quality">
-            <option value="">default quality</option>
-            <option v-for="q in capabilities?.qualities ?? []" :key="q" :value="q">{{ q }}</option>
-          </select>
-          <button class="btn primary" :disabled="rendering || !clips.length" @click="render">
-            {{ rendering ? "Rendering…" : "Render" }}
-          </button>
-          <span v-if="!clips.length" class="muted">Add at least one clip below.</span>
-          <span v-if="dirty" class="muted warn">Unsaved clip changes — save a version before rendering to include them.</span>
         </div>
 
         <div class="timeline">
@@ -323,6 +440,163 @@ function pickRoom(name: string) {
           </div>
           <div v-if="error" class="banner bad">{{ error }}</div>
         </div>
+        </template>
+
+        <template v-if="activeRoom === 'Audio'">
+        <div class="audio-room">
+          <div class="clip-editor-head">
+            <h2>Audio tracks</h2>
+            <button class="btn" :disabled="!assets.length" @click="addAudioTrack">+ Add track</button>
+          </div>
+          <p v-if="!assets.length" class="muted">
+            No media ingested yet. <router-link to="/media">Add some</router-link>.
+          </p>
+          <p v-else-if="!audioTracks.length" class="muted">
+            No audio tracks in this edit yet. A clip's own dialogue is mixed via
+            its Volume/Mute fields in the Edit room — tracks here are separate
+            layers (music, narration, sound effects) mixed alongside it.
+          </p>
+
+          <div v-for="(t, i) in audioTracks" :key="i" class="track-row">
+            <div class="track-row-top">
+              <span class="mono muted track-index">Track {{ i + 1 }}</span>
+              <select v-model="t.asset_id">
+                <option v-for="a in assets" :key="a.id" :value="a.id">
+                  {{ a.original_filename }}{{ a.state !== "stored" ? ` (${a.state})` : "" }}
+                </option>
+              </select>
+              <button class="danger" title="Remove track" @click="removeAudioTrack(i)">Remove</button>
+            </div>
+
+            <div class="track-wave">
+              <img
+                v-if="assetState(t.asset_id) === 'stored'"
+                :src="`/waveform/${t.asset_id}/file`"
+                :alt="`Waveform of ${assetName(t.asset_id)}`"
+                class="wave-img"
+              />
+              <div v-else class="wave-empty muted">media not available</div>
+            </div>
+            <audio
+              v-if="assetState(t.asset_id) === 'stored'"
+              :src="`/media/${t.asset_id}/file`"
+              controls
+              preload="metadata"
+              class="track-audio"
+            />
+
+            <div class="track-controls">
+              <label class="fader">
+                Volume
+                <input type="range" min="0" max="2" step="0.01" :disabled="isMuted(i)" v-model.number="t.volume" />
+                <span class="mono">{{ t.volume.toFixed(2) }}</span>
+              </label>
+              <label>Starts at (s)<input type="number" step="any" min="0" v-model.number="t.start" /></label>
+              <label class="checkbox"><input type="checkbox" :checked="isMuted(i)" @change="toggleMute(i)" /> Mute</label>
+              <label class="checkbox">
+                <input type="checkbox" v-model="t.duck" /> Duck under dialogue
+                <span class="mono muted caveat" title="R-021: this field is saved on the EDL but render.py does not apply it yet.">not yet applied at render — R-021</span>
+              </label>
+              <label class="checkbox"><input type="checkbox" v-model="t.compressor" /> Compressor</label>
+            </div>
+
+            <div class="track-eq">
+              <label v-for="band in AUDIO_EQ_BANDS" :key="band.field">
+                {{ band.label }}
+                <input
+                  type="range" :min="AUDIO_EQ_RANGE[0]" :max="AUDIO_EQ_RANGE[1]" step="0.5"
+                  v-model.number="t[band.field]"
+                />
+                <span class="mono">{{ t[band.field].toFixed(1) }} dB</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="save-row">
+            <input v-model="note" type="text" placeholder="What changed (optional)" />
+            <button class="btn primary" :disabled="saving || !clips.length" @click="saveVersion">
+              {{ saving ? "Saving…" : "Save as new version" }}
+            </button>
+          </div>
+          <div v-if="error" class="banner bad">{{ error }}</div>
+        </div>
+        </template>
+
+        <template v-if="activeRoom === 'Color'">
+        <div class="monitors">
+          <div class="monitor">
+            <div class="monitor-label mono">SOURCE</div>
+            <div class="monitor-frame">
+              <video
+                v-if="sourceAssetId && assetState(sourceAssetId) === 'stored'"
+                :src="`/media/${sourceAssetId}/file`"
+                controls
+                preload="metadata"
+              />
+              <div v-else class="monitor-empty muted">
+                {{ sourceAssetId ? "media not available" : "select a clip" }}
+              </div>
+            </div>
+          </div>
+          <div class="monitor program">
+            <div class="monitor-label mono program-label">PROGRAM · proxy preview</div>
+            <div class="monitor-frame">
+              <video v-if="latestRender?.output_exists" :src="`/renders/${latestRender.id}/file`" controls preload="metadata" />
+              <div v-else class="monitor-empty muted">nothing rendered yet</div>
+            </div>
+          </div>
+        </div>
+        <p v-if="clips.length" class="muted color-hint">
+          The program monitor is a real render of the current version — it only updates when you Render,
+          same as the Edit room (no live scrubbing on this hardware).
+        </p>
+
+        <div class="color-room">
+          <div class="clip-editor-head">
+            <h2>Color grade</h2>
+          </div>
+          <p v-if="!clips.length" class="muted">
+            No clips yet — add one in the Edit room first.
+          </p>
+          <template v-else>
+            <div class="color-clip-strip">
+              <button
+                v-for="(c, i) in clips"
+                :key="i"
+                class="tl-clip color-chip"
+                :class="{ selected: selectedClipIndex === i }"
+                @click="selectedClipIndex = i"
+              >
+                <span class="tl-clip-name">{{ assetName(c.asset_id) }}</span>
+                <span v-if="isGraded(c)" class="tl-badge">graded</span>
+              </button>
+            </div>
+
+            <div v-if="selectedClip" class="grade-fields">
+              <label v-for="field in GRADE_FIELDS" :key="field.name" class="grade-field">
+                <span>{{ field.label }}</span>
+                <input
+                  type="range"
+                  :min="gradeRange(field.name)[0]"
+                  :max="gradeRange(field.name)[1]"
+                  :step="field.step"
+                  v-model.number="selectedClip[field.name]"
+                />
+                <span class="mono grade-value">{{ selectedClip[field.name].toFixed(field.decimals) }}</span>
+              </label>
+              <button class="btn" :disabled="!isGraded(selectedClip)" @click="resetGrade">Reset to neutral</button>
+            </div>
+          </template>
+
+          <div class="save-row">
+            <input v-model="note" type="text" placeholder="What changed (optional)" />
+            <button class="btn primary" :disabled="saving || !clips.length" @click="saveVersion">
+              {{ saving ? "Saving…" : "Save as new version" }}
+            </button>
+          </div>
+          <div v-if="error" class="banner bad">{{ error }}</div>
+        </div>
+        </template>
 
         <details class="json-escape">
           <summary>The edit, as JSON (escape hatch — the fastest way to read exactly what an agent changed)</summary>
@@ -618,6 +892,138 @@ button.danger {
   align-items: center;
   gap: 5px;
   align-self: flex-end;
+}
+
+.audio-room {
+  background: var(--bg-panel);
+  border: 1px solid var(--line-3);
+  border-radius: var(--radius-xl);
+  padding: 14px 16px;
+}
+
+.color-hint {
+  margin: -8px 0 0;
+  font-size: 11px;
+}
+.color-room {
+  background: var(--bg-panel);
+  border: 1px solid var(--line-3);
+  border-radius: var(--radius-xl);
+  padding: 14px 16px;
+}
+.color-clip-strip {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  min-height: 46px;
+  background: #0b0d10;
+  border: 1px solid var(--line-3);
+  border-radius: 6px;
+  padding: 4px;
+  margin-bottom: 14px;
+}
+.color-chip {
+  flex: none;
+  min-width: 90px;
+}
+.grade-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+}
+.grade-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font: 400 10.5px var(--font-ui);
+  color: var(--fg-muted-2);
+  min-width: 11rem;
+}
+.grade-value {
+  align-self: flex-end;
+}
+.track-row {
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line-2);
+  margin-bottom: 10px;
+}
+.track-row-top {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.track-row-top select {
+  flex: 1;
+}
+.track-index {
+  font-size: 10px;
+  white-space: nowrap;
+}
+.track-wave {
+  height: 84px;
+  background: #0b0d10;
+  border: 1px solid var(--line-3);
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+.wave-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.wave-empty {
+  font-size: 12px;
+}
+.track-audio {
+  width: 100%;
+  height: 32px;
+  margin-bottom: 10px;
+}
+.track-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.track-controls label,
+.track-eq label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font: 400 10.5px var(--font-ui);
+  color: var(--fg-muted-2);
+}
+.track-controls label.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 5px;
+}
+.track-controls .fader {
+  flex-direction: row;
+  align-items: center;
+  min-width: 12rem;
+}
+.caveat {
+  font-size: 9.5px;
+  color: var(--amber);
+}
+.track-eq {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.track-eq label {
+  flex-direction: row;
+  align-items: center;
+  min-width: 10rem;
 }
 
 .save-row {

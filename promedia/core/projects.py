@@ -1044,7 +1044,7 @@ def capabilities(ctx: Context) -> dict[str, Any]:
     Exists because "why did that fail" is otherwise answered by trying it. An
     absent toolchain is reported as absent rather than as a media error.
     """
-    from .media.edl import ASPECT_PRESETS, CLIP_EFFECTS, TRANSITIONS
+    from .media.edl import ASPECT_PRESETS, CLIP_EFFECTS, GRADE_NEUTRAL, GRADE_RANGES, TRANSITIONS
     from .media.render import QUALITY_PRESETS
 
     available = ffmpeg.available()
@@ -1057,6 +1057,13 @@ def capabilities(ctx: Context) -> dict[str, Any]:
         "effects": list(CLIP_EFFECTS),
         "transitions": list(TRANSITIONS),
         "qualities": sorted(QUALITY_PRESETS),
+        # Colour grade vocabulary (T-064/T-065, DR-019). Served the same way
+        # as effects/transitions/qualities above, for the same reason: a
+        # slider UI reads its own min/max/neutral from here rather than
+        # duplicating GRADE_RANGES/GRADE_NEUTRAL, which would drift the first
+        # time either changes in edl.py.
+        "grade_ranges": {name: list(bounds) for name, bounds in GRADE_RANGES.items()},
+        "grade_neutral": dict(GRADE_NEUTRAL),
         # Derived, so this cannot claim a transition works after the compiler
         # stops implementing it — or, as happened, keep claiming only one is
         # broken when five are.

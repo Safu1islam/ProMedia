@@ -33,12 +33,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import("./views/PanelPlaceholderView.vue"),
     props: { screenId: "templates" },
   },
-  {
-    path: "/brand",
-    name: "brand",
-    component: () => import("./views/PanelPlaceholderView.vue"),
-    props: { screenId: "brand" },
-  },
+  { path: "/brand", name: "brand", component: () => import("./views/BrandKitView.vue") },
   {
     path: "/agent",
     name: "agent",
@@ -47,8 +42,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: "/generation",
     name: "generation",
-    component: () => import("./views/PanelPlaceholderView.vue"),
-    props: { screenId: "generation" },
+    component: () => import("./views/CapabilityDirectoryView.vue"),
   },
   {
     path: "/export",

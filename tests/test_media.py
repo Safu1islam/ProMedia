@@ -11,6 +11,7 @@ depends on no checked-in binary and no particular file being present.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,41 @@ from promedia.core.media.edl import EDL, AudioTrack, Clip, TextOverlay
 needs_ffmpeg = pytest.mark.skipif(
     not ffmpeg.available(), reason="ffmpeg/ffprobe not installed"
 )
+
+
+def measure_astats(path: Path) -> dict[str, float]:
+    """Real loudness/level measurement of a file's audio, via ffmpeg's astats
+    filter (T-066 AC-1) — proves a mix setting changed the actual output
+    rather than trusting the filter string that produced it.
+
+    Test-only helper, not a production function: nothing under promedia/
+    needs an astats reading outside this proof, so it lives here rather than
+    in ffmpeg.py.
+
+    astats prints one block per channel and then an 'Overall' block last,
+    all under the same key names — parsing every 'key: value' line in order
+    and letting later ones overwrite earlier ones is what leaves the
+    OVERALL numbers in the returned dict.
+    """
+    binary = ffmpeg.require("ffmpeg")
+    result = subprocess.run(
+        [binary, "-hide_banner", "-nostdin", "-i", str(path), "-af", "astats", "-f", "null", "-"],
+        capture_output=True, text=True, timeout=60, check=False,
+    )
+    assert result.returncode == 0, (result.stderr or "")[-800:]
+    stats: dict[str, float] = {}
+    for line in (result.stderr or "").splitlines():
+        _, sep, rest = line.partition("] ")
+        if not sep:
+            continue
+        key, sep2, value = rest.rpartition(": ")
+        if not sep2:
+            continue
+        try:
+            stats[key.strip()] = float(value.strip())
+        except ValueError:
+            continue
+    return stats
 
 
 @pytest.fixture(scope="module")
@@ -225,3 +261,149 @@ def test_a_runaway_render_is_stopped(tmp_path):
                     "-c:v", "libx264", "-preset", "veryslow", str(tmp_path / "slow.mp4")],
                    timeout_seconds=2)
     assert "budget" in str(excinfo.value)
+
+
+# --- audio mixing (T-066, DR-020) --------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def noise_clip(tmp_path_factory) -> Path:
+    """Video plus broadband white noise audio. Noise, not a pure tone, is
+    what makes an EQ band boost measurable across the whole spectrum rather
+    than only near one frequency."""
+    out = tmp_path_factory.mktemp("media") / "noise.mp4"
+    ffmpeg.run([
+        "-f", "lavfi", "-i", "testsrc=size=640x480:rate=25:duration=3",
+        "-f", "lavfi", "-i", "anoisesrc=color=white:duration=3:sample_rate=44100",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-shortest", str(out),
+    ], timeout_seconds=120)
+    return out
+
+
+@pytest.fixture(scope="module")
+def dynamic_clip(tmp_path_factory) -> Path:
+    """Video plus an amplitude-modulated (tremolo) tone: audio that swings
+    between quiet and loud, so a compressor has real dynamics to act on. A
+    steady tone or steady noise barely moves under a compressor because
+    there is no level swing for it to level out."""
+    out = tmp_path_factory.mktemp("media") / "dynamic.mp4"
+    ffmpeg.run([
+        "-f", "lavfi", "-i", "testsrc=size=640x480:rate=25:duration=4",
+        "-f", "lavfi", "-i",
+        "aevalsrc=0.9*sin(2*PI*440*t)*(0.5+0.5*sin(2*PI*0.5*t)):d=4:s=44100",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-shortest", str(out),
+    ], timeout_seconds=120)
+    return out
+
+
+@needs_ffmpeg
+def test_an_eq_boost_measurably_raises_the_output_level(noise_clip, tmp_path):
+    """T-066 AC-1, EQ half: real ffprobe/astats measurement before and
+    after, not a read of the filter string. normalise_audio is off because
+    loudnorm's whole job is to erase exactly the level difference this
+    proves — leaving it on would make the test assert nothing."""
+    def render_with(eq_high: float, name: str) -> Path:
+        edl = EDL(
+            aspect="landscape_720",
+            clips=[Clip(asset_id="a", start=0, end=2, mute=True)],
+            audio=[AudioTrack(asset_id="a", volume=0.2, eq_high=eq_high)],
+            normalise_audio=False,
+        )
+        plan = render.compile_render(edl, {"a": noise_clip}, tmp_path / name, quality="fast")
+        render.execute(plan, timeout_seconds=300)
+        return plan.output_path
+
+    baseline = measure_astats(render_with(0.0, "eq_off.mp4"))
+    boosted = measure_astats(render_with(15.0, "eq_on.mp4"))
+    delta = boosted["RMS level dB"] - baseline["RMS level dB"]
+    assert delta > 3.0, (
+        f"a +15dB high-band boost should raise measured RMS level well beyond "
+        f"noise, got baseline={baseline['RMS level dB']:.1f}dB "
+        f"boosted={boosted['RMS level dB']:.1f}dB (delta={delta:.1f}dB)"
+    )
+
+
+@needs_ffmpeg
+def test_the_compressor_toggle_measurably_changes_the_output_level(dynamic_clip, tmp_path):
+    """T-066 AC-1, compressor half: same discipline, a different source —
+    the compressor needs amplitude variation to act on (see dynamic_clip)."""
+    def render_with(compressor: bool, name: str) -> Path:
+        edl = EDL(
+            aspect="landscape_720",
+            clips=[Clip(asset_id="a", start=0, end=3, mute=True)],
+            audio=[AudioTrack(asset_id="a", volume=1.0, compressor=compressor)],
+            normalise_audio=False,
+        )
+        plan = render.compile_render(edl, {"a": dynamic_clip}, tmp_path / name, quality="fast")
+        render.execute(plan, timeout_seconds=300)
+        return plan.output_path
+
+    off = measure_astats(render_with(False, "comp_off.mp4"))
+    on = measure_astats(render_with(True, "comp_on.mp4"))
+    delta = on["RMS level dB"] - off["RMS level dB"]
+    assert abs(delta) > 0.5, (
+        f"toggling the compressor should measurably change RMS level, got "
+        f"off={off['RMS level dB']:.1f}dB on={on['RMS level dB']:.1f}dB (delta={delta:.1f}dB)"
+    )
+
+
+@needs_ffmpeg
+def test_an_edl_with_no_mix_settings_renders_byte_identically_to_before(clip_a, tmp_path):
+    """T-066 AC-2, at the real-render level (test_edl.py already proves it
+    structurally): a default AudioTrack must produce the exact same output
+    bytes as if the mix fields did not exist at all."""
+    def render_default(name: str) -> Path:
+        edl = EDL(aspect="landscape_720",
+                  clips=[Clip(asset_id="a", start=0, end=2)],
+                  audio=[AudioTrack(asset_id="a", volume=0.2)])
+        plan = render.compile_render(edl, {"a": clip_a}, tmp_path / name, quality="fast")
+        render.execute(plan, timeout_seconds=300)
+        return plan.output_path
+
+    first = render_default("default_a.mp4")
+    second = render_default("default_b.mp4")
+    assert first.read_bytes() == second.read_bytes()
+
+
+@needs_ffmpeg
+def test_render_waveform_produces_a_real_image_of_the_actual_audio(noise_clip, dynamic_clip, tmp_path):
+    """T-066 AC-3: a real rendering of the asset's actual audio, not a
+    placeholder — proven the same way T-045 proved real transitions: two
+    different sources must produce two different images, not one fixed one."""
+    noise_wave = render.render_waveform(noise_clip, tmp_path / "noise_wave.png")
+    dynamic_wave = render.render_waveform(dynamic_clip, tmp_path / "dynamic_wave.png")
+
+    assert noise_wave.is_file() and noise_wave.stat().st_size > 0
+    assert dynamic_wave.is_file() and dynamic_wave.stat().st_size > 0
+    assert noise_wave.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n", "not a real PNG"
+    assert noise_wave.read_bytes() != dynamic_wave.read_bytes(), (
+        "two different assets produced identical waveform images — "
+        "this would be the placeholder failure mode AC-3 rules out"
+    )
+
+
+@needs_ffmpeg
+def test_render_waveform_still_produces_a_real_image_for_silent_audio(tmp_path):
+    """Silence is valid audio (a flat line), not an error condition — this is
+    the boundary case AC-3's 'real rendering... not a placeholder' has to
+    hold for too."""
+    silent = tmp_path / "silent.wav"
+    ffmpeg.run(["-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono:d=1", str(silent)],
+               timeout_seconds=60)
+    out = tmp_path / "wave.png"
+    render.render_waveform(silent, out)
+    assert out.is_file() and out.stat().st_size > 0
+
+
+@needs_ffmpeg
+def test_render_waveform_fails_loudly_when_the_source_has_no_audio(tmp_path):
+    """Same discipline as execute(): a source ffmpeg genuinely cannot draw a
+    waveform for must raise, not silently write nothing or a blank image."""
+    video_only = tmp_path / "video_only.mp4"
+    ffmpeg.run(["-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=1",
+                "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+                str(video_only)], timeout_seconds=60)
+    with pytest.raises(ffmpeg.RenderFailed):
+        render.render_waveform(video_only, tmp_path / "wave.png")
