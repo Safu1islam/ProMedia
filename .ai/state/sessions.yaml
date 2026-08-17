@@ -597,3 +597,11 @@ sessions:
       ended_at: "2026-08-17T01:44:56+04:00"
       outcome: "completed"
       next: "T-038 independently reviewed (PASSED, no blocking defect) and moved to complete. T-039 implemented (backup-tick + backup-status) and left at status in_review, independent_review NOT_RUN by design (Constitution s7) - needs a separate reviewing session before it moves to complete. Full detail in tasks.yaml's own T-038/T-039 records. Two real process incidents this session found and fixed, both disclosed in locks.yaml: (1) this session's own near-miss reverting a sabotage edit with git checkout -- instead of reconstructing from a prior Read, caught via SHA-256 hash mismatch and fully recovered before anything was lost; (2) a genuine YAML-breaking indentation bug in tasks.yaml introduced by t038-session's own concurrent SECOND REVIEW addendum (a folded-scalar continuation written at the wrong indent level), which broke aef.py validate/doctor for every reader until this session found and fixed it. Also disclosed: t038-session and this session both held overlapping, uncoordinated claims on promedia/core/ops/backup.py and tests/test_backup.py for about 15 minutes: this project's locking convention is advisory only (no OS/git-level enforcement), and the two sessions' edits happened to land in non-overlapping regions rather than because either session's own check caught the other -- worth the project raising a recommendation about strengthening the convention. Next: independent review of T-039 (backup-tick/backup-status); T-040 (restore drill) is next in the dependency chain and is now mechanically unblocked (T-037, T-038 both complete)."
+  - id: "claude-code-t039review-0817"
+    agent: "reviewer-agent"
+    main_engineer: false
+    task: "T-039"
+    activity: "Independent review of T-039 (backup scheduling/staleness)"
+    status: "working"
+    started_at: "2026-08-17T10:16:46+04:00"
+    heartbeat_at: "2026-08-17T10:16:46+04:00"
