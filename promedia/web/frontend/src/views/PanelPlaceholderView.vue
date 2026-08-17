@@ -22,18 +22,6 @@ const SCREENS: Record<string, { title: string; blurb: string; note: string; task
     note: "No template data model exists yet. Needs its own planning pass before a task is written (T-060).",
     task: "T-060",
   },
-  brand: {
-    title: "Brand kits",
-    blurb: "Colours, type, motion assets, caption styles and an approver, per brand.",
-    note: "No brand-kit data model exists yet. Needs its own planning pass before a task is written (T-060).",
-    task: "T-060",
-  },
-  generation: {
-    title: "Capabilities & models",
-    blurb: "What the system can do today, what needs an integration, and what has no path yet.",
-    note: "The AI capability provider seam (T-048) is designed but not built. Nothing here is wired to a real model yet, so nothing is claimed.",
-    task: "T-048",
-  },
   export: {
     title: "Export & rendering",
     blurb: "Batch one timeline to many targets in a single job.",

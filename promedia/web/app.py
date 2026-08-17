@@ -778,6 +778,51 @@ def create_app(config: Config | None = None, *, store: CredentialStore | None = 
             )
         return FileResponse(path, media_type="video/mp4", filename=path.name)
 
+    @app.get("/waveform/{asset_id}/file")
+    def waveform_file(request: Request, asset_id: str) -> Any:
+        """Serve a real waveform image of an asset's own audio (T-067, DR-020).
+
+        Same routing shape as media_file/render_file above, and for the same
+        reason: the path comes from the `asset` operation's DB-backed
+        object_path, never from the URL. Unlike those two, the response isn't
+        the asset's own bytes — it's rendered on first request via ffmpeg's
+        showwavespic filter (render.render_waveform, T-066) and cached at
+        data_dir/media/waveforms/{asset_id}.png. Caching, not regenerating
+        every call, is safe because a stored asset's bytes are immutable
+        (F-8 provenance keys on content hash) and the Audio room re-fetches
+        this image on every load/save.
+        """
+        from fastapi.responses import FileResponse
+
+        from ..core.media import render as render_engine
+        from ..errors import MediaUnavailable
+
+        ctx = context(request)
+        try:
+            detail = invoke(ctx, "asset", {"asset_id": asset_id})
+        except ProMediaError as exc:
+            return _error_page(request, exc)
+        finally:
+            ctx.conn.close()
+        asset = detail["asset"]
+        if asset["state"] != "stored":
+            return _error_page(
+                request,
+                MediaUnavailable(
+                    f"this asset's media is '{asset['state']}', not stored", asset_id=asset_id
+                ),
+            )
+        source = Path(asset["object_path"])
+        if not source.is_file():
+            return _error_page(request, NotFound("the file is not on disk", asset_id=asset_id))
+        cache_path = cfg.data_dir / "media" / "waveforms" / f"{asset_id}.png"
+        if not cache_path.is_file():
+            try:
+                render_engine.render_waveform(source, cache_path)
+            except ProMediaError as exc:
+                return _error_page(request, exc)
+        return FileResponse(cache_path, media_type="image/png")
+
     # --- media library (T-050) -------------------------------------------------
 
     @app.get("/media", response_class=HTMLResponse)

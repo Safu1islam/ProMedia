@@ -9,6 +9,20 @@
       "autoPort": true
     },
     {
+      "name": "promedia-t069-scratch",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-c", "import os, uvicorn; os.environ['PROMEDIA_DATA_DIR'] = r'C:\\Users\\saifu\\AppData\\Local\\Temp\\claude\\C--Users-saifu-code-ProMedia\\7d96d0b2-c83b-48f7-ade0-690f5116c646\\scratchpad\\promedia-t069-scratch'; os.environ['PROMEDIA_CREDENTIAL_STORE'] = r'C:\\Users\\saifu\\AppData\\Local\\Temp\\claude\\C--Users-saifu-code-ProMedia\\7d96d0b2-c83b-48f7-ade0-690f5116c646\\scratchpad\\promedia-t069-scratch\\creds.json'; from promedia.config import load as load_config; from promedia.core.credentials import CredentialStore; from promedia.web.app import create_app; cfg = load_config(); cfg.values['web']['port'] = int(os.environ.get('PORT', cfg.get('web', 'port'))); store = CredentialStore(); token = store.ensure_operator_token(); host = str(cfg.get('web', 'host')); port = int(cfg.get('web', 'port')); print(f'\\nT-069 SCRATCH UI (isolated data dir, never the operators real data). Open this URL to authenticate as the operator:\\n  http://{host}:{port}/?token={token}\\n', flush=True); uvicorn.run(create_app(cfg, store=store), host=host, port=port, access_log=False)"],
+      "port": 8766,
+      "autoPort": true
+    },
+    {
+      "name": "promedia-t065-scratch",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-c", "import os, uvicorn; os.environ['PROMEDIA_DATA_DIR'] = r'C:\\Users\\saifu\\AppData\\Local\\Temp\\claude\\C--Users-saifu-code-ProMedia\\0ca0e055-f35f-4491-b95c-f3fff5c5bd8b\\scratchpad\\promedia-t065-scratch'; os.environ['PROMEDIA_CREDENTIAL_STORE'] = r'C:\\Users\\saifu\\AppData\\Local\\Temp\\claude\\C--Users-saifu-code-ProMedia\\0ca0e055-f35f-4491-b95c-f3fff5c5bd8b\\scratchpad\\promedia-t065-scratch\\creds.json'; from promedia.config import load as load_config; from promedia.core.credentials import CredentialStore; from promedia.web.app import create_app; cfg = load_config(); cfg.values['web']['port'] = int(os.environ.get('PORT', cfg.get('web', 'port'))); store = CredentialStore(); token = store.ensure_operator_token(); host = str(cfg.get('web', 'host')); port = int(cfg.get('web', 'port')); print(f'\\nT-065 SCRATCH UI (isolated data dir, never the operators real data). Open this URL to authenticate as the operator:\\n  http://{host}:{port}/?token={token}\\n', flush=True); uvicorn.run(create_app(cfg, store=store), host=host, port=port, access_log=False)"],
+      "port": 8767,
+      "autoPort": true
+    },
+    {
       "name": "aef-dashboard",
       "runtimeExecutable": "python",
       "runtimeArgs": ["-c", "import os, sys; sys.path.insert(0, 'aef/tools'); from aefkit import server; server.serve('.', '127.0.0.1', int(os.environ.get('PORT', 7423)))"],

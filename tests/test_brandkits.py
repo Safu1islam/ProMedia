@@ -203,3 +203,157 @@ def test_a_brand_kit_round_trips_through_backup_and_restore(agent_ctx, media_fil
     kit_rows = artefact["payload"]["brand_kits"]
     assert kit_rows[0]["id"] == kit_id
     assert kit_rows[0]["primary_color"] == "#123456"
+
+
+# --- AC-2/AC-3: apply-brand-kit -----------------------------------------------
+#
+# The RENDER-side proof that a logo overlay actually appears where asked
+# (AC-2's "renders as a real, measurably-present burned-in watermark") lives
+# in tests/test_transitions.py against the render engine directly — the
+# engine has no idea an EDL came from a brand kit rather than a hand-authored
+# edit, so what matters here is narrower: that apply-brand-kit writes the
+# RIGHT ImageOverlay, through the same set_edl every other edit goes through,
+# and that deleting the brand kit row afterward changes nothing about it
+# (DR-021's core constraint, AC-3).
+
+
+def _ingest(ctx, path: Path) -> str:
+    """Same as _ingest_logo, generalised: any real, rights-declared asset —
+    used for both the video clip and the logo in the tests below, from two
+    files with different bytes so ingest's content-hash dedupe (T-029) gives
+    each its own asset id rather than silently reusing one."""
+    result = invoke(
+        ctx, "ingest",
+        {"source_path": str(path), "declaration": declaration_original()},
+    )
+    return result["asset_id"]
+
+
+def _project_with_clip(ctx, asset_id: str) -> str:
+    """A real project whose CURRENT edit already has one clip — the minimum
+    apply-brand-kit needs, since it reads the current edit and APPENDS to
+    it rather than replacing it."""
+    project = invoke(ctx, "create-project", {"title": "Kit test project"})
+    invoke(ctx, "set-edl", {
+        "project_id": project["project_id"],
+        "edl": {"aspect": "landscape_720",
+                "clips": [{"asset_id": asset_id, "start": 0, "end": 2}]},
+    })
+    return project["project_id"]
+
+
+def test_apply_brand_kit_writes_a_new_edl_version_with_the_logo_overlay(agent_ctx, tmp_path):
+    clip_path = tmp_path / "clip.mp4"
+    clip_path.write_bytes(b"clip bytes for apply-brand-kit" * 50)
+    clip_asset = _ingest(agent_ctx, clip_path)
+    logo_asset_path = tmp_path / "logo.png"
+    logo_asset_path.write_bytes(b"logo bytes for apply-brand-kit, different from the clip" * 50)
+    logo = _ingest(agent_ctx, logo_asset_path)
+
+    project_id = _project_with_clip(agent_ctx, clip_asset)
+    kit_id = invoke(agent_ctx, "create-brand-kit", {"name": "Kit", "logo_asset_id": logo})["brand_kit_id"]
+
+    result = invoke(agent_ctx, "apply-brand-kit", {"project_id": project_id, "brand_kit_id": kit_id})
+    assert result["ok"] is True
+    assert result["previous_version"] == 2  # v1: empty, from create-project. v2: the clip, from set-edl above.
+    assert result["edl_version"] == 3
+    assert result["brand_kit_id"] == kit_id
+    assert result["logo_asset_id"] == logo
+    assert result["image_overlays"] == 1
+
+    fetched = invoke(agent_ctx, "project", {"project_id": project_id})
+    assert fetched["edl_version"] == 3
+    overlay = fetched["edl"]["image_overlays"][0]
+    assert overlay["asset_id"] == logo
+    assert overlay["position"] == "bottom_right"  # default, not overridden below
+    assert overlay["size"] == 0.15
+    assert overlay["margin"] == 24
+    # The clip that was already there is untouched, not replaced — DR-021's
+    # "writes a NEW version" is additive, not destructive.
+    assert len(fetched["edl"]["clips"]) == 1
+    assert fetched["edl"]["clips"][0]["asset_id"] == clip_asset
+
+
+def test_apply_brand_kit_accepts_position_size_margin_and_time_window_overrides(agent_ctx, tmp_path):
+    clip_path = tmp_path / "clip.mp4"
+    clip_path.write_bytes(b"another clip's bytes" * 50)
+    clip_asset = _ingest(agent_ctx, clip_path)
+    logo_path = tmp_path / "logo.png"
+    logo_path.write_bytes(b"another logo's bytes, still different" * 50)
+    logo = _ingest(agent_ctx, logo_path)
+
+    project_id = _project_with_clip(agent_ctx, clip_asset)
+    kit_id = invoke(agent_ctx, "create-brand-kit", {"name": "Kit", "logo_asset_id": logo})["brand_kit_id"]
+
+    invoke(agent_ctx, "apply-brand-kit", {
+        "project_id": project_id, "brand_kit_id": kit_id,
+        "position": "top_left", "size": "0.3", "margin": "8",
+        "start": "1.0", "end": "1.5",
+    })
+
+    fetched = invoke(agent_ctx, "project", {"project_id": project_id})
+    overlay = fetched["edl"]["image_overlays"][0]
+    assert overlay["position"] == "top_left"
+    assert overlay["size"] == 0.3
+    assert overlay["margin"] == 8
+    assert overlay["start"] == 1.0
+    assert overlay["end"] == 1.5
+
+
+def test_deleting_the_brand_kit_after_apply_leaves_the_edl_version_untouched_ac3(agent_ctx, tmp_path):
+    """AC-3: apply-brand-kit's EDL never carries the brand_kit id, only the
+    resolved logo asset id and overlay geometry — so once a version exists,
+    deleting the row it came from changes NOTHING about that version, byte
+    for byte, proving DR-021's "the brand_kits table is a convenience
+    generator, never a live render-time dependency"."""
+    clip_path = tmp_path / "clip.mp4"
+    clip_path.write_bytes(b"yet another clip" * 50)
+    clip_asset = _ingest(agent_ctx, clip_path)
+    logo_path = tmp_path / "logo.png"
+    logo_path.write_bytes(b"yet another logo, still distinct bytes" * 50)
+    logo = _ingest(agent_ctx, logo_path)
+
+    project_id = _project_with_clip(agent_ctx, clip_asset)
+    kit_id = invoke(agent_ctx, "create-brand-kit", {"name": "Kit", "logo_asset_id": logo})["brand_kit_id"]
+    invoke(agent_ctx, "apply-brand-kit", {"project_id": project_id, "brand_kit_id": kit_id})
+
+    before = invoke(agent_ctx, "project", {"project_id": project_id, "version": 3})
+
+    invoke(agent_ctx, "delete-brand-kit", {"brand_kit_id": kit_id})
+    with pytest.raises(NotFound):
+        invoke(agent_ctx, "brand-kit", {"brand_kit_id": kit_id})
+
+    after = invoke(agent_ctx, "project", {"project_id": project_id, "version": 3})
+    assert after["edl"] == before["edl"], "the EDL version must be byte-identical after the kit is deleted"
+
+    # A fresh apply against the same (now brand-kit-less) history is refused
+    # the ordinary way — NotFound, same as any other unknown id — proving the
+    # gate is real rather than merely untested.
+    with pytest.raises(NotFound):
+        invoke(agent_ctx, "apply-brand-kit", {"project_id": project_id, "brand_kit_id": kit_id})
+
+
+def test_applying_an_unknown_brand_kit_is_not_found(agent_ctx, tmp_path):
+    clip_path = tmp_path / "clip.mp4"
+    clip_path.write_bytes(b"solo clip bytes" * 50)
+    clip_asset = _ingest(agent_ctx, clip_path)
+    project_id = _project_with_clip(agent_ctx, clip_asset)
+
+    with pytest.raises(NotFound):
+        invoke(agent_ctx, "apply-brand-kit", {"project_id": project_id, "brand_kit_id": "bk_nope"})
+
+
+def test_applying_to_an_unknown_project_is_not_found(agent_ctx, tmp_path):
+    logo_path = tmp_path / "logo.png"
+    logo_path.write_bytes(b"a logo with no project to apply to" * 50)
+    logo = _ingest(agent_ctx, logo_path)
+    kit_id = invoke(agent_ctx, "create-brand-kit", {"name": "Kit", "logo_asset_id": logo})["brand_kit_id"]
+
+    with pytest.raises(NotFound):
+        invoke(agent_ctx, "apply-brand-kit", {"project_id": "pr_nope", "brand_kit_id": kit_id})
+
+
+def test_apply_brand_kit_is_agent_authority():
+    from promedia.core.registry import load_operations
+
+    assert load_operations()["apply-brand-kit"].authority == "agent"

@@ -17,13 +17,14 @@ that does not exist yet — so it is tested by adding one.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
 from promedia.core import backup, db
 from promedia.core.principal import agent, operator
 from promedia.core.registry import Context, invoke
-from promedia.errors import Forbidden, NotFound, ProMediaError, ValidationError
+from promedia.errors import Forbidden, IntegrityError, NotFound, ProMediaError, ValidationError
 from tests.conftest import attest, declaration_original, make_config
 
 CANARY = "canary-credential-must-never-be-backed-up-9x7"
@@ -282,6 +283,377 @@ def test_exporting_onto_a_directory_is_refused(env, tmp_path):
     cfg, ctx = env
     with pytest.raises(ValidationError):
         invoke(ctx, "export-permanent-set", {"destination": str(tmp_path)})
+
+
+# --- send-offsite (T-038, OD-9: external/removable drive) --------------------
+
+
+def test_send_offsite_writes_artefact_and_manifest(env, media_file, tmp_path):
+    """AC-1: the artefact reaches the destination, and what/when/hash is recorded.
+
+    tmp_path stands in for the mount point of an external drive — the code
+    under test never distinguishes a removable drive from any other
+    directory, so there is nothing OD-9-specific left to fake.
+    """
+    cfg, ctx = env
+    _full_history(ctx, media_file)
+    drive = tmp_path / "E" / "ProMediaBackups"
+    drive.mkdir(parents=True)
+
+    result = invoke(ctx, "send-offsite", {"destination": str(drive)})
+
+    assert result["ok"] is True
+    assert result["verified_on_destination"] is True
+    sent = Path(result["sent_to"])
+    assert sent.is_file() and sent.parent == drive
+
+    manifest = Path(result["manifest"])
+    assert manifest.is_file()
+    lines = manifest.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    entry = json.loads(lines[0])
+    assert entry["artefact_file"] == sent.name
+    assert entry["integrity_hash"] == result["integrity_hash"]
+    assert entry["sent_at"] == result["created_at"]
+    assert entry["bytes"] == result["bytes"] > 0
+
+
+def test_send_offsite_creates_the_destination_directory(env, tmp_path):
+    """A fresh drive with no ProMediaBackups folder yet is not an error."""
+    cfg, ctx = env
+    drive = tmp_path / "F" / "not-yet-created"
+
+    result = invoke(ctx, "send-offsite", {"destination": str(drive)})
+
+    assert drive.is_dir()
+    assert Path(result["sent_to"]).is_file()
+
+
+def test_send_offsite_copy_verifies_independently_of_the_database(env, media_file, tmp_path):
+    """The point of off-site: the copy must verify with no database at all."""
+    cfg, ctx = env
+    _full_history(ctx, media_file)
+    drive = tmp_path / "drive"
+
+    result = invoke(ctx, "send-offsite", {"destination": str(drive)})
+
+    artefact = json.loads(Path(result["sent_to"]).read_text(encoding="utf-8"))
+    assert backup.verify(artefact)["integrity_verified"] is True
+
+
+def test_send_offsite_raises_if_the_destination_copy_fails_verification(env, tmp_path, monkeypatch):
+    """DR-024's threat model T2, the negative path.
+
+    Every other test here exercises a correctly-written copy; this one
+    proves the read-back-and-rehash check actually FIRES on a bad one,
+    rather than trusting that it would, by making the destination read as
+    corrupted and asserting the call refuses instead of reporting success.
+    """
+    cfg, ctx = env
+
+    def corrupted(artefact):
+        return {"integrity_verified": False, "expected_hash": "a", "actual_hash": "b"}
+
+    monkeypatch.setattr(backup, "verify", corrupted)
+
+    with pytest.raises(IntegrityError):
+        invoke(ctx, "send-offsite", {"destination": str(tmp_path / "drive")})
+
+
+def test_send_offsite_manifest_write_failure_is_a_clear_error(env, tmp_path, monkeypatch):
+    """The manifest append gets the same OSError-to-NotFound treatment as
+
+    the artefact write and the destination mkdir — a drive that disconnects
+    in the narrow window between a verified artefact write and the manifest
+    append must not surface a bare OSError.
+    """
+    cfg, ctx = env
+    real_open = Path.open
+
+    def flaky_open(self, *args, **kwargs):
+        if self.name == "promedia-backup-manifest.jsonl":
+            raise OSError("drive disconnected")
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", flaky_open)
+
+    with pytest.raises(NotFound):
+        invoke(ctx, "send-offsite", {"destination": str(tmp_path / "drive")})
+
+
+def test_send_offsite_appends_to_the_manifest_across_transports(env, media_file, tmp_path):
+    cfg, ctx = env
+    drive = tmp_path / "drive"
+
+    invoke(ctx, "send-offsite", {"destination": str(drive)})
+    _full_history(ctx, media_file)
+    invoke(ctx, "send-offsite", {"destination": str(drive)})
+
+    manifest = drive / "promedia-backup-manifest.jsonl"
+    lines = manifest.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 2
+    files = {json.loads(line)["artefact_file"] for line in lines}
+    assert len(files) == 2, "each transport must write a distinct artefact file"
+
+
+def test_send_offsite_refuses_a_destination_that_is_a_file(env, tmp_path):
+    cfg, ctx = env
+    not_a_dir = tmp_path / "backup.txt"
+    not_a_dir.write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(ValidationError):
+        invoke(ctx, "send-offsite", {"destination": str(not_a_dir)})
+
+
+def test_send_offsite_reports_a_clear_error_when_the_drive_is_unreachable(env, tmp_path):
+    """Stands in for 'the removable drive is not plugged in': a destination
+
+    that cannot be created because part of its path is a file, not a
+    directory, is refused with a specific remedy rather than a bare OSError.
+    """
+    cfg, ctx = env
+    blocking_file = tmp_path / "blocked"
+    blocking_file.write_text("occupies the path a directory needs", encoding="utf-8")
+    unreachable = blocking_file / "sub" / "dir"
+
+    with pytest.raises(NotFound):
+        invoke(ctx, "send-offsite", {"destination": str(unreachable)})
+
+
+def test_an_agent_cannot_send_offsite(env, tmp_path):
+    """Operator authority, same reasoning as export-permanent-set."""
+    cfg, ctx = env
+    as_agent = Context(config=ctx.config, conn=ctx.conn, principal=agent("ag"))
+    with pytest.raises(Forbidden):
+        invoke(as_agent, "send-offsite", {"destination": str(tmp_path / "drive")})
+
+
+def test_send_offsite_does_not_carry_a_credential_either(env, media_file, tmp_path):
+    """Same canary as the export path (DR-008) — send-offsite builds its own
+
+    artefact via backup.build rather than reusing one handed to it, so this
+    is not implied by the export test; it is a separate call to the same
+    function and is checked separately for that reason.
+    """
+    cfg, ctx = env
+    _full_history(ctx, media_file)
+    drive = tmp_path / "drive"
+
+    result = invoke(ctx, "send-offsite", {"destination": str(drive)})
+
+    text = Path(result["sent_to"]).read_text(encoding="utf-8")
+    assert CANARY not in text, "a credential reached the off-site artefact"
+    manifest_text = Path(result["manifest"]).read_text(encoding="utf-8")
+    assert CANARY not in manifest_text, "a credential reached the transport manifest"
+
+
+def test_send_offsite_does_not_claim_encryption(env, tmp_path):
+    """AC-2 is conditional on a third-party destination; OD-9 chose a drive.
+
+    Asserted explicitly so a future change to the response shape cannot
+    silently start claiming a protection this destination does not provide.
+    """
+    cfg, ctx = env
+    result = invoke(ctx, "send-offsite", {"destination": str(tmp_path / "drive")})
+    assert result["encrypted"] is False
+    assert "third party" in result["note"]
+
+
+def test_send_offsite_changes_nothing_except_recording_that_it_happened(env, media_file, tmp_path):
+    cfg, ctx = env
+    _full_history(ctx, media_file)
+    before = backup.build(ctx.conn)["row_counts"]
+
+    invoke(ctx, "send-offsite", {"destination": str(tmp_path / "drive")})
+    after = backup.build(ctx.conn)["row_counts"]
+
+    assert {t: n for t, n in after.items() if t != "audit_log"} == {
+        t: n for t, n in before.items() if t != "audit_log"
+    }
+    entries = invoke(ctx, "audit", {"limit": 5})["entries"]
+    assert any(e["operation"] == "send-offsite" for e in entries)
+    assert db.list_locks(ctx.conn) == []
+
+
+# --- backup-tick / backup-status (T-039) --------------------------------------
+
+
+def test_backup_tick_writes_a_local_snapshot_and_reports_it_fresh(env, media_file):
+    """AC-1: backup age is reportable, and a just-run tick is not overdue."""
+    cfg, ctx = env
+    _full_history(ctx, media_file)
+
+    result = invoke(ctx, "backup-tick", {})
+
+    assert result["ok"] is True
+    assert result["local_export"]["ok"] is True
+    local_path = Path(result["local_export"]["written_to"])
+    assert local_path.is_file()
+    assert local_path.parent == cfg.data_dir / "backups"
+
+    written = json.loads(local_path.read_text(encoding="utf-8"))
+    assert backup.verify(written)["integrity_verified"] is True
+
+    assert result["local_export"]["overdue"] is False
+    assert result["needs_attention"] >= 1, "offsite has never been sent, so it is overdue"
+    assert result["offsite"]["overdue"] is True
+    assert result["offsite"]["last_sent_at"] is None
+
+
+def test_backup_tick_is_idempotent(env, media_file):
+    """Safe to run twice — the local snapshot is overwritten, not accumulated."""
+    cfg, ctx = env
+    _full_history(ctx, media_file)
+
+    invoke(ctx, "backup-tick", {})
+    first = json.loads((cfg.data_dir / "backups" / "promedia-backup-local.json").read_text())
+    result = invoke(ctx, "backup-tick", {})
+
+    backups_dir = cfg.data_dir / "backups"
+    files = list(backups_dir.glob("*.json"))
+    assert files == [backups_dir / "promedia-backup-local.json"], (
+        "a second tick must not accumulate a second file"
+    )
+    second = json.loads(files[0].read_text())
+    # audit_log itself grows with every tick (each invoke() call is audited,
+    # T-038's precedent in test_send_offsite_appends_to_the_manifest...), so
+    # it is excluded the same way test_send_offsite_changes_nothing... and
+    # test_export_changes_nothing... already do below.
+    assert {t: n for t, n in second["row_counts"].items() if t != "audit_log"} == {
+        t: n for t, n in first["row_counts"].items() if t != "audit_log"
+    }
+    assert result["local_export"]["ok"] is True
+
+
+def test_backup_tick_treats_a_recent_send_offsite_as_not_overdue(env, media_file, tmp_path):
+    """AC-1's other half: off-site freshness is read from send-offsite's own
+    audit trail, per DR-024's revisit note, not reinvented."""
+    cfg, ctx = env
+    invoke(ctx, "send-offsite", {"destination": str(tmp_path / "drive")})
+
+    result = invoke(ctx, "backup-tick", {})
+
+    assert result["offsite"]["overdue"] is False
+    assert result["offsite"]["last_sent_at"] is not None
+    assert result["offsite"]["age_days"] < 1
+
+
+def test_backup_tick_escalates_offsite_overdue_like_a_missed_publish_window(env, media_file):
+    """AC-2: escalated (C-27's pattern), not merely absent from a log."""
+    cfg, ctx = env
+
+    invoke(ctx, "backup-tick", {})
+
+    entries = invoke(ctx, "audit", {"limit": 10})["entries"]
+    escalations = [
+        e for e in entries
+        if e["operation"] == "backup-tick" and e["outcome"] == "failed"
+        and "OFFSITE BACKUP OVERDUE" in (e["detail"] or "")
+    ]
+    assert escalations, "an overdue off-site backup must leave its own audit entry"
+    assert escalations[0]["entity_type"] == "backup"
+
+
+def test_backup_tick_does_not_escalate_offsite_once_it_is_fresh(env, media_file, tmp_path):
+    cfg, ctx = env
+    invoke(ctx, "send-offsite", {"destination": str(tmp_path / "drive")})
+
+    invoke(ctx, "backup-tick", {})
+
+    entries = invoke(ctx, "audit", {"limit": 10})["entries"]
+    assert not any(
+        e["operation"] == "backup-tick" and "OFFSITE BACKUP OVERDUE" in (e["detail"] or "")
+        for e in entries
+    )
+
+
+def test_backup_tick_escalates_a_local_export_failure_instead_of_crashing(env, media_file, tmp_path):
+    """AC-2, the other failure mode: the export mechanism itself breaks.
+
+    A file occupies the path the local snapshot's directory needs — the same
+    'drive unreachable' shape send-offsite's own test uses, applied to the
+    local path. The tick must report the failure, not raise past the caller,
+    matching scheduling.tick()'s own per-post catch.
+    """
+    cfg, ctx = env
+    (cfg.data_dir).mkdir(parents=True, exist_ok=True)
+    (cfg.data_dir / "backups").write_text("occupies the path a directory needs", encoding="utf-8")
+
+    result = invoke(ctx, "backup-tick", {})
+
+    assert result["ok"] is True, "the tick itself must not raise"
+    assert result["local_export"]["ok"] is False
+    assert result["needs_attention"] >= 1
+
+    entries = invoke(ctx, "audit", {"limit": 10})["entries"]
+    assert any(
+        e["operation"] == "backup-tick" and e["outcome"] == "failed"
+        and "LOCAL EXPORT FAILED" in (e["detail"] or "")
+        for e in entries
+    )
+
+
+def test_an_agent_cannot_run_backup_tick(env, tmp_path):
+    """Operator authority, same reasoning as export-permanent-set/send-offsite:
+    it writes the whole permanent set to a file, even at a fixed path."""
+    cfg, ctx = env
+    as_agent = Context(config=ctx.config, conn=ctx.conn, principal=agent("ag"))
+    with pytest.raises(Forbidden):
+        invoke(as_agent, "backup-tick", {})
+
+
+def test_an_agent_may_read_backup_status(env, media_file):
+    """Read-only staleness check must be cheap and frequent, like schedule-status."""
+    cfg, ctx = env
+    invoke(ctx, "backup-tick", {})
+
+    as_agent = Context(config=ctx.config, conn=ctx.conn, principal=agent("ag"))
+    result = invoke(as_agent, "backup-status", {})
+
+    assert result["ok"] is True
+    assert result["local_export"]["overdue"] is False
+    assert result["offsite"]["overdue"] is True  # never sent in this test
+
+
+def test_backup_status_never_written_reports_overdue_and_writes_nothing(env, media_file):
+    """AC-1: staleness is visible even before the first tick has ever run —
+    and reading it must not itself create a snapshot or an audit entry."""
+    cfg, ctx = env
+
+    result = invoke(ctx, "backup-status", {})
+
+    assert result["local_export"]["exists"] is False
+    assert result["local_export"]["overdue"] is True
+    assert result["offsite"]["overdue"] is True
+    assert not (cfg.data_dir / "backups").exists()
+    assert invoke(ctx, "audit", {"limit": 5})["entries"] == []
+
+
+def test_backup_status_and_backup_tick_agree_on_freshness(env, media_file, tmp_path):
+    """One implementation, not two (DR-002) — a status read must match what
+    the tick that just ran reported, not a second, drifting computation."""
+    cfg, ctx = env
+    invoke(ctx, "send-offsite", {"destination": str(tmp_path / "drive")})
+    tick_result = invoke(ctx, "backup-tick", {})
+
+    status_result = invoke(ctx, "backup-status", {})
+
+    assert status_result["local_export"]["overdue"] == tick_result["local_export"]["overdue"] is False
+    assert status_result["offsite"] == tick_result["offsite"]
+
+
+def test_backup_tick_changes_nothing_in_the_permanent_set_itself(env, media_file):
+    cfg, ctx = env
+    _full_history(ctx, media_file)
+    before = backup.build(ctx.conn)["row_counts"]
+
+    invoke(ctx, "backup-tick", {})
+    after = backup.build(ctx.conn)["row_counts"]
+
+    assert {t: n for t, n in after.items() if t != "audit_log"} == {
+        t: n for t, n in before.items() if t != "audit_log"
+    }
+    assert db.list_locks(ctx.conn) == []
 
 
 def test_export_changes_nothing_except_recording_that_it_happened(env, media_file):

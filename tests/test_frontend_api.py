@@ -20,7 +20,7 @@ import pytest
 from promedia.core.registry import invoke
 from tests.conftest import attest
 from tests.test_ops_forms import agent_client, env, ingest_as_agent, operator_client
-from tests.test_projects import real_media
+from tests.test_projects import needs_ffmpeg, real_media
 
 __all__ = ["env"]
 
@@ -65,6 +65,56 @@ def test_studio_calendar_route_serves_the_same_shell(env):
     calendar = agent_client(cfg, store).get("/studio/calendar")
     assert calendar.status_code == 200
     assert calendar.text == direct.text
+
+
+@pytest.mark.skipif(not (FRONTEND_DIST / "index.html").is_file(),
+                     reason="frontend not built (npm run build) in this environment")
+def test_studio_generation_route_serves_the_same_shell(env):
+    """T-071: /generation is a client-only route (DR-023, no new backend
+    surface) — pins that it reaches the SPA shell rather than 404ing, the
+    same 'no dead links' guarantee test_studio_calendar_route_... pins."""
+    cfg, ctx, store = env
+    direct = agent_client(cfg, store).get("/studio")
+    generation = agent_client(cfg, store).get("/studio/generation")
+    assert generation.status_code == 200
+    assert generation.text == direct.text
+
+
+def test_studio_brand_route_serves_the_same_shell(env):
+    """T-069: /brand used to be PanelPlaceholderView (T-060's "no data model
+    yet" placeholder); it now serves the real BrandKitView (DR-021, T-068's
+    CRUD + apply-brand-kit). No new backend route — pins the same 'no dead
+    links' guarantee as calendar/generation above."""
+    cfg, ctx, store = env
+    direct = agent_client(cfg, store).get("/studio")
+    brand = agent_client(cfg, store).get("/studio/brand")
+    assert brand.status_code == 200
+    assert brand.text == direct.text
+
+
+# --- T-071 AC-3: no purchase/checkout/subscribe/payment control anywhere ----
+# in the frontend source. Grepped, not asserted, the same discipline
+# tests/test_providers.py uses for the backend half of the same guarantee
+# (T-048's own "no purchasing or payment code" rule) — DR-023 explicitly
+# ruled out a literal marketplace on this ground, so this is checked, not
+# assumed, as this task's own acceptance evidence.
+_FORBIDDEN_MARKETPLACE_TOKENS = (
+    "purchase", "checkout", "subscribe", "add-to-cart", "add to cart",
+    "payment-form", "payment form", "creditcard", "credit card", "buy now",
+    "stripe",
+)
+
+
+def test_no_purchase_or_payment_control_in_the_frontend_source():
+    frontend_src = FRONTEND_DIST.parent / "src"
+    for path in frontend_src.rglob("*.vue"):
+        text = path.read_text(encoding="utf-8").lower()
+        for token in _FORBIDDEN_MARKETPLACE_TOKENS:
+            assert token not in text, f"{path} contains '{token}'"
+    for path in frontend_src.rglob("*.ts"):
+        text = path.read_text(encoding="utf-8").lower()
+        for token in _FORBIDDEN_MARKETPLACE_TOKENS:
+            assert token not in text, f"{path} contains '{token}'"
 
 
 @pytest.mark.skipif(not (FRONTEND_DIST / "index.html").is_file(),
@@ -166,6 +216,85 @@ def test_media_file_path_comes_from_the_database_not_the_url(env, real_media):
     assert response.status_code in (200, 404)
     if response.status_code == 200:
         assert int(response.headers["content-length"]) == real_media.stat().st_size
+
+
+# --- /waveform/{asset_id}/file: T-067's real per-track waveform route ----------
+#
+# Same shape and same reasoning as /media/{asset_id}/file above (path from the
+# database, never the URL) — this route additionally renders on first request
+# via render.render_waveform (T-066) and caches the result, which the tests
+# below verify explicitly rather than assuming.
+
+
+def test_waveform_file_serves_a_real_png_of_the_assets_audio(env, real_media):
+    cfg, ctx, store = env
+    asset_id = ingest_as_agent(ctx, real_media)
+    response = agent_client(cfg, store).get(f"/waveform/{asset_id}/file")
+    assert response.status_code == 200
+    assert response.content[:8] == b"\x89PNG\r\n\x1a\n", "not a real PNG"
+    assert len(response.content) > 0
+
+
+@needs_ffmpeg
+def test_waveform_file_of_two_different_assets_are_visibly_different(env, real_media, tmp_path):
+    """T-067 AC-2, at the route this task actually added — not a re-test of
+    render.render_waveform itself (tests/test_media.py already proves that
+    at the function level); this proves the SAME real-vs-placeholder
+    guarantee holds through ingest -> the HTTP route T-067 built."""
+    from promedia.core.media import ffmpeg as ffmpeg_module
+
+    cfg, ctx, store = env
+    other = tmp_path / "other.mp4"
+    ffmpeg_module.run([
+        "-f", "lavfi", "-i", "testsrc=size=640x480:rate=25:duration=4",
+        "-f", "lavfi", "-i", "sine=frequency=1200:duration=4",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-shortest", str(other),
+    ], timeout_seconds=180)
+
+    asset_a = ingest_as_agent(ctx, real_media)
+    asset_b = ingest_as_agent(ctx, other)
+    client = agent_client(cfg, store)
+    wave_a = client.get(f"/waveform/{asset_a}/file")
+    wave_b = client.get(f"/waveform/{asset_b}/file")
+    assert wave_a.status_code == 200 and wave_b.status_code == 200
+    assert wave_a.content != wave_b.content, (
+        "two different assets produced identical waveform images — "
+        "this would be the placeholder failure mode AC-2 rules out"
+    )
+
+
+def test_waveform_file_is_cached_not_regenerated_every_request(env, real_media):
+    """The route's own docstring promises a cache, not a re-render per call —
+    proven by the served bytes being byte-identical across two requests
+    (regenerating would still be deterministic for the same source, so this
+    also checks the cache file itself only gets written once)."""
+    cfg, ctx, store = env
+    asset_id = ingest_as_agent(ctx, real_media)
+    client = agent_client(cfg, store)
+    first = client.get(f"/waveform/{asset_id}/file")
+    cache_path = cfg.data_dir / "media" / "waveforms" / f"{asset_id}.png"
+    assert cache_path.is_file()
+    written_at = cache_path.stat().st_mtime_ns
+    second = client.get(f"/waveform/{asset_id}/file")
+    assert second.content == first.content
+    assert cache_path.stat().st_mtime_ns == written_at, "cache file was rewritten on a second request"
+
+
+def test_waveform_file_refuses_when_media_is_not_stored(env, real_media):
+    cfg, ctx, store = env
+    asset_id = ingest_as_agent(ctx, real_media)
+    ctx.conn.execute("UPDATE assets SET state = 'deleted' WHERE id = ?", (asset_id,))
+    ctx.conn.commit()
+    response = agent_client(cfg, store).get(f"/waveform/{asset_id}/file")
+    assert response.status_code == 400  # MediaUnavailable's default mapping
+    assert "MEDIA_UNAVAILABLE" in response.text
+
+
+def test_waveform_file_404s_for_an_unknown_asset(env):
+    cfg, ctx, store = env
+    response = agent_client(cfg, store).get("/waveform/as_does_not_exist/file")
+    assert response.status_code == 404
 
 
 # --- T-056: diff-project-versions, and reject-as-a-new-version -----------------

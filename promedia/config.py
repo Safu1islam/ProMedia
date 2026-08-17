@@ -101,6 +101,25 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "hard_stop_fraction": 1.5,
         "per_operation_cap_usd": 5.0,
     },
+    # T-039. Backup staleness thresholds — protocol 05 forbids hardcoding
+    # these, and an operator's own rotation discipline is exactly the thing
+    # they will want to tune (a desktop backed up hourly vs. one touched
+    # weekly needs different alarms). `backup-tick` runs the LOCAL export
+    # (no drive needed) on this cadence; `local_export_overdue_hours` should
+    # exceed the scheduler's own trigger interval with headroom, the same
+    # relationship HUMAN-ACTIONS.md already asks the operator to keep
+    # between publish-tick's trigger and its tolerance (C-26's pattern,
+    # applied here without a project.md constraint number of its own).
+    # `offsite_overdue_days` cannot be enforced by the tick itself — OD-9's
+    # destination is a removable drive the tick cannot assume is connected —
+    # so it exists to make a forgotten rotation VISIBLE rather than to force
+    # one; 14 mirrors project.md 5.4's retention grace period as the nearest
+    # existing anchor for "how long is normal to go without doing this",
+    # not a value the operator has stated a preference for.
+    "backup": {
+        "local_export_overdue_hours": 26,
+        "offsite_overdue_days": 14,
+    },
     "web": {"host": "127.0.0.1", "port": 8765},
     # T-030 (O2, O3). Both were literals in the modules that used them, which
     # protocol 05 forbids for the same reason as any other limit: the value a

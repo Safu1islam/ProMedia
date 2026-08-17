@@ -5,22 +5,25 @@ two colours and a font — never a second thing a render reads. Applying one
 (``apply-brand-kit``) compiles it into a NEW EDL version as a burned-in
 ``ImageOverlay``; once that version exists, this table is a convenience
 generator and is safely deletable without touching the render it produced
-(DR-021's core constraint).
+(DR-021's core constraint) — ``apply_brand_kit`` below never stores the
+brand kit's id anywhere in the EDL, only the logo asset id and the overlay
+geometry, which is what makes that deletion-safety real rather than assumed.
 
-``apply-brand-kit`` itself is NOT implemented here yet: it needs a new
-``ImageOverlay`` type in ``promedia.core.media.edl`` and a compiler branch in
-``promedia.core.media.render``, and at the time this module was written
-those two files (plus ``tests/test_edl.py``) were under an active, live file
-lock held by a concurrent session working T-064 (colour grading, same
-files). Editing a path another live agent owns is exactly what Constitution
-rule 3 forbids, so that half of DR-021 is deferred rather than worked
-around — see T-068's task record (``.ai/state/tasks.yaml``, AC-2/AC-3) and
-R-019 for the full account. What IS here — create/list/update/delete — has
-no dependency on either locked file.
+``apply-brand-kit`` (AC-2/AC-3) was deferred past this module's first
+session: it needs the ``ImageOverlay`` type in ``promedia.core.media.edl``
+and a compiler branch in ``promedia.core.media.render``, and those two files
+(plus ``tests/test_edl.py``) were under an active, live file lock held by a
+concurrent session working T-064 (colour grading, same files) at the time.
+Editing a path another live agent owns is exactly what Constitution rule 3
+forbids. Both landed later (T-064, then T-066/audio mixing on the same
+files), and this module now builds on top of them — see T-068's task record
+(``.ai/state/tasks.yaml``) and R-019 for the full account of the collision.
 
 Authority (F-2): every operation below is agent-callable. A brand kit is
 drafting material, like an EDL itself — it never publishes, spends, or
-clears a rights flag.
+clears a rights flag. ``apply-brand-kit`` writes an EDL version exactly the
+way ``set-edl`` does (same entity="project" lock, same C-19 protection), not
+a new authority level of its own.
 """
 
 from __future__ import annotations
@@ -28,7 +31,9 @@ from __future__ import annotations
 from typing import Any
 
 from ...errors import NotFound, ValidationError
+from .. import projects as projects_layer
 from ..db import iso, new_id, transaction
+from ..media.edl import ImageOverlay
 from ..registry import Context, Param, register
 
 
@@ -228,3 +233,74 @@ def delete_brand_kit(ctx: Context, brand_kit_id: str) -> dict[str, Any]:
             " byte, unchanged by this deletion"
         ),
     }
+
+
+@register(
+    "apply-brand-kit",
+    "Burn a brand kit's logo into a project's edit as a new EDL version."
+    " The brand kit row is not read again after this — deleting it later"
+    " changes nothing about the render (DR-021).",
+    params=(
+        Param("project_id", "str"),
+        Param("brand_kit_id", "str"),
+        Param(
+            "position", "str", required=False,
+            help="top_left | top_right | bottom_left | bottom_right | center. Default bottom_right.",
+        ),
+        Param(
+            "size", "float", required=False,
+            help="Logo width as a fraction of the frame width, 0.01-1.0. Default 0.15.",
+        ),
+        Param("margin", "int", required=False, help="Pixels from the frame edge. Default 24."),
+        Param(
+            "start", "float", required=False,
+            help="Seconds into the edit the logo appears. Default 0 (from the start).",
+        ),
+        Param(
+            "end", "float", required=False,
+            help="Seconds into the edit the logo disappears. Default: stays for the whole edit.",
+        ),
+    ),
+    mutates=True,
+    entity="project",
+)
+def apply_brand_kit(
+    ctx: Context,
+    project_id: str,
+    brand_kit_id: str,
+    position: str | None = None,
+    size: float | None = None,
+    margin: int | None = None,
+    start: float | None = None,
+    end: float | None = None,
+) -> dict[str, Any]:
+    """AC-2/AC-3 (DR-021): append an ImageOverlay for the kit's logo to the
+    project's CURRENT edit and write it as a new version through the same
+    ``set_edl`` every other edit goes through — same validation, same
+    ``expected_version`` optimistic-concurrency guard (R-010), same append-
+    only history. The brand kit id itself is never written into the EDL; only
+    the resolved ``logo_asset_id`` and the overlay geometry are, which is
+    what makes AC-3 (deleting the kit afterward leaves the render untouched)
+    true by construction rather than by a rule someone has to remember.
+    """
+    kit = _brand_kit_row(ctx, brand_kit_id)
+    version, edl = projects_layer.current_version(ctx, project_id)
+
+    overlay_kwargs: dict[str, Any] = {"asset_id": kit["logo_asset_id"]}
+    if position is not None:
+        overlay_kwargs["position"] = position
+    if size is not None:
+        overlay_kwargs["size"] = size
+    if margin is not None:
+        overlay_kwargs["margin"] = margin
+    if start is not None:
+        overlay_kwargs["start"] = start
+    if end is not None:
+        overlay_kwargs["end"] = end
+    edl.image_overlays.append(ImageOverlay(**overlay_kwargs))
+
+    result = projects_layer.set_edl(
+        ctx, project_id=project_id, edl=edl.to_dict(),
+        note=f"applied brand kit '{kit['name']}'", expected_version=version,
+    )
+    return {**result, "brand_kit_id": brand_kit_id, "logo_asset_id": kit["logo_asset_id"]}

@@ -122,4 +122,61 @@ export const api = {
   storageStatus: () => post("storage-status"),
   ingestQueue: () => post("ingest-queue"),
   locks: () => post("locks"),
+
+  // AI capability providers and the C-31 spend ledger (T-048, DR-023). Every
+  // capability here structurally cannot acquire or pay for anything — see
+  // core/providers/base.py's own docstring — so nothing on this surface
+  // needs a confirmation dialog beyond what run-capability's own refusal
+  // already provides.
+  listCapabilities: () => post("list-capabilities"),
+  capabilityRequirements: (capability: string) => post("capability-requirements", { capability }),
+  estimateCapabilityCost: (capability: string) => post("estimate-capability-cost", { capability }),
+  runCapability: (capability: string) => post("run-capability", { capability }),
+  spendStatus: () => post("spend-status"),
+  spendHistory: (month?: string, limit?: number) =>
+    post("spend-history", { ...(month ? { month } : {}), ...(limit ? { limit } : {}) }),
+
+  // Brand kits (T-068/T-069, DR-021). create/update never bypass the
+  // rights-declaration-at-import path: logoAssetId must already be a real,
+  // declared asset id (see BrandKitView.vue's upload flow, which reuses
+  // MediaView's own /media route rather than a second one). apply-brand-kit
+  // writes a NEW EDL version through the existing set-edl and never reads
+  // this row again — DR-021's core constraint.
+  listBrandKits: () => post("list-brand-kits"),
+  brandKit: (brandKitId: string) => post("brand-kit", { brand_kit_id: brandKitId }),
+  createBrandKit: (
+    name: string,
+    logoAssetId: string,
+    primaryColor?: string,
+    secondaryColor?: string,
+    fontFamily?: string,
+  ) =>
+    post("create-brand-kit", {
+      name,
+      logo_asset_id: logoAssetId,
+      ...(primaryColor ? { primary_color: primaryColor } : {}),
+      ...(secondaryColor ? { secondary_color: secondaryColor } : {}),
+      ...(fontFamily ? { font_family: fontFamily } : {}),
+    }),
+  updateBrandKit: (
+    brandKitId: string,
+    name?: string,
+    primaryColor?: string,
+    secondaryColor?: string,
+    fontFamily?: string,
+  ) =>
+    post("update-brand-kit", {
+      brand_kit_id: brandKitId,
+      ...(name !== undefined ? { name } : {}),
+      ...(primaryColor !== undefined ? { primary_color: primaryColor } : {}),
+      ...(secondaryColor !== undefined ? { secondary_color: secondaryColor } : {}),
+      ...(fontFamily !== undefined ? { font_family: fontFamily } : {}),
+    }),
+  deleteBrandKit: (brandKitId: string) => post("delete-brand-kit", { brand_kit_id: brandKitId }),
+  applyBrandKit: (brandKitId: string, projectId: string, position?: string) =>
+    post("apply-brand-kit", {
+      brand_kit_id: brandKitId,
+      project_id: projectId,
+      ...(position ? { position } : {}),
+    }),
 };

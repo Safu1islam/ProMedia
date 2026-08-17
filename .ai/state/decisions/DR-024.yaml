@@ -1,0 +1,175 @@
+id: DR-024
+title: "T-038 off-site destination: external/removable drive, plain-copy transport with destination-side round-trip verification and an append-only manifest"
+date: 2026-08-17
+status: accepted
+decision_area: backup_and_recovery
+
+prompted_by: >
+  OD-7 (2026-08-13) deferred T-038 to "for now we'll keep it here." Operator
+  instruction (2026-08-17, this session) revisited that deferral and chose a
+  destination from the same four options OD-7 had put — see OD-9 in
+  tasks.yaml for the raw operator answer. This record is the resulting
+  engineering design: where OD-9 says WHERE, this says HOW, matching the
+  T-036 module's own stated split ("what to back up and where to put it are
+  separate questions").
+
+binding_constraints:
+  - "project.md 5.4: the permanent set (rights evidence, provenance, publication
+    and audit records) must survive disk loss — the requirement T-038 exists
+    to close."
+  - "C-31: $100/month ceiling. An external/removable drive has no recurring
+    cost, so this spends nothing and needed no spend-ledger entry."
+  - "DR-009: confirmed self-hosted, no cloud. A removable drive is the
+    posture most consistent with that stance, of the four options put to the
+    operator."
+  - "AC-2 (T-038): encryption is required only if the destination is a third
+    party. An external/removable drive under the operator's own physical
+    possession is not one — this is the fact that makes AC-2's clause not
+    fire, not an oversight."
+  - "DR-008: credentials never enter the database, so they were never
+    reachable from any artefact this module builds, on any destination.
+    Re-verified for this specific code path with its own canary test rather
+    than inferred from the export path's."
+
+candidates:
+  - option: "External/removable drive — plain, unencrypted copy plus a manifest"
+    advantages:
+      - "No third party, no recurring cost, no new external dependency
+        (NON-NEGOTIABLES §B untouched)"
+      - "Matches DR-009's self-hosted posture"
+      - "AC-2's encryption requirement genuinely does not apply, so nothing
+        was built that would sit unused — this project's own stated
+        preference (no code for scenarios that cannot happen)"
+    disadvantages:
+      - "Durability is only as good as the operator's own rotation discipline
+        — a drive left permanently plugged in next to the machine reduces to
+        OD-7's original gap (shares a disk-loss-adjacent fate: theft, fire,
+        flood covering both). Named in OD-9's action_taken, not hidden."
+      - "No encryption: a lost or stolen drive exposes the audit/publication/
+        rights-evidence history in plaintext (not credentials — DR-008
+        already keeps those out). Recorded as a residual risk below, not
+        waived."
+  - option: "Consumer cloud drive already paid for"
+    advantages: ["No new recurring cost since already subscribed", "Off-site by construction, no rotation discipline required"]
+    disadvantages:
+      - "Third party: AC-2 fires, requiring encryption before upload and a
+        key kept separate from the artefact — a second capability (key
+        management) this task's operator decision did not ask for"
+      - "Not chosen — recorded for T-039/T-040 context and in case OD-9 is
+        revisited"
+  - option: "Object storage (S3/B2/R2), priced per GB"
+    advantages: ["Automatable, API-driven, cheapest per-GB at scale (irrelevant here — megabyte scale per project.md 5.4)"]
+    disadvantages:
+      - "Third party: same AC-2 encryption requirement as the cloud-drive
+        option, plus a new external dependency and credential to manage"
+      - "Not chosen"
+
+decision: >
+  Implement `send-offsite` (promedia/core/ops/backup.py): builds a fresh
+  artefact via the existing `backup.build`, copies it as a timestamped JSON
+  file into an operator-supplied destination directory (the drive's mount
+  point or a folder on it), reads the COPY back and re-verifies its integrity
+  hash before reporting success (catches a corrupted transport, not just a
+  corrupted source), and appends one line to a `promedia-backup-manifest.jsonl`
+  at the destination recording what was sent, when, and its hash — durable
+  and readable at the destination alone, with no database required, matching
+  `backup.verify`'s own "verifiable off-site" reasoning. Operator authority,
+  same as `export-permanent-set`. Not encrypted, and the response says so
+  explicitly (`encrypted: false` plus a note naming AC-2's actual trigger),
+  so a future reader cannot mistake an unencrypted local copy for a
+  third-party-safe one.
+
+rationale: >
+  The task's own objective text names the real choice as "a trust and habit
+  decision rather than a cost one" at this data scale (megabytes). Given that,
+  the engineering decision left to make was not WHICH destination protects
+  best in the abstract, but HOW to make the chosen destination trustworthy:
+  round-trip verification catches transport corruption (the failure mode
+  unique to copying, as opposed to just building the artefact), and the
+  manifest makes the drive self-describing so T-039 (staleness) and T-040
+  (restore drill) have something durable to read that does not depend on
+  this machine's own audit_log surviving.
+
+threat_model:
+  trust_boundary: >
+    A local file write from the ProMedia process to an operator-chosen
+    filesystem path, typically the mount point of a removable drive. No
+    network boundary is crossed; the process boundary that matters is the
+    same one every other operator-authority operation already crosses
+    (registry.py's authority check).
+  threats:
+    - id: T1
+      description: >
+        Physical loss or theft of the drive exposes the full permanent set
+        (audit log, publication history, rights evidence) in plaintext to
+        whoever has it.
+      mitigation: >
+        No credentials are ever in scope (DR-008, re-verified for this path
+        by test_send_offsite_does_not_carry_a_credential_either). Residual
+        exposure is the audit/provenance/publication record itself, which is
+        the operator's own history, not a system secret. OD-9's operator
+        choice is to accept this in exchange for zero third-party exposure;
+        recorded rather than silently accepted.
+      residual_risk: medium
+      verified_by: "test_send_offsite_does_not_carry_a_credential_either (canary assertion on both the artefact file and the manifest)"
+    - id: T2
+      description: >
+        A crash or a drive that disconnects mid-write leaves a truncated or
+        corrupted artefact on the destination that looks present but is not
+        restorable.
+      mitigation: >
+        The destination COPY is read back and passed through backup.verify
+        before the call reports success; a hash mismatch raises IntegrityError
+        rather than a silent partial write. write_text/mkdir failures (drive
+        unreachable, out of space) are caught and re-raised as NotFound with
+        a specific remedy instead of a bare OSError.
+      residual_risk: low
+      verified_by: "test_send_offsite_copy_verifies_independently_of_the_database; test_send_offsite_reports_a_clear_error_when_the_drive_is_unreachable"
+    - id: T3
+      description: >
+        An agent invokes the transport without operator awareness, moving
+        the full audit/publication history to a location an agent chose.
+      mitigation: "authority=\"operator\", same gate export-permanent-set already uses; registry.py refuses an agent principal before any file is touched."
+      residual_risk: low
+      verified_by: "test_an_agent_cannot_send_offsite"
+    - id: T4
+      description: >
+        A destination path collision overwrites a previous transport's
+        artefact, losing history rather than adding to it.
+      mitigation: >
+        Each artefact filename is stamped with its own created_at to
+        microsecond resolution (Python's isoformat default), making a
+        same-second collision astronomically unlikely at this system's
+        throughput (well under 1 op/sec, C-8). The manifest is opened in
+        append mode only — never rewritten, never truncated.
+      residual_risk: low
+  rollback: >
+    The operation does not mutate the source database beyond the standard
+    operator-authority audit_log entry invoke() already writes for every
+    such call (append-only, same as every other operation). A bad transport
+    on the destination is corrected by deleting that artefact file (and, if
+    desired, its manifest line) and retrying — there is no partial local
+    state to unwind, because nothing here is written until the destination
+    copy has already verified.
+
+reversibility: cheap
+reversibility_note: >
+  New operation, new tests, no schema change, no change to backup.py's
+  export/restore surface. Reverting is deleting the operation and its tests.
+
+revisit_if:
+  - "OD-9 is revisited toward a third-party destination (cloud drive or
+    object storage) — AC-2's encryption requirement then actually fires and
+    must be implemented (key management, key kept apart from the artefact)
+    before send-offsite is pointed at one."
+  - "T-039 (scheduled backup + staleness) is picked up — it should read this
+    manifest (or the local audit_log's send-offsite entries) as its source
+    of 'when did off-site last succeed', not reinvent a second record."
+  - "T-040 (restore drill) is picked up — it should exercise send-offsite's
+    own manifest/artefact pair as the thing it restores FROM, proving the
+    off-site copy is independently usable, not just the local export T-037
+    already drilled."
+
+relates_to: [DR-006, DR-008, DR-009]
+supersedes: []
+extends: []

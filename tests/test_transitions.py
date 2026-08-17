@@ -50,7 +50,7 @@ from pathlib import Path
 import pytest
 
 from promedia.core.media import ffmpeg, render
-from promedia.core.media.edl import EDL, TRANSITIONS, Clip
+from promedia.core.media.edl import EDL, TRANSITIONS, Clip, ImageOverlay
 from promedia.errors import ValidationError
 
 needs_ffmpeg = pytest.mark.skipif(
@@ -484,3 +484,137 @@ def test_temperature_measurably_shifts_colour_balance_ac1_colortemperature(tmp_p
         f"the 6500K neutral baseline; neutral r-b={nr - nb:.1f}, "
         f"3000K r-b={wr - wb:.1f}"
     )
+
+
+# --- image overlays / brand kits (T-068, DR-021) — AC-2, proved against real
+# decoded renders, same discipline as the sections above: "it compiled" is
+# not evidence a logo appears anywhere, only a decoded frame is. The
+# structural filter-string assertions (position expressions, scale target,
+# enable windows, chaining order) live in tests/test_edl.py, which this task
+# also owns — this file supplies the pixel-level proof those cannot.
+#
+# apply-brand-kit itself (promedia.core.ops.brandkits) is exercised in
+# tests/test_brandkits.py, DB-side. What matters here is narrower and
+# render-engine-only: the ImageOverlay it writes into an EDL renders exactly
+# as asked, because compile_render has no idea an EDL came from a brand kit
+# rather than a hand-authored edit — the same reasoning T-064/T-066 used to
+# put their own AC-1 proofs here rather than in the ops-layer test files.
+
+
+@pytest.fixture(scope="module")
+def logo_image(tmp_path_factory) -> Path:
+    """A small, solid-colour PNG standing in for a real logo asset. Solid
+    green, square, for the same reason the clip fixtures above are solid
+    colours: a known, predictable source colour makes "the overlay region
+    differs from the background, in the overlay's own colour" a clean
+    measurement rather than an eyeballed one."""
+    out = tmp_path_factory.mktemp("media") / "logo.png"
+    ffmpeg.run([
+        "-f", "lavfi", "-i", "color=c=green:size=200x200",
+        "-frames:v", "1", "-update", "1", str(out),
+    ], timeout_seconds=30)
+    return out
+
+
+def _region_mean_rgb(path: Path, at_seconds: float, x: int, y: int, w: int, h: int) -> tuple[float, float, float]:
+    """Same technique as _mean_rgb (raw RGB24 bytes straight from ffmpeg),
+    restricted to one rectangular region via ffmpeg's own `crop` filter —
+    what proves an overlay is present exactly where it was asked to be, not
+    just somewhere in the frame."""
+    binary = ffmpeg.require("ffmpeg")
+    result = subprocess.run(
+        [binary, "-hide_banner", "-nostdin", "-y",
+         "-ss", f"{at_seconds:.3f}", "-i", str(path),
+         "-vf", f"crop={w}:{h}:{x}:{y}",
+         "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        capture_output=True, timeout=30, check=False,
+    )
+    data = result.stdout
+    expected_bytes = w * h * 3
+    assert len(data) == expected_bytes, (
+        f"expected one {w}x{h} RGB24 region ({expected_bytes} bytes), "
+        f"got {len(data)} bytes; stderr: {(result.stderr or b'').decode(errors='replace')[-400:]}"
+    )
+    pixels = len(data) // 3
+    r = sum(data[0::3]) / pixels
+    g = sum(data[1::3]) / pixels
+    b = sum(data[2::3]) / pixels
+    return r, g, b
+
+
+@needs_ffmpeg
+def test_a_logo_overlay_is_measurably_present_at_its_named_corner_ac2(tmp_path, red_clip, logo_image):
+    """AC-2: a bottom_right logo overlay must show up, on a real decoded
+    frame, as the logo's OWN colour (green) in that corner — and the
+    background clip's colour (red) everywhere the overlay does not cover, so
+    a passing test cannot be explained by the whole frame having changed."""
+    edl = EDL(
+        aspect="landscape_720",
+        clips=[Clip(asset_id="red", start=0, end=2)],
+        image_overlays=[ImageOverlay(asset_id="logo", position="bottom_right",
+                                      size=0.2, margin=20)],
+        normalise_audio=False,
+    )
+    out = tmp_path / "logo.mp4"
+    plan = render.compile_render(edl, {"red": red_clip, "logo": logo_image}, out, quality="fast")
+    assert "overlay=" in plan.filter_graph
+    render.execute(plan, timeout_seconds=60)
+
+    # The overlay's own scaled bounding box, computed the same way render.py
+    # does (render._image_position / compile_render's pixel_width) — sampled
+    # well inside its edges so no anti-aliased border pixel confounds the
+    # mean. The logo source is a 200x200 square, so its scaled height equals
+    # its scaled width.
+    overlay_size = int(round(WIDTH * 0.2)) // 2 * 2
+    ox = WIDTH - overlay_size - 20
+    oy = HEIGHT - overlay_size - 20
+
+    r, g, b = _region_mean_rgb(out, 1.0, ox + 20, oy + 20, overlay_size - 40, overlay_size - 40)
+    assert g > 100 and g - r > 50 and g - b > 50, (
+        f"expected the logo's own green inside its bottom_right region; got "
+        f"r={r:.1f} g={g:.1f} b={b:.1f}"
+    )
+
+    # Well outside the overlay: still the plain red background, untouched —
+    # the decisive check that this is a LOCALISED overlay, not a full-frame
+    # colour shift that happens to include green.
+    br, bg, bb = _region_mean_rgb(out, 1.0, 40, 40, 100, 100)
+    assert br > 150 and bg < 40 and bb < 40, (
+        f"background outside the overlay should stay the source's own red; "
+        f"got r={br:.1f} g={bg:.1f} b={bb:.1f}"
+    )
+
+
+@needs_ffmpeg
+def test_a_time_windowed_logo_overlay_is_absent_outside_its_window_ac1(tmp_path, red_clip, logo_image):
+    """AC-1's time-bound half: an overlay with start/end must be absent from
+    a frame outside that window and present inside it, in the SAME render —
+    not just a filter string that claims to gate it (matches the discipline
+    T-045 established for transitions: a compiled graph is not evidence)."""
+    edl = EDL(
+        aspect="landscape_720",
+        clips=[Clip(asset_id="red", start=0, end=3)],
+        image_overlays=[ImageOverlay(asset_id="logo", position="bottom_right",
+                                      size=0.2, margin=20, start=1.5, end=2.5)],
+        normalise_audio=False,
+    )
+    out = tmp_path / "windowed.mp4"
+    plan = render.compile_render(edl, {"red": red_clip, "logo": logo_image}, out, quality="fast")
+    assert "enable='between(t,1.5,2.5)'" in plan.filter_graph
+    render.execute(plan, timeout_seconds=60)
+
+    overlay_size = int(round(WIDTH * 0.2)) // 2 * 2
+    ox = WIDTH - overlay_size - 20
+    oy = HEIGHT - overlay_size - 20
+    cx, cy, cw, ch = ox + 20, oy + 20, overlay_size - 40, overlay_size - 40
+
+    _, before_g, _ = _region_mean_rgb(out, 0.5, cx, cy, cw, ch)
+    assert before_g < 40, f"logo should not be visible before its window; g={before_g:.1f}"
+
+    during_r, during_g, _ = _region_mean_rgb(out, 2.0, cx, cy, cw, ch)
+    assert during_g > 100 and during_g - during_r > 50, (
+        f"logo should be visible during its window; got r={during_r:.1f} g={during_g:.1f}"
+    )
+
+    _, after_g, _ = _region_mean_rgb(out, 2.9, cx, cy, cw, ch)
+    assert after_g < 40, f"logo should not be visible after its window; g={after_g:.1f}"

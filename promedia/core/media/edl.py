@@ -29,7 +29,7 @@ from typing import Any
 
 from ...errors import ValidationError
 
-EDL_VERSION = 2
+EDL_VERSION = 4
 
 # Aspect presets, named by what they are FOR rather than by their numbers,
 # because that is how the operator and the agent both think about them.
@@ -92,6 +92,50 @@ GRADE_RANGES: dict[str, tuple[float, float]] = {
     "white_balance": (-1.0, 1.0),
     "temperature": (2000.0, 12000.0),
 }
+
+# Audio-mix vocabulary (T-066, DR-020). Same discipline as GRADE_NEUTRAL, for
+# AudioTrack instead of Clip: each field maps to one known ffmpeg filter in
+# render.py's compiler (see render._mix_filters) —
+#   eq_low / eq_mid / eq_high -> equalizer, one instance per band, gain in
+#     dB. Only the bands that differ from neutral are emitted, so adjusting
+#     one band does not silently touch the others.
+#   compressor                 -> acompressor, a single fixed-parameter
+#     preset. DR-020 scoped this as a toggle, not a tunable compressor —
+#     there is deliberately no ratio/threshold/attack field to keep neutral.
+# Every value below is each field's NEUTRAL default: an AudioTrack whose mix
+# fields are all at these values must compile to no mix filter at all beyond
+# whatever volume/aresample/aformat/fade already existed, which is what
+# makes an EDL written before this change render identically (AC-2) —
+# AudioTrack.from_dict defaults every missing mix field to exactly one of
+# these.
+AUDIO_MIX_NEUTRAL: dict[str, float] = {
+    "eq_low": 0.0,
+    "eq_mid": 0.0,
+    "eq_high": 0.0,
+}
+
+# Range each EQ band is refused outside of by EDL.validate(). ffmpeg's own
+# `equalizer` filter accepts a much wider gain, but this is the range this
+# vocabulary considers a meaningful correction for narration/dialogue under a
+# music bed (project.md C-11) — past this, the fix is re-recording, not more
+# gain — matching GRADE_RANGES' own "supported range, not filter tolerance"
+# style.
+AUDIO_EQ_GAIN_RANGE: tuple[float, float] = (-24.0, 24.0)
+
+# Image-overlay vocabulary (T-068, DR-021). Named corners rather than
+# TextOverlay's top/center/bottom band: a logo's natural placement is a
+# corner, not a horizontal strip. render.py's own IMAGE_POSITIONS dict (see
+# render._image_position) maps each of these names to the same ffmpeg
+# `overlay` x/y expression pair — kept as matching string literals in the two
+# modules, same discipline TextOverlay/TEXT_POSITIONS already use.
+IMAGE_OVERLAY_POSITIONS = ("top_left", "top_right", "bottom_left", "bottom_right", "center")
+
+# ImageOverlay.size is a fraction of the frame WIDTH the logo is scaled to,
+# height following automatically to preserve the source's own aspect ratio —
+# refused outside this range by EDL.validate() for the same "meaningful for
+# this vocabulary" reason as GRADE_RANGES/AUDIO_EQ_GAIN_RANGE: much below 1%
+# is not a visible watermark, and above the full frame is not a corner logo.
+IMAGE_OVERLAY_SIZE_RANGE: tuple[float, float] = (0.01, 1.0)
 
 
 @dataclass
@@ -209,6 +253,46 @@ class TextOverlay:
 
 
 @dataclass
+class ImageOverlay:
+    """A burned-in still image — a logo or watermark (T-068, DR-021).
+
+    Exists so ``apply-brand-kit`` (DR-021's core constraint) can burn a brand
+    kit's logo into a NEW EDL version that never depends on the brand_kits
+    row again: once this overlay is written into a version, deleting the
+    brand kit changes nothing about it, byte for byte.
+
+    ``size`` is a fraction of the frame width, not pixels, for the same
+    resolution-independence reason TextOverlay's position is a name rather
+    than coordinates — a logo sized for a landscape render stays the right
+    relative size when the same EDL is re-rendered vertical.
+    """
+
+    asset_id: str
+    start: float = 0.0
+    end: float | None = None
+    position: str = "bottom_right"
+    size: float = 0.15
+    margin: int = 24
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "asset_id": self.asset_id, "start": self.start, "end": self.end,
+            "position": self.position, "size": self.size, "margin": self.margin,
+        }
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "ImageOverlay":
+        return cls(
+            asset_id=str(raw["asset_id"]),
+            start=float(raw.get("start", 0.0)),
+            end=None if raw.get("end") is None else float(raw["end"]),
+            position=str(raw.get("position", "bottom_right")),
+            size=float(raw.get("size", 0.15)),
+            margin=int(raw.get("margin", 24)),
+        )
+
+
+@dataclass
 class AudioTrack:
     """Music, voiceover or an effect laid under the video.
 
@@ -224,12 +308,31 @@ class AudioTrack:
     fade_in: float = 0.0
     fade_out: float = 0.0
     duck: bool = True
+    # Audio mix (T-066, DR-020). Defaults are AUDIO_MIX_NEUTRAL's own values,
+    # not duplicated as literals here so the two cannot drift apart.
+    eq_low: float = AUDIO_MIX_NEUTRAL["eq_low"]
+    eq_mid: float = AUDIO_MIX_NEUTRAL["eq_mid"]
+    eq_high: float = AUDIO_MIX_NEUTRAL["eq_high"]
+    compressor: bool = False
+
+    def is_mixed(self) -> bool:
+        """True if any mix field differs from its neutral default.
+
+        Used for reporting (EDL.summary()) — the render compiler decides
+        filter-by-filter, on its own, whether each individual field needs to
+        be emitted (see render._mix_filters), rather than calling this.
+        """
+        return self.compressor or any(
+            getattr(self, name) != neutral for name, neutral in AUDIO_MIX_NEUTRAL.items()
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "asset_id": self.asset_id, "start": self.start, "volume": self.volume,
             "loop": self.loop, "fade_in": self.fade_in, "fade_out": self.fade_out,
             "duck": self.duck,
+            "eq_low": self.eq_low, "eq_mid": self.eq_mid, "eq_high": self.eq_high,
+            "compressor": self.compressor,
         }
 
     @classmethod
@@ -242,6 +345,13 @@ class AudioTrack:
             fade_in=float(raw.get("fade_in", 0.0)),
             fade_out=float(raw.get("fade_out", 0.0)),
             duck=bool(raw.get("duck", True)),
+            # An EDL written before T-066 has none of these keys at all — each
+            # defaults to AUDIO_MIX_NEUTRAL/False, which is what makes a
+            # pre-existing EDL render identically to before (AC-2).
+            eq_low=float(raw.get("eq_low", AUDIO_MIX_NEUTRAL["eq_low"])),
+            eq_mid=float(raw.get("eq_mid", AUDIO_MIX_NEUTRAL["eq_mid"])),
+            eq_high=float(raw.get("eq_high", AUDIO_MIX_NEUTRAL["eq_high"])),
+            compressor=bool(raw.get("compressor", False)),
         )
 
 
@@ -253,6 +363,10 @@ class EDL:
     clips: list[Clip] = field(default_factory=list)
     text: list[TextOverlay] = field(default_factory=list)
     audio: list[AudioTrack] = field(default_factory=list)
+    # Image overlays (T-068, DR-021). A separate list from `text`, not a unit
+    # in it, because it needs its own ffmpeg input stream (a real image file)
+    # rather than TextOverlay's textfile-filter approach — see render.py.
+    image_overlays: list[ImageOverlay] = field(default_factory=list)
     subtitle_asset_id: str | None = None
     normalise_audio: bool = True
     version: int = EDL_VERSION
@@ -265,6 +379,7 @@ class EDL:
             "clips": [c.to_dict() for c in self.clips],
             "text": [t.to_dict() for t in self.text],
             "audio": [a.to_dict() for a in self.audio],
+            "image_overlays": [i.to_dict() for i in self.image_overlays],
             "subtitle_asset_id": self.subtitle_asset_id,
             "normalise_audio": self.normalise_audio,
         }
@@ -287,6 +402,12 @@ class EDL:
                 clips=[Clip.from_dict(c) for c in raw.get("clips", [])],
                 text=[TextOverlay.from_dict(t) for t in raw.get("text", [])],
                 audio=[AudioTrack.from_dict(a) for a in raw.get("audio", [])],
+                # An EDL written before T-068 has no `image_overlays` key at
+                # all — defaults to empty, which is what makes a pre-existing
+                # EDL render identically to before (AC-2's own discipline).
+                image_overlays=[
+                    ImageOverlay.from_dict(i) for i in raw.get("image_overlays", [])
+                ],
                 subtitle_asset_id=raw.get("subtitle_asset_id"),
                 normalise_audio=bool(raw.get("normalise_audio", True)),
                 version=version,
@@ -368,12 +489,41 @@ class EDL:
                 raise ValidationError(f"{where}.size {overlay.size} is outside 8-400",
                                       parameter=where)
 
+        for index, overlay in enumerate(self.image_overlays):
+            where = f"image_overlays[{index}]"
+            if overlay.position not in IMAGE_OVERLAY_POSITIONS:
+                raise ValidationError(
+                    f"{where}.position '{overlay.position}' is not one of "
+                    + "/".join(IMAGE_OVERLAY_POSITIONS),
+                    parameter=where, supported=list(IMAGE_OVERLAY_POSITIONS),
+                )
+            if overlay.end is not None and overlay.end <= overlay.start:
+                raise ValidationError(f"{where}.end must be after start", parameter=where)
+            low, high = IMAGE_OVERLAY_SIZE_RANGE
+            if not low <= overlay.size <= high:
+                raise ValidationError(
+                    f"{where}.size {overlay.size:g} is outside the supported "
+                    f"{low:g}-{high:g} range",
+                    parameter=where,
+                )
+            if overlay.margin < 0:
+                raise ValidationError(f"{where}.margin cannot be negative", parameter=where)
+
         for index, track in enumerate(self.audio):
             where = f"audio[{index}]"
             if track.volume < 0:
                 raise ValidationError(f"{where}.volume cannot be negative", parameter=where)
             if track.start < 0:
                 raise ValidationError(f"{where}.start cannot be negative", parameter=where)
+            low, high = AUDIO_EQ_GAIN_RANGE
+            for name in AUDIO_MIX_NEUTRAL:
+                gain = getattr(track, name)
+                if not low <= gain <= high:
+                    raise ValidationError(
+                        f"{where}.{name} {gain:g} is outside the supported "
+                        f"{low:g}-{high:g} dB range",
+                        parameter=where,
+                    )
 
     def asset_ids(self) -> list[str]:
         """Every asset this edit depends on, video and audio alike.
@@ -383,7 +533,7 @@ class EDL:
         so, not part-way through a render.
         """
         seen: list[str] = []
-        for item in [*self.clips, *self.audio]:
+        for item in [*self.clips, *self.audio, *self.image_overlays]:
             if item.asset_id not in seen:
                 seen.append(item.asset_id)
         if self.subtitle_asset_id and self.subtitle_asset_id not in seen:
@@ -401,9 +551,11 @@ class EDL:
             "clips": len(self.clips),
             "text_overlays": len(self.text),
             "audio_tracks": len(self.audio),
+            "image_overlays": len(self.image_overlays),
             "has_subtitles": self.subtitle_asset_id is not None,
             "effects_used": sorted({c.effect for c in self.clips if c.effect != "none"}),
             "transitions_used": sorted({c.transition_in for c in self.clips
                                         if c.transition_in != "cut"}),
             "graded_clips": sum(1 for c in self.clips if c.is_graded()),
+            "mixed_tracks": sum(1 for a in self.audio if a.is_mixed()),
         }

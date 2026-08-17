@@ -19,7 +19,16 @@ from typing import Any
 
 from ...errors import ValidationError
 from . import ffmpeg
-from .edl import EDL, GRADE_NEUTRAL, Clip, TextOverlay, TIMELINE_TRANSITIONS
+from .edl import (
+    AUDIO_MIX_NEUTRAL,
+    EDL,
+    GRADE_NEUTRAL,
+    AudioTrack,
+    Clip,
+    ImageOverlay,
+    TextOverlay,
+    TIMELINE_TRANSITIONS,
+)
 
 # ffmpeg filter fragments per named effect. Kept here, next to the compiler, so
 # that adding an effect to the EDL vocabulary and teaching the compiler to
@@ -98,6 +107,26 @@ TEXT_POSITIONS: dict[str, str] = {
     "center": "x=(w-text_w)/2:y=(h-text_h)/2",
     "bottom": "x=(w-text_w)/2:y=h*0.85-text_h/2",
 }
+
+# Where named ImageOverlay positions land, as ffmpeg `overlay` filter x/y
+# expressions (T-068, DR-021). `main_w`/`main_h` and `w`/`h` are the overlay
+# filter's own names for the background stream's and the overlay stream's
+# dimensions respectively — not to be confused with TEXT_POSITIONS' `w`/`h`,
+# which are drawtext's names for the SAME stream's own frame (drawtext has no
+# second stream). `{margin}` is substituted per-overlay via .format(), since
+# ImageOverlay.margin is a per-instance field, unlike TextOverlay's positions
+# which need no numeric parameter at all.
+IMAGE_POSITIONS: dict[str, str] = {
+    "top_left": "x={margin}:y={margin}",
+    "top_right": "x=main_w-w-{margin}:y={margin}",
+    "bottom_left": "x={margin}:y=main_h-h-{margin}",
+    "bottom_right": "x=main_w-w-{margin}:y=main_h-h-{margin}",
+    "center": "x=(main_w-w)/2:y=(main_h-h)/2",
+}
+
+
+def _image_position(overlay: ImageOverlay) -> str:
+    return IMAGE_POSITIONS[overlay.position].format(margin=overlay.margin)
 
 QUALITY_PRESETS: dict[str, dict[str, Any]] = {
     # Measured on this machine, 60s of 1490x1022 -> 1280x720 with fade + text.
@@ -182,6 +211,45 @@ def _grade_filters(clip: Clip) -> list[str]:
     if clip.temperature != GRADE_NEUTRAL["temperature"]:
         filters.append(f"colortemperature=temperature={clip.temperature:g}")
 
+    return filters
+
+
+# Audio-mix vocabulary (T-066, DR-020). Fixed centre frequencies chosen for
+# dialogue/narration under a music bed (project.md C-11: screen recordings,
+# not music production) — a 3-band split separating rumble/plosives (low),
+# vocal presence (mid) and air/sibilance (high), not a full parametric mixer.
+# Each is ffmpeg's own `equalizer` filter, octave-width so the shape holds
+# regardless of gain. width_type=o:w=2 verified against this build to behave
+# sensibly across the whole AUDIO_EQ_GAIN_RANGE, not just small adjustments.
+AUDIO_EQ_BANDS: dict[str, tuple[int, float]] = {
+    "eq_low": (100, 2.0),
+    "eq_mid": (1000, 2.0),
+    "eq_high": (8000, 2.0),
+}
+
+# A single, deliberately non-parametric preset (DR-020: "a compressor
+# toggle", not a tunable compressor) — moderate, even narration levelling.
+# threshold/ratio/attack/release/makeup chosen for spoken-word screen
+# recordings, not mastering; there is no field on AudioTrack to vary any of
+# them, by design, so this string never needs to be built dynamically.
+COMPRESSOR_FILTER = "acompressor=threshold=-18dB:ratio=3:attack=20:release=250:makeup=2"
+
+
+def _mix_filters(track: AudioTrack) -> list[str]:
+    """The audio-mix filter fragments for one AudioTrack (T-066, DR-020).
+
+    Mirrors _grade_filters exactly: each field is compared against its own
+    neutral default and omitted when unchanged, so a track with none of these
+    set compiles to no mix filter at all — what makes an EDL written before
+    this change render identically (AC-2).
+    """
+    filters: list[str] = []
+    for name, (freq, width) in AUDIO_EQ_BANDS.items():
+        gain = getattr(track, name)
+        if gain != AUDIO_MIX_NEUTRAL[name]:
+            filters.append(f"equalizer=f={freq}:width_type=o:w={width:g}:g={gain:g}")
+    if track.compressor:
+        filters.append(COMPRESSOR_FILTER)
     return filters
 
 
@@ -453,6 +521,9 @@ def compile_render(
     audio_offset = len(ordered_ids)
     for track in edl.audio:
         ordered_ids.append(track.asset_id)
+    image_offset = len(ordered_ids)
+    for overlay in edl.image_overlays:
+        ordered_ids.append(overlay.asset_id)
 
     args: list[str] = []
     for position, clip in enumerate(edl.clips):
@@ -466,6 +537,14 @@ def compile_render(
         args += ["-i", str(path)]
     for track in edl.audio:
         args += ["-i", str(sources[track.asset_id])]
+    for overlay in edl.image_overlays:
+        # -loop 1 turns a single still image into an infinite stream — needed
+        # because the overlay filter below reads from it for as long as the
+        # main video runs, not for one frame. overlay=...:shortest=1 (below)
+        # is what stops the now-infinite stream from making the WHOLE render
+        # run forever: it ends the composited output the moment the finite
+        # main stream does, exactly the watermark behaviour DR-021 wants.
+        args += ["-loop", "1", "-i", str(sources[overlay.asset_id])]
 
     chains: list[str] = []
     for index, clip in enumerate(edl.clips):
@@ -483,11 +562,44 @@ def compile_render(
         chains.append(f"[{video_label}]{text_filters}[vtxt]")
         video_label = "vtxt"
 
+    # Image overlays (T-068, DR-021) — after text, so a brand watermark sits
+    # visually on top of captions rather than under them, since it is meant
+    # to stay identifiable at every point in the edit. One overlay= filter
+    # per image: unlike drawtext, each needs its own input stream, so they
+    # cannot be comma-chained into a single filter the way multiple captions
+    # are above.
+    for index, overlay in enumerate(edl.image_overlays):
+        input_index = image_offset + index
+        # Scaled to a fraction of the OUTPUT frame width, height following to
+        # preserve the source image's own aspect ratio (-2, not -1, so the
+        # scaled height is always even — some encoders refuse odd chroma
+        # planes). format=rgba keeps a transparent PNG's alpha channel alive
+        # through the scale, which is what lets overlay= blend its edges
+        # instead of pasting a solid rectangle.
+        pixel_width = max(2, int(round(width * overlay.size)) // 2 * 2)
+        chains.append(f"[{input_index}:v]scale={pixel_width}:-2,format=rgba[img{index}]")
+        enable = ""
+        if overlay.start or overlay.end is not None:
+            end = overlay.end if overlay.end is not None else 99999
+            enable = f":enable='between(t,{overlay.start:g},{end:g})'"
+        new_label = f"vimg{index}"
+        chains.append(
+            f"[{video_label}][img{index}]overlay={_image_position(overlay)}:"
+            f"shortest=1{enable}[{new_label}]"
+        )
+        video_label = new_label
+
     audio_label = base_audio_label
     for position, track in enumerate(edl.audio):
         input_index = audio_offset + position
-        steps = [f"volume={track.volume:g}", "aresample=48000",
-                 "aformat=sample_fmts=fltp:channel_layouts=stereo"]
+        steps = [f"volume={track.volume:g}"]
+        # EQ before compressor, same order a mix engineer would apply them
+        # (shape the tone, then control the dynamics) — see _mix_filters.
+        # Empty (the common case) for a track with no mix settings, which is
+        # what keeps this identical to the pre-T-066 filter_graph (AC-2).
+        steps.extend(_mix_filters(track))
+        steps.append("aresample=48000")
+        steps.append("aformat=sample_fmts=fltp:channel_layouts=stereo")
         if track.fade_in > 0:
             steps.append(f"afade=t=in:st=0:d={track.fade_in:g}")
         chains.append(f"[{input_index}:a]" + ",".join(steps) + f"[bg{position}]")
@@ -522,6 +634,41 @@ def compile_render(
         width=width, height=height, quality=quality, source_count=len(ordered_ids),
         expected_duration_seconds=expected_duration,
     )
+
+
+def render_waveform(
+    source_path: Path,
+    output_path: Path,
+    *,
+    width: int = 1200,
+    height: int = 200,
+    color: str = "0x60a5fa",
+    timeout_seconds: float = 60.0,
+) -> Path:
+    """A real waveform image for one asset's own audio (T-066 AC-3, DR-020).
+
+    Deliberately independent of any EDL: a waveform is a property of the raw
+    asset, not of an edit, so T-067's Audio room can show one for a track the
+    moment its asset is chosen — before any mix setting exists to compile.
+    ffmpeg's own ``showwavespic`` filter; no new dependency, per DR-020.
+
+    ``-frames:v 1 -update 1`` (rather than an image-sequence pattern) is what
+    tells ffmpeg's image2 muxer to write exactly one still rather than warn
+    about a missing ``%d`` pattern.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    ffmpeg.run([
+        "-i", str(source_path),
+        "-filter_complex", f"showwavespic=s={width}x{height}:colors={color}",
+        "-frames:v", "1", "-update", "1",
+        str(output_path),
+    ], timeout_seconds=timeout_seconds)
+    if not output_path.is_file() or output_path.stat().st_size == 0:
+        raise ffmpeg.RenderFailed(
+            "ffmpeg reported success but produced no waveform image",
+            output_path=str(output_path),
+        )
+    return output_path
 
 
 def execute(plan: RenderPlan, *, timeout_seconds: float) -> dict[str, Any]:
