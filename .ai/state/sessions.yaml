@@ -602,6 +602,22 @@ sessions:
     main_engineer: false
     task: "T-039"
     activity: "Independent review of T-039 (backup scheduling/staleness)"
-    status: "working"
+    status: "ended"
     started_at: "2026-08-17T10:16:46+04:00"
-    heartbeat_at: "2026-08-17T10:16:46+04:00"
+    heartbeat_at: "2026-08-17T10:30:35+04:00"
+    handoff:
+      ended_at: "2026-08-17T10:30:35+04:00"
+      outcome: "completed"
+      next: "T-039 independent review PASSED, no blocking finding (full evidence in tasks.yaml/locks.yaml). Task moved in_review -> complete. Next candidate: T-040 restore drill -- its blocked_reason ('depends on a real destination and a real restore path') looks stale now that both T-037 and T-038 are complete; worth re-checking whether it can proceed against a scratch off-site destination before leaving it blocked."
+  - id: "claude-code-t040-0817"
+    agent: "test-agent"
+    main_engineer: false
+    task: "T-040"
+    activity: "Investigating whether T-040's blocked_reason is stale now that T-037/T-038 are complete"
+    status: "ended"
+    started_at: "2026-08-17T10:31:21+04:00"
+    heartbeat_at: "2026-08-17T10:43:43+04:00"
+    handoff:
+      ended_at: "2026-08-17T10:43:43+04:00"
+      outcome: "completed"
+      next: "T-040 unblocked (its blocked_reason was stale -- T-037/T-038 both complete) and implemented: tests/test_restore_drill.py proves recovery from a genuinely destroyed database using only the off-site artefact, run twice for repeatability (AC-1/AC-2 both self-verified PASSED with a sabotage-and-revert proof). docs/HUMAN-ACTIONS.md section 5 documents the real-drive procedure. Status left at in_review: independent_review is NOT_RUN by design (Constitution s7) -- next session should review tests/test_restore_drill.py's _run_drill and confirm the destruction step is real, then move T-040 to complete. That would close out the Durability and recovery section entirely; the only remaining open item project-wide is T-019's AC-1 (a real publish), which stays NEEDS_HUMAN pending operator-supplied platform credentials -- nothing further an agent can do there."

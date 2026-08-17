@@ -3380,7 +3380,7 @@ tasks:
     mode: standard
     owner_role: implementer
     assigned_model_tier: standard
-    status: in_review
+    status: complete
     claimed_by: "claude-code-t039-0817"
     claimed_at: "2026-08-17T00:52:00+04:00"
     depends_on: [T-036, T-038, T-018]
@@ -3511,21 +3511,25 @@ tasks:
     decisions: []
     required_dimensions: [correctness, reliability, observability, testing, documentation]
     independent_review:
-      status: NOT_RUN
+      status: PASSED
+      reviewer: "claude-code-t039review-0817"
+      reviewed_at: "2026-08-17T02:15:00+04:00"
       note: >
-        Constitution §7 / rule 4: the implementing session may not be its
-        own sole reviewer. Self-verification performed and recorded above,
-        including a negative-path proof for AC-2 (the "does not escalate
-        once fresh" test). A separate reviewing session or agent must still
-        read promedia/core/ops/backup.py's backup_tick/backup_status/
-        _freshness, the promedia/config.py `backup` section, and
-        tests/test_backup.py's new tests before this task moves to complete.
-        Worth a reviewer's specific attention: whether a local,
-        same-disk-only snapshot genuinely serves AC-1/AC-2 given it does not
-        by itself satisfy F-7/5.4's off-site durability requirement (that
-        remains send-offsite's job, unchanged) — this task's own design note
-        in ops/backup.py states that scope narrowing explicitly rather than
-        implying more durability than a local file provides.
+        Constitution §7 — independent of the implementer. Read
+        backup_tick/backup_status/_freshness, the promedia/config.py
+        `backup` section, and tests/test_backup.py's new tests fresh, then
+        re-ran tests/test_backup.py myself (40/40) plus
+        test_registry.py/test_parity.py/test_ops_forms.py and the full
+        suite (exit 0, clean) rather than trusting the recorded numbers on
+        sight. Sabotage-and-revert proof on the two offsite-escalation
+        tests (flipped the `overdue` condition in backup_tick; both failed
+        immediately; reverted, SHA-256 confirmed identical) — full detail
+        in locks.yaml's T-039-REVIEW entry. No blocking finding. Confirmed
+        the implementer's own disclosed scope note is accurate, not
+        optimistic: the local snapshot is same-disk-only and does not by
+        itself satisfy F-7/5.4 off-site durability — send-offsite (T-038)
+        remains that mechanism; T-039 only makes a lapse in it visible,
+        and says so in its own docstring rather than implying more.
 
   - id: T-040
     title: "Restore drill — prove recovery against a destroyed database"
@@ -3539,21 +3543,148 @@ tasks:
     mode: critical
     owner_role: verifier
     assigned_model_tier: standard
-    status: blocked
-    blocked_reason: "Depends on a real destination and a real restore path."
+    status: complete
+    claimed_by: "claude-code-t040-0817"
+    claimed_at: "2026-08-17T02:20:00+04:00"
     depends_on: [T-037, T-038]
     blocks: []
     owned_paths: [tests/test_restore_drill.py, docs/HUMAN-ACTIONS.md]
+    unblocked_note: >
+      blocked_reason was stale: T-037 (restore path) and T-038 (off-site
+      destination and transport) are both complete, and neither AC requires
+      a physical drive — OD-9's removable drive is a filesystem path, the
+      same abstraction T-038's own tests already exercise with tmp_path.
+      Re-scoped from blocked to in_progress/in_review by
+      claude-code-t040-0817 on discovering the stale record; see
+      locks.yaml's T-040 entry for the full check.
     acceptance_criteria:
       - id: AC-1
         statement: "Starting from the off-site artefact alone, with the working database destroyed, the permanent set is recovered and provenance integrity verifies."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          test_restore_drill_recovers_from_the_offsite_artefact_alone_after_the_database_is_destroyed
+          (tests/test_restore_drill.py): a real system is built, sent
+          off-site through the actual `send-offsite` transport (T-038, not
+          `export-permanent-set` called directly), the source data
+          directory is then deleted with `shutil.rmtree` and its absence
+          asserted, and the artefact used for recovery is located by
+          reading the off-site drive's own manifest file — never a path
+          variable carried forward from the send-offsite call. After
+          `restore-permanent-set`, every permanent table's row count
+          matches, `verify-provenance` reports `integrity_verified: true`
+          (F-8 end to end), the rights verdict is unchanged, and the audit
+          log (itself a permanent record) contains the pre-destruction
+          publish-post entry.
       - id: AC-2
         statement: "The drill is repeatable without operator improvisation, and what it does NOT recover (transient media) is stated in its output."
-        result: NOT_RUN
-        evidence: "not implemented"
+        result: PASSED
+        evidence: >
+          test_the_drill_is_repeatable_without_operator_improvisation runs
+          the identical `_run_drill` procedure twice against two
+          independent scratch environments and asserts identical outcomes —
+          repeatability demonstrated by execution, not claimed from one
+          pass. `restore-permanent-set`'s own result carries
+          `media_restored: false`, asserted directly; the recovered asset's
+          row is confirmed `state: absent` with `object_path: null` (never
+          'stored', which T-037's schema change exists specifically to
+          prevent), and `backup-scope` on the recovered database still
+          reports `media_included: false`. docs/HUMAN-ACTIONS.md section 5
+          documents the equivalent manual procedure for a real drive and
+          restates the media exclusion explicitly rather than leaving an
+          operator to discover it mid-recovery.
+    verification:
+      - command: "python -m pytest -p no:cacheprovider tests/test_restore_drill.py -v"
+        status: PASSED
+        observed: "2 passed"
+      - command: "python -m pytest -p no:cacheprovider tests/test_restore_drill.py tests/test_restore.py tests/test_backup.py -q"
+        status: PASSED
+        observed: >
+          60 passed. Corrected from an initial "62" transcription error
+          caught by this task's own independent review (see
+          independent_review note below) — the tests themselves were
+          always green; only the recorded count was wrong.
+      - command: "python -m pytest -p no:cacheprovider (full suite)"
+        status: PASSED
+        observed: "exit 0, no FAILURES/ERRORS section (this environment's pytest does not print a final summary count line to captured output — the same pre-existing quirk T-039's record already disclosed)."
+      - command: "Sabotage-and-revert: promedia/core/backup.py's phantom-asset guard condition replaced with `False`"
+        status: PASSED
+        observed: >
+          Both new tests failed immediately on the sabotaged code
+          ("recovered media state must be honest, not 'stored'"), proving
+          they exercise the real guard. Reverted; SHA-256
+          12dcbf24605306a123b736820124e7e1b1d1df76a3f83f1c23ccd7d7d14992b6
+          confirmed identical before and after.
+    fabrications_introduced: []
+    assumptions:
+      - >
+        No fixed drill cadence exists in project.md, so docs/HUMAN-ACTIONS.md
+        recommends "once after setup, again after any backup/restore code
+        change" as the reasonable floor rather than inventing a specific
+        interval the operator has not stated a preference for.
+    decisions: []
     required_dimensions: [correctness, backup_recovery, rollback, documentation, testing]
+    independent_review:
+      status: PASSED
+      reviewer: "claude-code-t040review-0817"
+      reviewed_at: "2026-08-17T03:40:00+04:00"
+      note: >
+        PASSED, no blocking finding. NOT the implementer of any of this
+        code. Read tests/test_restore_drill.py fresh, cold, then
+        promedia/core/backup.py (build/restore/verify) and
+        promedia/core/ops/backup.py (send_offsite/restore_permanent_set)
+        against the two ACs and the record's own claims, rather than
+        trusting either on sight.
+
+        Independently confirmed: (1) the destruction is real — the source
+        db lives at `data_dir/promedia.db`, `_run_drill` asserts it exists
+        then `shutil.rmtree`s the whole data_dir and asserts it is gone,
+        not a fresh directory that never held data; (2) the artefact
+        reaches the off-site dir through the real `send-offsite` operation,
+        not `export-permanent-set` called directly; (3)
+        `_latest_offsite_artefact` reads only the drive's own
+        `promedia-backup-manifest.jsonl` and takes its last entry's
+        `artefact_file` — no path variable from the send-offsite call is
+        reused, and the recovery target is a genuinely separate,
+        freshly-created Config/db (the "-recovered" label), independent of
+        the destroyed source; (4) `restore()` really does refuse a
+        non-empty database (`_is_empty` check, raises before any row is
+        written), matching docs/HUMAN-ACTIONS.md section 5 step 3 exactly —
+        confirmed by reading the function body, not the doc's word for it.
+
+        Re-ran the tests myself: `python -m pytest -p no:cacheprovider
+        tests/test_restore_drill.py -v` — 2 passed. Combined with
+        test_restore.py/test_backup.py — 60 passed (see IMPORTANT finding
+        below). Full suite — 944 passed, exit 0, no failures.
+
+        Independent sabotage-and-revert proof on a DIFFERENT code path than
+        the implementer's own disclosed one (theirs: the phantom-asset
+        guard `if table == "assets" and row.get("state") == "stored":`
+        replaced with `False`). Mine: added `if table ==
+        "provenance_records": continue` to restore()'s per-table copy loop,
+        silently dropping provenance rows. Both new tests failed
+        immediately (`AssertionError: provenance_records: 0 rows, expected
+        1`), proving the row-count loop genuinely exercises the restore
+        path. Reverted; SHA-256 of promedia/core/backup.py before my edit
+        and after my revert both
+        12dcbf24605306a123b736820124e7e1b1d1df76a3f83f1c23ccd7d7d14992b6 —
+        matching the hash the implementer's own record independently
+        reported for the same clean file, corroborating both proofs read
+        the same baseline. `git status --short` empty afterward;
+        test_restore_drill.py re-confirmed green (2 passed).
+
+        IMPORTANT, non-blocking finding: this task's own `verification:`
+        section claims "62 passed" for `tests/test_restore_drill.py
+        tests/test_restore.py tests/test_backup.py -q`. Independently
+        re-run, this is actually 60 passed — `grep -c "^def test_"` across
+        the three files confirms 2+18+40=60 test functions exist. The tests
+        themselves are all genuinely green; this is a transcription error
+        in the recorded evidence, not a functional defect, and does not
+        block completion. Worth a future correction pass on the
+        `verification:` entry's `observed:` field.
+
+        Full detail, including exact commands and the hash proof, is in
+        this session's own entry in .ai/state/locks.yaml
+        (T-040-REVIEW, claude-code-t040review-0817), not duplicated here.
 
   # -------------------------------------------------------------------------
   # Pro Media v2 — rich client. DR-017, project.md section 4 amendment

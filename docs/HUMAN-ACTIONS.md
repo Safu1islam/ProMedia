@@ -195,3 +195,77 @@ Two screens have never been looked at by a human at all:
   shows the account, rights verdict, ruleset version and asset hash before an
   approve or publish control. Its behaviour is verified by tests and against a
   live server; its *legibility* is not, and legibility is the entire point of it.
+
+---
+
+## 5. Run a real restore drill periodically (T-040)
+
+**Status: OPTIONAL but recommended. The automated proof already runs on every
+test suite invocation (`tests/test_restore_drill.py`); this section is for
+actually exercising it against your own drive and your own database, which no
+agent may do unattended (destroying a real database is exactly the kind of
+irreversible action `NON-NEGOTIABLES.md` reserves for the operator).**
+
+A backup nobody has restored is a hypothesis, not a plan. `tests/
+test_restore_drill.py` proves the mechanism works, twice, against scratch
+data on every run — but it can never prove *your* drive, mounted the way you
+actually mount it, holds a readable artefact. Only running the real thing
+does that. There is no fixed cadence recorded for this (no project.md
+constraint names one); doing it once after first setting up off-site backup,
+and again any time the backup or restore code changes, is the reasonable
+floor.
+
+### What to do
+
+1. **Send a real backup off-site**, to the real drive:
+
+   ```
+   python -m promedia send-offsite --destination <drive path> --json
+   ```
+
+2. **Find the artefact via the drive's own manifest** — not a path you
+   remember from step 1. `<drive path>/promedia-backup-manifest.jsonl` is a
+   plain JSON-lines file; its last line's `artefact_file` is the one to use.
+   Reading it this way is the point: it is what you would have to do if this
+   machine were gone and only the drive remained.
+
+3. **Move the real database aside** (do not delete it until step 5 confirms
+   the restore worked): rename `promedia.db` in your data directory to
+   something like `promedia.db.pre-drill`. `restore-permanent-set` refuses a
+   non-empty database on purpose (T-037, AC-4) — moving the file aside is
+   what makes the next command operate on a genuinely empty one, the same
+   shape a real disk loss would leave you in.
+
+4. **Restore from the off-site artefact alone**:
+
+   ```
+   python -m promedia restore-permanent-set --source <artefact path from step 2> --json
+   ```
+
+5. **Verify the result**, same as the automated drill does:
+
+   ```
+   python -m promedia backup-scope --json
+   python -m promedia rights --asset-id <an asset you know> --json
+   python -m promedia audit --limit 20 --json
+   ```
+
+   Confirm: rights verdicts match what you expect, the audit log has your
+   publishing history, and `backup-scope` still reports `media_included:
+   false` — a reminder that this restores rights, provenance, publication and
+   audit records, and **never media**. Re-acquiring media after a real
+   incident means re-ingesting from wherever the original files still exist
+   (if anywhere); that is outside what a backup regime for a 100 GB-capped,
+   transient-media system (F-7) can promise, and restating it here is
+   deliberate, not an oversight.
+
+6. Once satisfied, delete `promedia.db.pre-drill` — or keep it a while longer
+   if you would rather double-check by hand first. Nothing further deletes it
+   for you.
+
+### What this does NOT test
+
+Media recovery, because there is none to recover (project.md 5.4: masters and
+derivatives are transient by policy). This drill is scoped to the permanent
+set — rights evidence, provenance, publication and audit records — exactly
+what F-7/F-8 require to survive.
